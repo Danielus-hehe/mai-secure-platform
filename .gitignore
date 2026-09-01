@@ -1,0 +1,55 @@
+# ============ DEPENDENȚE ============
+node_modules/
+
+# ============ BUILD ============
+dist/
+dist-ssr/
+build/
+*.local
+
+# ============ VARIABILE DE MEDIU / SECRETE ============
+# IMPORTANT: niciodată chei JWT, parole sau configurări sensibile pe GitHub!
+.env
+.env.*
+!.env.example
+
+# ============ LOGURI ============
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ============ CACHE / TOOLING ============
+.vite/
+.eslintcache
+*.tsbuildinfo
+.oxlintrc-cache/
+coverage/
+
+# ============ EDITOR / IDE ============
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ============ SISTEM DE OPERARE ============
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+ $RECYCLE.BIN/
+
+# macOS (dacă deschizi proiectul și de pe Mac)
+.DS_Store
+
+# ============ Fișiere temporare ============
+*.tmp
+*.bak
+*~
