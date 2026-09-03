@@ -9,15 +9,14 @@ import { formatDateTime, formatFileSize } from '../../utils/format';
 export default function DashboardPage() {
     const { user } = useAuth();
 
-    // Stats derivate din store — nu mai sunt hardcodate
-    const transfers  = transferStore.getAll();
-    const docs       = documentStore.getAll();
-    const users      = userStore.getAll();
-    const audit      = auditStore.getAll();
+    const transfers   = transferStore.getAll();
+    const docs        = documentStore.getAll();
+    const users       = userStore.getAll();
+    const audit       = auditStore.getAll();
 
-    const pending    = transfers.filter(t => t.status === 'IN_ASTEPTARE').length;
+    const pending     = transfers.filter(t => t.status === 'IN_ASTEPTARE').length;
     const activeUsers = users.filter(u => u.isActive).length;
-    const yesterday  = new Date(Date.now() - 24 * 3600_000);
+    const yesterday   = new Date(Date.now() - 24 * 3600_000);
     const failedLogins = audit.filter(a =>
         a.action === 'LOGIN' && a.result === 'ESEC' && new Date(a.timestamp) > yesterday
     ).length;
@@ -70,7 +69,7 @@ export default function DashboardPage() {
                             </thead>
                             <tbody className="divide-y divide-mai-50">
                                 {recent.map(f => (
-                                    <tr key={f.id} className="hover:bg-mai-50/50 transition-colors">
+                                    <tr key={f.id} className="hover:bg-mai-100/60 transition-colors">
                                         <td className="px-5 py-3.5 font-medium text-mai-900 whitespace-nowrap">
                                             {f.fileName}
                                         </td>
