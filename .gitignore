@@ -1,5 +1,7 @@
 # ============ DEPENDENȚE ============
 node_modules/
+frontend/node_modules/
+frontend/dist/
 
 # ============ BUILD ============
 dist/
@@ -53,3 +55,14 @@ Desktop.ini
 *.tmp
 *.bak
 *~
+
+# .NET build output
+bin/
+obj/
+[Bb]in/
+[Oo]bj/
+
+# IDE configurations
+.vs/
+.idea/
+*.user
