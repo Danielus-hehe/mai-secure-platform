@@ -1,0 +1,17 @@
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.DataAccessLayer\bin\Debug\net8.0\MAI.DataAccessLayer.deps.json
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.DataAccessLayer\bin\Debug\net8.0\MAI.DataAccessLayer.runtimeconfig.json
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.DataAccessLayer\bin\Debug\net8.0\MAI.DataAccessLayer.dll
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.DataAccessLayer\bin\Debug\net8.0\MAI.DataAccessLayer.pdb
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.DataAccessLayer\bin\Debug\net8.0\MAI.Domain.dll
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.DataAccessLayer\bin\Debug\net8.0\MAI.Domain.pdb
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.DataAccessLayer\obj\Debug\net8.0\MAI.DataAccessLayer.csproj.AssemblyReference.cache
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.DataAccessLayer\obj\Debug\net8.0\MAI.DataAccessLayer.GeneratedMSBuildEditorConfig.editorconfig
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.DataAccessLayer\obj\Debug\net8.0\MAI.DataAccessLayer.AssemblyInfoInputs.cache
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.DataAccessLayer\obj\Debug\net8.0\MAI.DataAccessLayer.AssemblyInfo.cs
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.DataAccessLayer\obj\Debug\net8.0\MAI.DataAccessLayer.csproj.CoreCompileInputs.cache
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.DataAccessLayer\obj\Debug\net8.0\MAI.Data.B1C561C8.Up2Date
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.DataAccessLayer\obj\Debug\net8.0\MAI.DataAccessLayer.dll
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.DataAccessLayer\obj\Debug\net8.0\refint\MAI.DataAccessLayer.dll
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.DataAccessLayer\obj\Debug\net8.0\MAI.DataAccessLayer.pdb
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.DataAccessLayer\obj\Debug\net8.0\MAI.DataAccessLayer.genruntimeconfig.cache
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.DataAccessLayer\obj\Debug\net8.0\ref\MAI.DataAccessLayer.dll

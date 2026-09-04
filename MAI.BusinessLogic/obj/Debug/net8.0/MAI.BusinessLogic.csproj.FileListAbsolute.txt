@@ -1,0 +1,17 @@
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.BusinessLogic\bin\Debug\net8.0\MAI.BusinessLogic.deps.json
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.BusinessLogic\bin\Debug\net8.0\MAI.BusinessLogic.dll
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.BusinessLogic\bin\Debug\net8.0\MAI.BusinessLogic.pdb
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.BusinessLogic\bin\Debug\net8.0\MAI.DataAccessLayer.dll
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.BusinessLogic\bin\Debug\net8.0\MAI.Domain.dll
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.BusinessLogic\bin\Debug\net8.0\MAI.Domain.pdb
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.BusinessLogic\bin\Debug\net8.0\MAI.DataAccessLayer.pdb
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.BusinessLogic\obj\Debug\net8.0\MAI.BusinessLogic.csproj.AssemblyReference.cache
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.BusinessLogic\obj\Debug\net8.0\MAI.BusinessLogic.GeneratedMSBuildEditorConfig.editorconfig
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.BusinessLogic\obj\Debug\net8.0\MAI.BusinessLogic.AssemblyInfoInputs.cache
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.BusinessLogic\obj\Debug\net8.0\MAI.BusinessLogic.AssemblyInfo.cs
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.BusinessLogic\obj\Debug\net8.0\MAI.BusinessLogic.csproj.CoreCompileInputs.cache
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.BusinessLogic\obj\Debug\net8.0\MAI.Busi.534F1785.Up2Date
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.BusinessLogic\obj\Debug\net8.0\MAI.BusinessLogic.dll
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.BusinessLogic\obj\Debug\net8.0\refint\MAI.BusinessLogic.dll
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.BusinessLogic\obj\Debug\net8.0\MAI.BusinessLogic.pdb
+D:\Universitate\Anul III\Practica\mai-tranferdata-backend\MAI.BusinessLogic\obj\Debug\net8.0\ref\MAI.BusinessLogic.dll
