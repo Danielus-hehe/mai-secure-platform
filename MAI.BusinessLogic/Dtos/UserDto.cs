@@ -37,6 +37,12 @@ namespace MAI.BusinessLogic.Dtos
         public string NewPassword { get; set; } = string.Empty;
     }
 
+    // Folosit de POST /api/Users/{id}/reset-password (administrator)
+    public class ResetPasswordDto
+    {
+        public string NewPassword { get; set; } = string.Empty;
+    }
+
     public class LoginDto
     {
         public string Username { get; set; } = string.Empty;
