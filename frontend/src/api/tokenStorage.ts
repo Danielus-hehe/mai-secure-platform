@@ -66,4 +66,20 @@ export const tokenStorage = {
     },
 };
 
+/**
+ * Punte de compatibilitate pentru paginile care inca folosesc fetch() direct
+ * si citeau tokenul din obiectul user (`user?.token`). Acel camp nu mai exista.
+ *
+ * Foloseste-o asa:
+ *   const res = await fetch(url, { headers: getAuthHeader() });
+ *
+ * Atentie: fetch() direct NU beneficiaza de refresh automat pe 401. Solutia
+ * corecta pe termen lung e migrarea paginilor pe clientul `api` din client.ts,
+ * care are interceptoarele. Helperul asta le tine functionale pana atunci.
+ */
+export function getAuthHeader(): Record<string, string> {
+    const token = tokenStorage.getAccessToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 export { ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, ACCESS_EXPIRES_KEY, USER_KEY };

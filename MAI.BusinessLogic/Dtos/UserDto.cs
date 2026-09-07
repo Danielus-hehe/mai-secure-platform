@@ -13,6 +13,11 @@ namespace MAI.BusinessLogic.Dtos
         public UserRole Role { get; set; }
         public bool IsActive { get; set; }
         public DateTime CreatedAt { get; set; }
+
+        /// <summary>True dacă respectivul cont este blocat acum de prea multe încercări eșuate.</summary>
+        public bool IsLockedOut { get; set; }
+        public DateTime? LockoutEndsAt { get; set; }
+        public DateTime? LastLoginAt { get; set; }
     }
 
     public class CreateUserDto
