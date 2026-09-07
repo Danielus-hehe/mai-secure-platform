@@ -25,6 +25,18 @@ namespace MAI.BusinessLogic.Dtos
         public UserRole Role { get; set; } = UserRole.Utilizator;
     }
 
+    public class ChangeRoleDto
+    {
+        public UserRole Role { get; set; }
+    }
+
+    // Folosit de PATCH /api/Auth/change-password
+    public class ChangePasswordDto
+    {
+        public string CurrentPassword { get; set; } = string.Empty;
+        public string NewPassword { get; set; } = string.Empty;
+    }
+
     public class LoginDto
     {
         public string Username { get; set; } = string.Empty;

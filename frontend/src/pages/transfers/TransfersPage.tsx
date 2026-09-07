@@ -1,53 +1,119 @@
-import { useMemo, useState } from 'react';
-import { ArrowLeftRight, Upload, Download, FileCheck, Search, AlertTriangle, Clock } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+    ArrowLeftRight, Upload, Download, FileCheck,
+    Search, AlertTriangle, Clock, Loader2,
+} from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader';
-import Badge from '../../components/ui/Badge';
-import Button from '../../components/ui/Button';
-import Modal from '../../components/ui/Modal';
-import { transferStore, auditStore } from '../../api/mockStore';
-import { MOCK_USERS } from '../../utils/mockData';
-import { useAuth } from '../../context/AuthContext';
+import Badge      from '../../components/ui/Badge';
+import Button     from '../../components/ui/Button';
+import Modal      from '../../components/ui/Modal';
+import { useAuth }  from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
-import { sha256 } from '../../utils/crypto';
+import { sha256 }   from '../../utils/crypto';
 import { formatDateTime, formatFileSize, truncateSha } from '../../utils/format';
-import type { SecureFile } from '../../types';
 
-type StatusFilter = 'TOATE' | SecureFile['status'];
+const API = 'http://localhost:5000';
 
-const statusBadge = (s: SecureFile['status']) =>
-    s === 'CONFIRMAT' ? <Badge tone="green">Confirmat</Badge>
-    : s === 'EXPIRAT' ? <Badge tone="red">Expirat</Badge>
-    :                   <Badge tone="gold">În așteptare</Badge>;
+// Backend TransferStatus.ToString(): "Pending" | "Downloaded" | "Expired"
+const toFrontendStatus = (s: string) =>
+    s === 'Pending' ? 'IN_ASTEPTARE' : s === 'Downloaded' ? 'CONFIRMAT' : 'EXPIRAT';
+
+type StatusFilter = 'TOATE' | 'IN_ASTEPTARE' | 'CONFIRMAT' | 'EXPIRAT';
+
+interface Transfer {
+    id: string;
+    fileName: string;
+    fileSize: number;
+    sha256: string;
+    senderName: string;
+    senderDepartment: string;
+    recipientName: string;
+    recipientDepartment: string;
+    status: string;         // "Pending" | "Downloaded" | "Expired"
+    frontendStatus: StatusFilter;
+    createdAt: string;
+    expiresAt: string;      // computed: createdAt + 14 days
+    isMine: boolean;
+}
+
+interface UserOption { id: string; fullName: string; username: string; department: string; isActive: boolean; }
+
+function addDays(iso: string, days: number): string {
+    const d = new Date(iso);
+    d.setDate(d.getDate() + days);
+    return d.toISOString();
+}
+
+const statusBadge = (s: StatusFilter) =>
+    s === 'CONFIRMAT'    ? <Badge tone="green">Confirmat</Badge>
+        : s === 'EXPIRAT'    ? <Badge tone="red">Expirat</Badge>
+            :                       <Badge tone="gold">În așteptare</Badge>;
 
 export default function TransfersPage() {
     const { user }  = useAuth();
     const toast     = useToast();
 
-    const [items, setItems]           = useState(() => transferStore.getAll());
-    const [filter, setFilter]         = useState<StatusFilter>('TOATE');
-    const [search, setSearch]         = useState('');
+    const [items,      setItems]      = useState<Transfer[]>([]);
+    const [users,      setUsers]      = useState<UserOption[]>([]);
+    const [loading,    setLoading]    = useState(true);
+    const [filter,     setFilter]     = useState<StatusFilter>('TOATE');
+    const [search,     setSearch]     = useState('');
     const [uploadOpen, setUploadOpen] = useState(false);
-    const [selected, setSelected]     = useState<SecureFile | null>(null);
+    const [selected,   setSelected]   = useState<Transfer | null>(null);
+    const [sending,    setSending]    = useState(false);
 
-    const [file, setFile]             = useState<File | null>(null);
-    const [hash, setHash]             = useState('');
-    const [recipient, setRecipient]   = useState('');
-    const [computing, setComputing]   = useState(false);
+    const [file,        setFile]        = useState<File | null>(null);
+    const [hash,        setHash]        = useState('');
+    const [recipientId, setRecipientId] = useState('');
+    const [computing,   setComputing]   = useState(false);
 
-    const refresh = () => setItems(transferStore.getAll());
+    const hdrs = useCallback(() => ({
+        Authorization: `Bearer ${user?.token ?? ''}`,
+    }), [user?.token]);
 
+    // ── Citire transferuri ───────────────────────────────────────────────
+    const fetchTransfers = useCallback(async () => {
+        setLoading(true);
+        try {
+            const res = await fetch(`${API}/api/Transfers`, { headers: hdrs() });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data: Omit<Transfer, 'frontendStatus' | 'expiresAt'>[] = await res.json();
+            setItems(data.map(t => ({
+                ...t,
+                frontendStatus: toFrontendStatus(t.status) as StatusFilter,
+                expiresAt:      addDays(t.createdAt, 14),
+            })));
+        } catch {
+            toast.error('Nu s-au putut încărca transferurile.');
+        } finally {
+            setLoading(false);
+        }
+    }, [hdrs, toast]);
+
+    // ── Citire utilizatori pentru dropdown ───────────────────────────────
+    useEffect(() => {
+        fetch(`${API}/api/Users`, { headers: hdrs() })
+            .then(r => r.ok ? r.json() : [])
+            .then((data: UserOption[]) => setUsers(data.filter(u => u.isActive)))
+            .catch(() => {});
+    }, [hdrs]);
+
+    useEffect(() => { fetchTransfers(); }, [fetchTransfers]);
+
+    // ── Filtrare client-side ─────────────────────────────────────────────
     const filtered = useMemo(() =>
-        items
-            .filter(t => filter === 'TOATE' || t.status === filter)
-            .filter(t =>
-                !search ||
-                t.fileName.toLowerCase().includes(search.toLowerCase()) ||
-                t.sender.fullName.toLowerCase().includes(search.toLowerCase()) ||
-                t.recipient.fullName.toLowerCase().includes(search.toLowerCase())
-            ),
+            items
+                .filter(t => filter === 'TOATE' || t.frontendStatus === filter)
+                .filter(t =>
+                    !search ||
+                    t.fileName.toLowerCase().includes(search.toLowerCase()) ||
+                    t.senderName.toLowerCase().includes(search.toLowerCase()) ||
+                    t.recipientName.toLowerCase().includes(search.toLowerCase())
+                ),
         [items, filter, search],
     );
 
+    // ── SHA-256 în browser ───────────────────────────────────────────────
     const handleFilePick = async (f: File | null) => {
         setFile(f); setHash('');
         if (!f) return;
@@ -56,31 +122,70 @@ export default function TransfersPage() {
         setComputing(false);
     };
 
-    const handleSend = () => {
-        if (!file || !recipient || !user) return;
-        const dest = MOCK_USERS.find(u => u.id === recipient)!;
-        transferStore.add({
-            fileName: file.name, sizeBytes: file.size, sha256: hash,
-            sender:    { id: user.id,  fullName: user.fullName  },
-            recipient: { id: dest.id,  fullName: dest.fullName  },
-        });
-        auditStore.log({ userId: user.id, userName: user.fullName, action: 'UPLOAD',
-            target: file.name, ipAddress: '10.0.12.61', result: 'SUCCES' });
-        auditStore.log({ userId: user.id, userName: user.fullName, action: 'TRANSFER',
-            target: `→ ${dest.fullName}`, ipAddress: '10.0.12.61', result: 'SUCCES' });
-        refresh();
-        setUploadOpen(false); setFile(null); setHash(''); setRecipient('');
-        toast.success(`Fișierul „${file.name}" a fost trimis cu succes către ${dest.fullName}.`);
+    // ── Upload fișier ────────────────────────────────────────────────────
+    const handleSend = async () => {
+        if (!file || !recipientId || !user) return;
+        setSending(true);
+        try {
+            const fd = new FormData();
+            fd.append('file', file);
+            fd.append('recipientId', recipientId);
+            if (hash) fd.append('sha256', hash);
+
+            const res = await fetch(`${API}/api/Transfers`, {
+                method: 'POST',
+                headers: hdrs(),   // NU setăm Content-Type! Browser-ul pune boundary automat
+                body: fd,
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
+                throw new Error(err.message);
+            }
+            const dest = users.find(u => u.id === recipientId);
+            toast.success(`Fișierul „${file.name}" a fost trimis către ${dest?.fullName ?? 'destinatar'}.`);
+            setUploadOpen(false);
+            setFile(null); setHash(''); setRecipientId('');
+            fetchTransfers();
+        } catch (e: unknown) {
+            toast.error(`Eroare: ${e instanceof Error ? e.message : 'Eroare necunoscută'}`);
+        } finally {
+            setSending(false);
+        }
     };
 
-    const handleConfirm = (f: SecureFile) => {
-        transferStore.confirm(f.id);
-        auditStore.log({ userId: user?.id ?? '', userName: user?.fullName ?? '',
-            action: 'DOWNLOAD', target: f.fileName,
-            ipAddress: '10.0.12.61', result: 'SUCCES' });
-        refresh();
-        toast.success('Transfer confirmat — integritatea SHA-256 a fost verificată.');
+    // ── Confirmare primire ───────────────────────────────────────────────
+    const handleConfirm = async (t: Transfer) => {
+        try {
+            const res = await fetch(`${API}/api/Transfers/${t.id}/confirm`, {
+                method: 'PATCH',
+                headers: hdrs(),
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            toast.success('Transfer confirmat — integritatea SHA-256 a fost verificată.');
+            fetchTransfers();
+        } catch {
+            toast.error('Eroare la confirmarea transferului.');
+        }
     };
+
+    // ── Descărcare fișier ────────────────────────────────────────────────
+    const handleDownload = async (t: Transfer) => {
+        try {
+            const res = await fetch(`${API}/api/Transfers/${t.id}/download`, { headers: hdrs() });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const blob = await res.blob();
+            const url  = URL.createObjectURL(blob);
+            const a    = document.createElement('a');
+            a.href = url; a.download = t.fileName;
+            a.click();
+            URL.revokeObjectURL(url);
+        } catch {
+            toast.error('Fișierul nu a putut fi descărcat.');
+        }
+    };
+
+    // ── UI ───────────────────────────────────────────────────────────────
+    const recipientOptions = users.filter(u => String(u.id) !== String(user?.id));
 
     return (
         <div className="space-y-6">
@@ -99,29 +204,29 @@ export default function TransfersPage() {
                 <div className="flex rounded-lg border border-mai-200 overflow-hidden bg-white">
                     {(['TOATE', 'IN_ASTEPTARE', 'CONFIRMAT', 'EXPIRAT'] as StatusFilter[]).map(s => (
                         <button key={s} onClick={() => setFilter(s)}
-                            className={`px-3.5 py-2 text-sm font-medium transition
-                                ${filter === s
-                                    ? 'bg-mai-700 text-white'
-                                    : 'text-mai-600 hover:bg-mai-100 hover:text-mai-900'}`}>
-                            {s === 'TOATE'         ? 'Toate'
-                            : s === 'IN_ASTEPTARE' ? 'În așteptare'
-                            : s === 'CONFIRMAT'    ? 'Confirmate'
-                            :                        'Expirate'}
+                                className={`px-3.5 py-2 text-sm font-medium transition
+                                ${filter === s ? 'bg-mai-700 text-white' : 'text-mai-600 hover:bg-mai-100 hover:text-mai-900'}`}>
+                            {s === 'TOATE' ? 'Toate' : s === 'IN_ASTEPTARE' ? 'În așteptare' : s === 'CONFIRMAT' ? 'Confirmate' : 'Expirate'}
                         </button>
                     ))}
                 </div>
                 <div className="relative ml-auto w-72">
                     <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-mai-300" />
                     <input value={search} onChange={e => setSearch(e.target.value)}
-                        placeholder="Caută fișier sau utilizator…"
-                        className="w-full rounded-lg border border-mai-200 bg-white pl-9 pr-3 py-2 text-sm
+                           placeholder="Caută fișier sau utilizator…"
+                           className="w-full rounded-lg border border-mai-200 bg-white pl-9 pr-3 py-2 text-sm
                             focus:outline-none focus:ring-2 focus:ring-mai-500 hover:border-mai-300 transition-colors" />
                 </div>
             </div>
 
             {/* Tabel */}
             <div className="bg-white rounded-xl shadow-card border border-mai-100/50 overflow-hidden">
-                {filtered.length === 0 ? (
+                {loading ? (
+                    <div className="flex items-center justify-center gap-3 py-14 text-mai-400">
+                        <Loader2 size={20} className="animate-spin" />
+                        <span className="text-sm">Se încarcă transferurile…</span>
+                    </div>
+                ) : filtered.length === 0 ? (
                     <div className="py-14 text-center">
                         <ArrowLeftRight size={36} className="mx-auto text-mai-200 mb-3" />
                         <p className="text-sm font-medium text-mai-400">
@@ -132,54 +237,57 @@ export default function TransfersPage() {
                     <div className="overflow-x-auto">
                         <table className="w-full text-sm">
                             <thead>
-                                <tr className="bg-mai-50 text-left text-xs uppercase tracking-wide text-mai-500">
-                                    <th className="px-5 py-3 font-semibold">Fișier</th>
-                                    <th className="px-5 py-3 font-semibold">Expeditor → Destinatar</th>
-                                    <th className="px-5 py-3 font-semibold">SHA-256</th>
-                                    <th className="px-5 py-3 font-semibold">Expiră</th>
-                                    <th className="px-5 py-3 font-semibold">Status</th>
-                                    <th className="px-5 py-3 font-semibold text-right">Acțiuni</th>
-                                </tr>
+                            <tr className="bg-mai-50 text-left text-xs uppercase tracking-wide text-mai-500">
+                                <th className="px-5 py-3 font-semibold">Fișier</th>
+                                <th className="px-5 py-3 font-semibold">Expeditor → Destinatar</th>
+                                <th className="px-5 py-3 font-semibold">SHA-256</th>
+                                <th className="px-5 py-3 font-semibold">Expiră</th>
+                                <th className="px-5 py-3 font-semibold">Status</th>
+                                <th className="px-5 py-3 font-semibold text-right">Acțiuni</th>
+                            </tr>
                             </thead>
                             <tbody className="divide-y divide-mai-50">
-                                {filtered.map(f => {
-                                    const expiringSoon =
-                                        f.status === 'IN_ASTEPTARE' &&
-                                        new Date(f.expiresAt).getTime() - Date.now() < 3 * 24 * 3600_000;
-                                    return (
-                                        <tr key={f.id} className="hover:bg-mai-100/60 transition-colors">
-                                            <td className="px-5 py-3.5 font-medium text-mai-900 whitespace-nowrap">
-                                                {f.fileName}
-                                                <p className="text-xs text-mai-400 font-normal">{formatFileSize(f.sizeBytes)}</p>
-                                            </td>
-                                            <td className="px-5 py-3.5 text-mai-500 whitespace-nowrap">
-                                                {f.sender.fullName} → {f.recipient.fullName}
-                                            </td>
-                                            <td className="px-5 py-3.5 font-mono text-xs text-mai-400 whitespace-nowrap">
-                                                {truncateSha(f.sha256)}
-                                            </td>
-                                            <td className="px-5 py-3.5 whitespace-nowrap">
+                            {filtered.map(t => {
+                                const expiringSoon =
+                                    t.frontendStatus === 'IN_ASTEPTARE' &&
+                                    new Date(t.expiresAt).getTime() - Date.now() < 3 * 24 * 3600_000;
+                                return (
+                                    <tr key={t.id} className="hover:bg-mai-100/60 transition-colors">
+                                        <td className="px-5 py-3.5 font-medium text-mai-900 whitespace-nowrap">
+                                            {t.fileName}
+                                            <p className="text-xs text-mai-400 font-normal">{formatFileSize(t.fileSize)}</p>
+                                        </td>
+                                        <td className="px-5 py-3.5 text-mai-500 whitespace-nowrap">
+                                            {t.senderName} → {t.recipientName}
+                                        </td>
+                                        <td className="px-5 py-3.5 font-mono text-xs text-mai-400 whitespace-nowrap">
+                                            {t.sha256 ? truncateSha(t.sha256) : '—'}
+                                        </td>
+                                        <td className="px-5 py-3.5 whitespace-nowrap">
                                                 <span className={`inline-flex items-center gap-1.5 text-xs
                                                     ${expiringSoon ? 'text-red-600 font-semibold' : 'text-mai-500'}`}>
                                                     {expiringSoon && <AlertTriangle size={12} />}
-                                                    {formatDateTime(f.expiresAt)}
+                                                    {formatDateTime(t.expiresAt)}
                                                 </span>
-                                            </td>
-                                            <td className="px-5 py-3.5">{statusBadge(f.status)}</td>
-                                            <td className="px-5 py-3.5 text-right whitespace-nowrap space-x-1">
-                                                <Button variant="ghost" className="px-2 py-1.5" onClick={() => setSelected(f)}>
-                                                    Detalii
+                                        </td>
+                                        <td className="px-5 py-3.5">{statusBadge(t.frontendStatus)}</td>
+                                        <td className="px-5 py-3.5 text-right whitespace-nowrap space-x-1">
+                                            <Button variant="ghost" className="px-2 py-1.5"
+                                                    onClick={() => setSelected(t)}>Detalii</Button>
+                                            {t.frontendStatus === 'IN_ASTEPTARE' && !t.isMine && (
+                                                <Button variant="secondary" className="px-2.5 py-1.5"
+                                                        onClick={() => handleConfirm(t)}>
+                                                    <FileCheck size={13} /> Confirmă
                                                 </Button>
-                                                {f.status === 'IN_ASTEPTARE' && (
-                                                    <Button variant="secondary" className="px-2.5 py-1.5"
-                                                        onClick={() => handleConfirm(f)}>
-                                                        <FileCheck size={13} /> Confirmă
-                                                    </Button>
-                                                )}
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
+                                            )}
+                                            <Button variant="ghost" className="px-2 py-1.5"
+                                                    onClick={() => handleDownload(t)} title="Descarcă fișierul">
+                                                <Download size={14} />
+                                            </Button>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
                             </tbody>
                         </table>
                     </div>
@@ -187,13 +295,14 @@ export default function TransfersPage() {
             </div>
 
             {/* Modal: trimite fișier */}
-            <Modal open={uploadOpen} title="Trimite fișier securizat" onClose={() => setUploadOpen(false)}>
+            <Modal open={uploadOpen} title="Trimite fișier securizat"
+                   onClose={() => { setUploadOpen(false); setFile(null); setHash(''); setRecipientId(''); }}>
                 <div className="space-y-5">
                     <label className="block rounded-xl border-2 border-dashed border-mai-200
                         hover:border-mai-500 transition cursor-pointer p-8 text-center bg-mai-50/50">
                         <input type="file" className="hidden"
-                            accept=".pdf,.doc,.docx,.xls,.xlsx,.zip,.rar"
-                            onChange={e => handleFilePick(e.target.files?.[0] ?? null)} />
+                               accept=".pdf,.doc,.docx,.xls,.xlsx,.zip,.rar"
+                               onChange={e => handleFilePick(e.target.files?.[0] ?? null)} />
                         <Upload size={28} className="mx-auto text-mai-400 mb-3" />
                         {file ? (
                             <div>
@@ -221,27 +330,32 @@ export default function TransfersPage() {
                         </div>
                     )}
 
-                    <label className="block">
-                        <span className="block text-sm font-medium text-mai-800 mb-1.5">Destinatar</span>
-                        <select value={recipient} onChange={e => setRecipient(e.target.value)}
-                            className="w-full rounded-lg border border-mai-200 px-3.5 py-2.5 text-sm
+                    <div>
+                        <label className="block text-sm font-medium text-mai-800 mb-1.5">Destinatar</label>
+                        <select value={recipientId} onChange={e => setRecipientId(e.target.value)}
+                                className="w-full rounded-lg border border-mai-200 px-3.5 py-2.5 text-sm
                                 focus:outline-none focus:ring-2 focus:ring-mai-500 hover:border-mai-300 transition-colors">
                             <option value="">— selectează utilizatorul —</option>
-                            {MOCK_USERS.filter(u => u.id !== user?.id && u.isActive).map(u => (
-                                <option key={u.id} value={u.id}>{u.fullName} ({u.department})</option>
+                            {recipientOptions.map(u => (
+                                <option key={u.id} value={u.id}>
+                                    {u.fullName || u.username}{u.department ? ` (${u.department})` : ''}
+                                </option>
                             ))}
                         </select>
-                    </label>
+                    </div>
 
                     <div className="flex items-center gap-2 rounded-lg bg-gold-500/10 border border-gold-500/30 p-3">
                         <AlertTriangle size={16} className="text-gold-600 shrink-0" />
                         <p className="text-xs text-mai-700">
-                            Fișierul va fi criptat AES-256-GCM și va expira automat după 14 zile.
+                            Fișierul va fi stocat securizat și va expira automat după 14 zile.
                         </p>
                     </div>
 
-                    <Button onClick={handleSend} disabled={!file || !recipient || computing} className="w-full">
-                        <ArrowLeftRight size={15} /> Trimite securizat
+                    <Button onClick={handleSend}
+                            disabled={!file || !recipientId || computing || sending}
+                            className="w-full flex items-center justify-center gap-2">
+                        <ArrowLeftRight size={15} />
+                        {sending ? 'Se trimite…' : 'Trimite securizat'}
                     </Button>
                 </div>
             </Modal>
@@ -251,24 +365,30 @@ export default function TransfersPage() {
                 {selected && (
                     <div className="space-y-3 text-sm">
                         {([
-                            ['Expeditor',  selected.sender.fullName],
-                            ['Destinatar', selected.recipient.fullName],
-                            ['Dimensiune', formatFileSize(selected.sizeBytes)],
+                            ['Expeditor',  selected.senderName    + (selected.senderDepartment    ? ` (${selected.senderDepartment})`    : '')],
+                            ['Destinatar', selected.recipientName + (selected.recipientDepartment ? ` (${selected.recipientDepartment})` : '')],
+                            ['Dimensiune', formatFileSize(selected.fileSize)],
                             ['Creat la',   formatDateTime(selected.createdAt)],
                             ['Expiră la',  formatDateTime(selected.expiresAt)],
-                            ['Status',     selected.status],
+                            ['Status',     selected.frontendStatus],
                         ] as [string, string][]).map(([k, v]) => (
                             <div key={k} className="flex justify-between border-b border-mai-50 pb-2">
                                 <span className="text-mai-400">{k}</span>
                                 <span className="font-medium text-mai-900">{v}</span>
                             </div>
                         ))}
-                        <div>
-                            <p className="text-mai-400 mb-1">Amprentă SHA-256</p>
-                            <p className="font-mono text-[11px] bg-mai-50 rounded-lg p-2.5 break-all text-mai-700">
-                                {selected.sha256}
-                            </p>
-                        </div>
+                        {selected.sha256 && (
+                            <div>
+                                <p className="text-mai-400 mb-1">Amprentă SHA-256</p>
+                                <p className="font-mono text-[11px] bg-mai-50 rounded-lg p-2.5 break-all text-mai-700">
+                                    {selected.sha256}
+                                </p>
+                            </div>
+                        )}
+                        <Button variant="secondary" className="w-full flex items-center justify-center gap-2"
+                                onClick={() => handleDownload(selected)}>
+                            <Download size={14} /> Descarcă fișierul
+                        </Button>
                         <p className="text-xs text-mai-400 flex items-center gap-1.5">
                             <Download size={12} /> La descărcare integritatea este re-verificată automat.
                         </p>

@@ -1,8 +1,9 @@
 ﻿import { useState } from 'react';
-import { Outlet } from 'react-router-dom';
-import Sidebar from './Sidebar';
-import TopBar from './TopBar';
-import Footer from './Footer';
+import { Outlet }   from 'react-router-dom';
+import Sidebar       from './Sidebar';
+import TopBar        from './TopBar';
+import Footer        from './Footer';
+import ErrorBoundary from '../ErrorBoundary';
 
 export function AppLayout() {
     const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -14,7 +15,11 @@ export function AppLayout() {
             <div className="lg:pl-64 flex flex-col min-h-screen">
                 <TopBar onMenuClick={() => setSidebarOpen(true)} />
                 <main className="flex-1 p-6">
-                    <Outlet />
+                    {/* ErrorBoundary: prinde crash-urile din pagini și afișează fallback
+                        în loc de ecranul alb care blochează toată aplicația */}
+                    <ErrorBoundary>
+                        <Outlet />
+                    </ErrorBoundary>
                 </main>
                 <Footer />
             </div>
