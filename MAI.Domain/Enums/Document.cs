@@ -9,6 +9,9 @@ namespace MAI.Domain.Entities
         public string Title { get; set; } = string.Empty;
         public string DocumentNumber { get; set; } = string.Empty;
         public string Category { get; set; } = string.Empty;
+        
+        public string Keywords { get; set; } = string.Empty;
+
         public int CurrentVersion { get; set; } = 1;
         public Guid CreatedById { get; set; }
         public User? CreatedBy { get; set; }
