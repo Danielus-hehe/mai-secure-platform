@@ -1,14 +1,19 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-    <ItemGroup>
-      <ProjectReference Include="..\MAI.Domain\MAI.Domain.csproj" />
-      <ProjectReference Include="..\MAI.DataAccessLayer\MAI.DataAccessLayer.csproj" />
-    </ItemGroup>
-
     <PropertyGroup>
         <TargetFramework>net8.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
     </PropertyGroup>
+
+    <ItemGroup>
+        <!-- Argon2id - implementare .NET pura, fara dependinte native -->
+        <PackageReference Include="Konscious.Security.Cryptography.Argon2" Version="1.3.1" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\MAI.Domain\MAI.Domain.csproj" />
+        <ProjectReference Include="..\MAI.DataAccessLayer\MAI.DataAccessLayer.csproj" />
+    </ItemGroup>
 
 </Project>
