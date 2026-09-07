@@ -1,4 +1,9 @@
-﻿using MAI.DataAccessLayer;
+﻿using System.Globalization;
+using System.Text;
+using ClosedXML.Excel;
+using MAI.BusinessLogic.Dtos;
+using MAI.DataAccessLayer;
+using MAI.Domain.Entities;
 using MAI.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -12,16 +17,126 @@ namespace MAI.Api.Controllers
     public class AuditLogsController : ControllerBase
     {
         private readonly AppDbContext _context;
-        public AuditLogsController(AppDbContext context) => _context = context;
+        private readonly ILogger<AuditLogsController> _logger;
 
-        // GET api/AuditLogs?username=&action=&result=
+        /// <summary>Plafon la export. Peste atât, utilizatorul trebuie să restrângă intervalul.</summary>
+        private const int MaxExportRows = 50_000;
+
+        public AuditLogsController(AppDbContext context, ILogger<AuditLogsController> logger)
+        {
+            _context = context;
+            _logger  = logger;
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // GET api/AuditLogs?username=&action=&result=&search=&from=&to=&page=&pageSize=
+        // ─────────────────────────────────────────────────────────────────────
         [HttpGet]
         public async Task<IActionResult> GetAll(
             [FromQuery] string? username,
             [FromQuery] string? action,
-            [FromQuery] string? result)
+            [FromQuery] string? result,
+            [FromQuery] string? search,
+            [FromQuery] DateTime? from,
+            [FromQuery] DateTime? to,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 25,
+            CancellationToken ct = default)
         {
-            var query = _context.AuditLogs.AsQueryable();
+            var pagination = new PaginationQuery { Page = page, PageSize = pageSize };
+            var query      = BuildQuery(username, action, result, search, from, to);
+
+            // Count înainte de Skip/Take — altfel numărăm doar pagina curentă.
+            var total = await query.CountAsync(ct);
+
+            var raw = await query
+                .OrderByDescending(a => a.Timestamp)
+                .Skip(pagination.Skip)
+                .Take(pagination.PageSize)
+                .ToListAsync(ct);
+
+            var items = raw.Select(Project).ToList();
+
+            return Ok(PagedResult<AuditEntryDto>.Create(items, total, pagination));
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // GET api/AuditLogs/export?format=xlsx|csv + aceleași filtre
+        // ─────────────────────────────────────────────────────────────────────
+        [Authorize(Roles = "Administrator,SefDirectie")]
+        [HttpGet("export")]
+        public async Task<IActionResult> Export(
+            [FromQuery] string format = "xlsx",
+            [FromQuery] string? username = null,
+            [FromQuery] string? action = null,
+            [FromQuery] string? result = null,
+            [FromQuery] string? search = null,
+            [FromQuery] DateTime? from = null,
+            [FromQuery] DateTime? to = null,
+            CancellationToken ct = default)
+        {
+            var query = BuildQuery(username, action, result, search, from, to);
+            var total = await query.CountAsync(ct);
+
+            if (total > MaxExportRows)
+            {
+                return BadRequest(new
+                {
+                    message = $"Exportul depășește limita de {MaxExportRows:N0} înregistrări " +
+                              $"({total:N0} găsite). Restrângeți intervalul de date sau filtrele.",
+                    totalCount = total,
+                });
+            }
+
+            var raw   = await query.OrderByDescending(a => a.Timestamp).ToListAsync(ct);
+            var items = raw.Select(Project).ToList();
+
+            // Exportul jurnalului de audit este el însuși o acțiune auditabilă.
+            _context.AuditLogs.Add(new AuditLog
+            {
+                Username  = HttpContext.User.Identity?.Name ?? "sistem",
+                Action    = AuditAction.FileDownload,
+                Details   = $"SUCCES: Export jurnal audit ({items.Count} inregistrari, {format})",
+                IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                Timestamp = DateTime.UtcNow,
+            });
+            await _context.SaveChangesAsync(ct);
+
+            var stamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmm", CultureInfo.InvariantCulture);
+
+            if (string.Equals(format, "csv", StringComparison.OrdinalIgnoreCase))
+            {
+                var csv = BuildCsv(items);
+                return File(csv, "text/csv; charset=utf-8", $"jurnal_audit_{stamp}.csv");
+            }
+
+            var xlsx = BuildXlsx(items, username, action, result, search, from, to);
+            return File(
+                xlsx,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                $"jurnal_audit_{stamp}.xlsx");
+        }
+
+        // GET api/AuditLogs/usernames — pentru dropdown-ul de filtrare
+        [HttpGet("usernames")]
+        public async Task<IActionResult> GetUsernames(CancellationToken ct)
+        {
+            var names = await _context.AuditLogs
+                .Select(a => a.Username)
+                .Distinct()
+                .OrderBy(n => n)
+                .ToListAsync(ct);
+            return Ok(names);
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Construirea query-ului — o singură sursă de adevăr pentru listă și export
+        // ─────────────────────────────────────────────────────────────────────
+        private IQueryable<AuditLog> BuildQuery(
+            string? username, string? action, string? result,
+            string? search, DateTime? from, DateTime? to)
+        {
+            var query = _context.AuditLogs.AsNoTracking().AsQueryable();
 
             if (!string.IsNullOrWhiteSpace(username))
                 query = query.Where(a => a.Username == username);
@@ -38,43 +153,181 @@ namespace MAI.Api.Controllers
             else if (result == "ESEC")
                 query = query.Where(a => a.Details.StartsWith("ESEC"));
 
-            // FIX: ToListAsync() primul, apoi proiecția cu range operator în memorie
-            var raw = await query
-                .OrderByDescending(a => a.Timestamp)
-                .Take(500)
-                .ToListAsync();
-
-            var logs = raw.Select(a => new
+            if (!string.IsNullOrWhiteSpace(search))
             {
-                id        = a.Id,
-                timestamp = a.Timestamp,
-                userId    = a.UserId,
-                userName  = a.Username,
-                action    = MapBackendAction(a.Action),
-                // Range operator [x..] e valid în memorie, nu în expression tree EF
-                target    = a.Details.Contains(':')
-                                ? a.Details[(a.Details.IndexOf(':') + 1)..].Trim()
-                                : a.Details,
-                ipAddress = a.IpAddress,
-                result    = a.Details.StartsWith("ESEC") ? "ESEC" : "SUCCES",
-            });
+                var term = search.Trim();
+                // ILike = LIKE case-insensitive în PostgreSQL. Traducerea se face de Npgsql,
+                // deci filtrarea rămâne în baza de date, nu în memorie.
+                query = query.Where(a =>
+                    EF.Functions.ILike(a.Username, $"%{term}%") ||
+                    EF.Functions.ILike(a.Details, $"%{term}%") ||
+                    EF.Functions.ILike(a.IpAddress, $"%{term}%"));
+            }
 
-            return Ok(logs);
+            if (from.HasValue)
+            {
+                var fromUtc = DateTime.SpecifyKind(from.Value.Date, DateTimeKind.Utc);
+                query = query.Where(a => a.Timestamp >= fromUtc);
+            }
+
+            if (to.HasValue)
+            {
+                // Inclusiv ziua "to" în întregime.
+                var toUtc = DateTime.SpecifyKind(to.Value.Date.AddDays(1), DateTimeKind.Utc);
+                query = query.Where(a => a.Timestamp < toUtc);
+            }
+
+            return query;
         }
 
-        // GET api/AuditLogs/usernames — pentru dropdown-ul de filtrare
-        [HttpGet("usernames")]
-        public async Task<IActionResult> GetUsernames()
+        private static AuditEntryDto Project(AuditLog a) => new()
         {
-            var names = await _context.AuditLogs
-                .Select(a => a.Username)
-                .Distinct()
-                .OrderBy(n => n)
-                .ToListAsync();
-            return Ok(names);
+            Id        = a.Id,
+            Timestamp = a.Timestamp,
+            UserId    = a.UserId,
+            UserName  = a.Username,
+            Action    = MapBackendAction(a.Action),
+            Target    = a.Details.Contains(':')
+                            ? a.Details[(a.Details.IndexOf(':') + 1)..].Trim()
+                            : a.Details,
+            IpAddress = a.IpAddress,
+            Result    = a.Details.StartsWith("ESEC") ? "ESEC" : "SUCCES",
+        };
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Generare fișiere
+        // ─────────────────────────────────────────────────────────────────────
+
+        private static byte[] BuildCsv(IReadOnlyList<AuditEntryDto> items)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("Timestamp;Utilizator;Actiune;Detalii;Adresa IP;Rezultat");
+
+            foreach (var e in items)
+            {
+                sb.Append(Csv(e.Timestamp.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture))).Append(';');
+                sb.Append(Csv(e.UserName)).Append(';');
+                sb.Append(Csv(ActionLabel(e.Action))).Append(';');
+                sb.Append(Csv(e.Target)).Append(';');
+                sb.Append(Csv(e.IpAddress)).Append(';');
+                sb.AppendLine(Csv(e.Result));
+            }
+
+            // BOM UTF-8: fără el, Excel pe Windows deschide fișierul în ANSI
+            // și diacriticele românești apar ca gunoi.
+            var preamble = Encoding.UTF8.GetPreamble();
+            var body     = Encoding.UTF8.GetBytes(sb.ToString());
+            var output   = new byte[preamble.Length + body.Length];
+            Buffer.BlockCopy(preamble, 0, output, 0, preamble.Length);
+            Buffer.BlockCopy(body, 0, output, preamble.Length, body.Length);
+            return output;
         }
 
-        // ── Mapări enum ──────────────────────────────────────────────────────
+        /// <summary>
+        /// Escapare CSV. Fără ea, un câmp Details care conține ; sau ghilimele
+        /// sparge coloanele. Prefixul cu apostrof apără de CSV injection: o valoare
+        /// care începe cu = sau + ar fi interpretată de Excel ca formulă.
+        /// </summary>
+        private static string Csv(string? value)
+        {
+            var v = value ?? string.Empty;
+
+            if (v.Length > 0 && (v[0] == '=' || v[0] == '+' || v[0] == '-' || v[0] == '@'))
+                v = "'" + v;
+
+            if (v.Contains('"') || v.Contains(';') || v.Contains('\n') || v.Contains('\r'))
+                return '"' + v.Replace("\"", "\"\"") + '"';
+
+            return v;
+        }
+
+        private static byte[] BuildXlsx(
+            IReadOnlyList<AuditEntryDto> items,
+            string? username, string? action, string? result,
+            string? search, DateTime? from, DateTime? to)
+        {
+            using var workbook = new XLWorkbook();
+            var sheet = workbook.Worksheets.Add("Jurnal audit");
+
+            // Antet cu context: un raport exportat trebuie să spună singur ce conține.
+            sheet.Cell(1, 1).Value = "MAI — Jurnal de audit SGDM";
+            sheet.Cell(1, 1).Style.Font.Bold = true;
+            sheet.Cell(1, 1).Style.Font.FontSize = 14;
+            sheet.Range(1, 1, 1, 6).Merge();
+
+            var filters = new List<string>();
+            if (!string.IsNullOrWhiteSpace(username)) filters.Add($"utilizator={username}");
+            if (!string.IsNullOrWhiteSpace(action))   filters.Add($"actiune={action}");
+            if (!string.IsNullOrWhiteSpace(result))   filters.Add($"rezultat={result}");
+            if (!string.IsNullOrWhiteSpace(search))   filters.Add($"cautare='{search}'");
+            if (from.HasValue) filters.Add($"de la {from:yyyy-MM-dd}");
+            if (to.HasValue)   filters.Add($"pana la {to:yyyy-MM-dd}");
+
+            sheet.Cell(2, 1).Value =
+                $"Generat: {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC · {items.Count} inregistrari" +
+                (filters.Count > 0 ? $" · Filtre: {string.Join(", ", filters)}" : " · Fara filtre");
+            sheet.Cell(2, 1).Style.Font.FontSize = 9;
+            sheet.Cell(2, 1).Style.Font.FontColor = XLColor.Gray;
+            sheet.Range(2, 1, 2, 6).Merge();
+
+            const int headerRow = 4;
+            string[] headers = ["Timestamp", "Utilizator", "Acțiune", "Detalii", "Adresă IP", "Rezultat"];
+            for (var i = 0; i < headers.Length; i++)
+            {
+                var cell = sheet.Cell(headerRow, i + 1);
+                cell.Value = headers[i];
+                cell.Style.Font.Bold = true;
+                cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#1E3A5F");
+                cell.Style.Font.FontColor = XLColor.White;
+            }
+
+            var row = headerRow + 1;
+            foreach (var e in items)
+            {
+                sheet.Cell(row, 1).Value = e.Timestamp;
+                sheet.Cell(row, 1).Style.DateFormat.Format = "yyyy-mm-dd hh:mm:ss";
+                sheet.Cell(row, 2).Value = e.UserName;
+                sheet.Cell(row, 3).Value = ActionLabel(e.Action);
+                sheet.Cell(row, 4).Value = e.Target;
+                sheet.Cell(row, 5).Value = e.IpAddress;
+                sheet.Cell(row, 6).Value = e.Result;
+
+                if (e.Result == "ESEC")
+                {
+                    sheet.Range(row, 1, row, 6).Style.Fill.BackgroundColor = XLColor.FromHtml("#FEE2E2");
+                    sheet.Cell(row, 6).Style.Font.Bold = true;
+                }
+                row++;
+            }
+
+            if (items.Count > 0)
+            {
+                sheet.Range(headerRow, 1, row - 1, 6).SetAutoFilter();
+                sheet.SheetView.FreezeRows(headerRow);
+            }
+
+            sheet.Columns(1, 6).AdjustToContents();
+            sheet.Column(4).Width = Math.Min(sheet.Column(4).Width, 60);
+
+            using var ms = new MemoryStream();
+            workbook.SaveAs(ms);
+            return ms.ToArray();
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Mapări enum
+        // ─────────────────────────────────────────────────────────────────────
+
+        private static string ActionLabel(string action) => action switch
+        {
+            "LOGIN"          => "Autentificare",
+            "LOGOUT"         => "Deconectare",
+            "UPLOAD"         => "Încărcare",
+            "DOWNLOAD"       => "Descărcare",
+            "MODIFICARE_DOC" => "Modificare document",
+            "ADMIN"          => "Administrare",
+            _                => action,
+        };
 
         private static string MapBackendAction(AuditAction a) => a switch
         {
@@ -99,5 +352,18 @@ namespace MAI.Api.Controllers
             "ADMIN"          => [AuditAction.UserCreated, AuditAction.UserUpdated],
             _                => null,
         };
+    }
+
+    /// <summary>Forma trimisă spre frontend pentru o înregistrare de audit.</summary>
+    public class AuditEntryDto
+    {
+        public Guid Id { get; set; }
+        public DateTime Timestamp { get; set; }
+        public Guid? UserId { get; set; }
+        public string UserName { get; set; } = string.Empty;
+        public string Action { get; set; } = string.Empty;
+        public string Target { get; set; } = string.Empty;
+        public string IpAddress { get; set; } = string.Empty;
+        public string Result { get; set; } = string.Empty;
     }
 }

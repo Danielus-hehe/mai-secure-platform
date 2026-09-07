@@ -42,12 +42,42 @@ namespace MAI.Api.Controllers
         private string ProfileFor(UserRole role) =>
             role >= UserRole.SefDirectie ? _argon2.PrivilegedProfile : _argon2.DefaultProfile;
 
-        // GET api/Users
+        // GET api/Users?search=&role=&isActive=&page=&pageSize=
         [HttpGet]
-        public async Task<IActionResult> GetAll(CancellationToken ct)
+        public async Task<IActionResult> GetAll(
+            [FromQuery] string? search,
+            [FromQuery] UserRole? role,
+            [FromQuery] bool? isActive,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 25,
+            CancellationToken ct = default)
         {
-            var users = await _context.Users
+            var pagination = new PaginationQuery { Page = page, PageSize = pageSize };
+
+            var query = _context.Users.AsNoTracking().AsQueryable();
+
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var term = $"%{search.Trim()}%";
+                query = query.Where(u =>
+                    EF.Functions.ILike(u.Username, term) ||
+                    EF.Functions.ILike(u.Email, term) ||
+                    (u.FullName != null && EF.Functions.ILike(u.FullName, term)) ||
+                    (u.Department != null && EF.Functions.ILike(u.Department, term)));
+            }
+
+            if (role.HasValue)
+                query = query.Where(u => u.Role == role.Value);
+
+            if (isActive.HasValue)
+                query = query.Where(u => u.IsActive == isActive.Value);
+
+            var total = await query.CountAsync(ct);
+
+            var users = await query
                 .OrderByDescending(u => u.CreatedAt)
+                .Skip(pagination.Skip)
+                .Take(pagination.PageSize)
                 .Select(u => new UserDto
                 {
                     Id         = u.Id,
@@ -58,6 +88,30 @@ namespace MAI.Api.Controllers
                     Role       = u.Role,
                     IsActive   = u.IsActive,
                     CreatedAt  = u.CreatedAt,
+                    IsLockedOut   = u.LockoutEndsAt.HasValue && u.LockoutEndsAt > DateTime.UtcNow,
+                    LockoutEndsAt = u.LockoutEndsAt,
+                    LastLoginAt   = u.LastLoginAt,
+                })
+                .ToListAsync(ct);
+
+            return Ok(PagedResult<UserDto>.Create(users, total, pagination));
+        }
+
+        // GET api/Users/all — listă completă fără paginare, pentru dropdown-uri
+        // (ex: selectarea destinatarului la un transfer). Doar câmpurile minime.
+        [HttpGet("all")]
+        public async Task<IActionResult> GetAllForDropdown(CancellationToken ct)
+        {
+            var users = await _context.Users
+                .AsNoTracking()
+                .Where(u => u.IsActive)
+                .OrderBy(u => u.FullName ?? u.Username)
+                .Select(u => new
+                {
+                    id         = u.Id,
+                    username   = u.Username,
+                    fullName   = u.FullName ?? u.Username,
+                    department = u.Department ?? string.Empty,
                 })
                 .ToListAsync(ct);
             return Ok(users);

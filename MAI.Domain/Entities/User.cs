@@ -48,6 +48,38 @@ namespace MAI.Domain.Entities
         /// <summary>Ultimul login reușit (UTC).</summary>
         public DateTime? LastLoginAt { get; set; }
 
+        // ── Chei criptografice pentru transferuri E2E ────────────────────────
+        // Cheile publice sunt publice prin definiție. Cheile private ajung aici
+        // DOAR criptate cu o cheie derivată din parola utilizatorului, în browser.
+        // Serverul nu le poate descuia — asta e tot rostul.
+
+        /// <summary>Cheia publică RSA-OAEP (SPKI, base64) — împachetează cheile de fișier.</summary>
+        public string? PublicKeyEncryption { get; set; }
+
+        /// <summary>Cheia publică RSA-PSS (SPKI, base64) — verifică semnăturile.</summary>
+        public string? PublicKeySigning { get; set; }
+
+        /// <summary>Cheile private, criptate AES-256-GCM cu cheia derivată din parolă.</summary>
+        public string? EncryptedPrivateBundle { get; set; }
+
+        /// <summary>Salt-ul PBKDF2 folosit la derivarea cheii de împachetare (base64).</summary>
+        public string? KeyDerivationSalt { get; set; }
+
+        /// <summary>Numărul de iterații PBKDF2 — stocat ca să putem crește pragul în timp.</summary>
+        public int? KeyDerivationIterations { get; set; }
+
+        /// <summary>IV-ul AES-GCM folosit la împachetarea cheilor private (base64).</summary>
+        public string? KeyWrapIv { get; set; }
+
+        /// <summary>Suita criptografică folosită, pentru migrări viitoare.</summary>
+        public string? CryptoSuite { get; set; }
+
+        public DateTime? KeysCreatedAt { get; set; }
+
+        /// <summary>True dacă utilizatorul și-a generat cheile și poate primi fișiere.</summary>
+        [NotMapped]
+        public bool HasKeys => !string.IsNullOrEmpty(PublicKeyEncryption);
+
         /// <summary>
         /// True dacă contul este blocat chiar acum. Calculată, nu stocată —
         /// [NotMapped] este obligatoriu, altfel EF caută o coloană "IsLockedOut".
