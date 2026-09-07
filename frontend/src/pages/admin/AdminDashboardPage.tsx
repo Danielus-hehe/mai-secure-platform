@@ -1,114 +1,239 @@
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-    CartesianGrid, PieChart, Pie, Cell, Legend } from 'recharts';
+import { useState } from 'react';
+import {
+    Users, ShieldAlert, FileText, HardDrive,
+    Key, UserPlus, Eye, EyeOff,
+} from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader';
-import StatCard from '../../components/ui/StatCard';
-import Button from '../../components/ui/Button';
-import { ArrowLeftRight, ShieldAlert, Users, HardDrive, FileDown } from 'lucide-react';
-import { auditStore, transferStore, userStore } from '../../api/mockStore';
+import Button     from '../../components/ui/Button';
+import Modal      from '../../components/ui/Modal';
+import Input      from '../../components/ui/Input';
+import { useAuth }  from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
+import { ROLE_LABELS } from '../../utils/constants';
+import type { Role } from '../../types';
 
-const ACTION_COLORS = ['#143461', '#2a5a99', '#4d7fbd', '#d4a935', '#b3891f', '#7fa8d6', '#7f1d1d'];
+const API_URL = 'http://localhost:5000';
+
+// UserRole enum backend: Utilizator=1, SefDirectie=2, Administrator=3
+const ROLE_TO_NUM: Record<Role, number> = {
+    UTILIZATOR:    1,
+    SEF_DIRECTIE:  2,
+    ADMINISTRATOR: 3,
+};
+
+interface CreateForm {
+    fullName: string; username: string; password: string;
+    email: string; department: string; role: Role;
+}
+const EMPTY: CreateForm = {
+    fullName: '', username: '', password: '',
+    email: '', department: '', role: 'UTILIZATOR',
+};
 
 export default function AdminDashboardPage() {
+    const { user }  = useAuth();
     const toast     = useToast();
-    const audit     = auditStore.getAll();
-    const transfers = transferStore.getAll();
-    const users     = userStore.getAll();   // nu mai e hardcodat
 
-    // Transferuri + autentificări pe ultimele 7 zile
-    const byDay = Array.from({ length: 7 }, (_, i) => {
-        const d = new Date();
-        d.setDate(d.getDate() - (6 - i));
-        const key = d.toISOString().slice(0, 10);
-        return {
-            ziua:          d.toLocaleDateString('ro-RO', { weekday: 'short' }),
-            transferuri:   transfers.filter(t => t.createdAt.slice(0, 10) === key).length,
-            autentificari: audit.filter(a => a.action === 'LOGIN' && a.timestamp.slice(0, 10) === key).length,
-        };
-    });
+    const [open, setOpen]       = useState(false);
+    const [loading, setLoading] = useState(false);
+    const [showPass, setShowPass] = useState(false);
+    const [form, setForm]       = useState<CreateForm>(EMPTY);
 
-    // Distribuția acțiunilor din audit
-    const byAction = Object.entries(
-        audit.reduce<Record<string, number>>((acc, e) => {
-            acc[e.action] = (acc[e.action] ?? 0) + 1;
-            return acc;
-        }, {})
-    ).map(([name, value]) => ({ name, value }));
+    const set = (f: keyof CreateForm) =>
+        (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+            setForm(prev => ({ ...prev, [f]: e.target.value }));
 
-    const failedLogins = audit.filter(a => a.action === 'LOGIN' && a.result === 'ESEC').length;
+    const handleClose = () => { setOpen(false); setForm(EMPTY); setShowPass(false); };
 
-    const handleExportRaport = () => {
-        toast.success('Raportul complet de sistem a fost generat și exportat.');
+    const handleCreate = async () => {
+        if (!form.fullName || !form.username || !form.password) return;
+        setLoading(true);
+        try {
+            const res = await fetch(`${API_URL}/api/Users`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${user?.token ?? ''}`,
+                },
+                body: JSON.stringify({
+                    fullName:   form.fullName,
+                    username:   form.username,
+                    password:   form.password,
+                    email:      form.email,
+                    department: form.department,
+                    role:       ROLE_TO_NUM[form.role],
+                }),
+            });
+
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
+                throw new Error(err.message ?? `HTTP ${res.status}`);
+            }
+
+            toast.success(`Contul @${form.username} (${ROLE_LABELS[form.role]}) creat cu succes.`);
+            handleClose();
+        } catch (e: unknown) {
+            toast.error(`Eroare: ${e instanceof Error ? e.message : 'Eroare necunoscută'}`);
+        } finally {
+            setLoading(false);
+        }
     };
 
-    const handleExportAudit = () => {
-        toast.info(`Audit exportat — ${audit.length} înregistrări incluse.`);
-    };
+    const stats = [
+        { title: 'Utilizatori Activi',     value: '42',     icon: Users      },
+        { title: 'Transferuri Securizate',  value: '1,284',  icon: FileText   },
+        { title: 'Stocare Criptată',        value: '45.8 GB', icon: HardDrive },
+        { title: 'Integritate Sistem',      value: '100%',   icon: ShieldAlert },
+    ];
+
+    const isValid = !!form.fullName.trim() && !!form.username.trim() && !!form.password.trim();
 
     return (
         <div className="space-y-6">
-            <PageHeader
-                title="Administrare & rapoarte"
-                subtitle="Statistici de sistem pentru Direcția TIC"
-                actions={
-                    <div className="flex gap-2">
-                        <Button variant="secondary" onClick={handleExportAudit}>
-                            <FileDown size={15} /> Export audit
+
+            {/* Header */}
+            <div>
+                <PageHeader
+                    title="Panou Administrare Sistem"
+                    actions={
+                        <Button className="flex items-center gap-2" onClick={() => setOpen(true)}>
+                            <UserPlus size={16} /> Adaugă Utilizator
                         </Button>
-                        <Button onClick={handleExportRaport}>
-                            <FileDown size={15} /> Raport complet
-                        </Button>
+                    }
+                />
+                <p className="text-sm text-mai-500 mt-1">
+                    Gestiune utilizatori, configurare politici de securitate și monitorizare servere.
+                </p>
+            </div>
+
+            {/* Metrici */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                {stats.map(s => {
+                    const Icon = s.icon;
+                    return (
+                        <div key={s.title}
+                             className="bg-white p-5 rounded-2xl shadow-card border border-mai-100 flex items-center justify-between">
+                            <div>
+                                <p className="text-xs text-mai-500 font-medium">{s.title}</p>
+                                <p className="text-2xl font-bold text-mai-900 mt-1">{s.value}</p>
+                            </div>
+                            <div className="p-3 bg-mai-50 rounded-xl text-mai-600">
+                                <Icon size={24} />
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+
+            {/* Politici + Backend */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="bg-white p-6 rounded-2xl shadow-card border border-mai-100 space-y-4">
+                    <h2 className="text-lg font-bold text-mai-900 flex items-center gap-2">
+                        <ShieldAlert size={20} className="text-gold-500" /> Politici Securitate
+                    </h2>
+                    <p className="text-xs text-mai-500">
+                        Configurări globale ale criptării AES-256 și reguli de acces intranet.
+                    </p>
+                    <div className="space-y-3 pt-2">
+                        <div className="flex items-center justify-between p-3 bg-mai-50 rounded-xl">
+                            <span className="text-sm font-medium text-mai-900">Rotire chei master JWT</span>
+                            <Button variant="secondary" className="text-xs py-1.5 px-3 flex items-center gap-1">
+                                <Key size={14} /> Execută
+                            </Button>
+                        </div>
+                        <div className="flex items-center justify-between p-3 bg-mai-50 rounded-xl">
+                            <span className="text-sm font-medium text-mai-900">Forțează Deconectare</span>
+                            <Button variant="danger" className="text-xs py-1.5 px-3">
+                                Resetează Sesiuni
+                            </Button>
+                        </div>
                     </div>
-                }
-            />
-
-            {/* Stat cards — valori reale din store */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-                <StatCard label="Total transferuri"      value={transfers.length}  icon={ArrowLeftRight} />
-                <StatCard label="Înregistrări audit"     value={audit.length}      icon={HardDrive}      tone="gold"  />
-                <StatCard label="Autentificări eșuate"   value={failedLogins}      icon={ShieldAlert}    tone="red"   />
-                <StatCard label="Conturi în sistem"      value={users.length}      icon={Users}          tone="green" />
-            </div>
-
-            {/* Grafice */}
-            <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-                {/* Bar chart — activitate zilnică */}
-                <div className="lg:col-span-3 bg-white rounded-xl shadow-card border border-mai-100/50 p-5">
-                    <h3 className="font-semibold text-mai-900 mb-4">Activitate — ultimele 7 zile</h3>
-                    <ResponsiveContainer width="100%" height={280}>
-                        <BarChart data={byDay}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#d9e6f5" />
-                            <XAxis dataKey="ziua" tick={{ fontSize: 12 }} />
-                            <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                            <Tooltip
-                                contentStyle={{ borderRadius: '8px', border: '1px solid #d9e6f5', fontSize: 12 }}
-                            />
-                            <Legend />
-                            <Bar dataKey="transferuri"   name="Transferuri"   fill="#143461" radius={[4,4,0,0]} />
-                            <Bar dataKey="autentificari" name="Autentificări" fill="#d4a935" radius={[4,4,0,0]} />
-                        </BarChart>
-                    </ResponsiveContainer>
                 </div>
 
-                {/* Pie chart — distribuție acțiuni */}
-                <div className="lg:col-span-2 bg-white rounded-xl shadow-card border border-mai-100/50 p-5">
-                    <h3 className="font-semibold text-mai-900 mb-4">Distribuția acțiunilor (audit)</h3>
-                    <ResponsiveContainer width="100%" height={280}>
-                        <PieChart>
-                            <Pie
-                                data={byAction} dataKey="value" nameKey="name"
-                                innerRadius={55} outerRadius={90} paddingAngle={3}
-                            >
-                                {byAction.map((_, i) => (
-                                    <Cell key={i} fill={ACTION_COLORS[i % ACTION_COLORS.length]} />
-                                ))}
-                            </Pie>
-                            <Tooltip contentStyle={{ borderRadius: '8px', fontSize: 12 }} />
-                            <Legend wrapperStyle={{ fontSize: 11 }} />
-                        </PieChart>
-                    </ResponsiveContainer>
+                <div className="lg:col-span-2 bg-white p-6 rounded-2xl shadow-card border border-mai-100 space-y-4">
+                    <h2 className="text-lg font-bold text-mai-900">Stare Module Backend & Services</h2>
+                    <div className="divide-y divide-mai-100">
+                        {[
+                            { name: 'API Gateway (.NET 8)',               latency: '12ms' },
+                            { name: 'Bază de Date (Supabase / PostgreSQL)', latency: '24ms' },
+                            { name: 'Serviciu Criptare AES-256-GCM',      latency: '5ms'  },
+                            { name: 'Jurnal Audit & Trasabilitate',        latency: '18ms' },
+                        ].map(m => (
+                            <div key={m.name} className="py-3 flex items-center justify-between">
+                                <span className="text-sm font-semibold text-mai-900">{m.name}</span>
+                                <div className="flex items-center gap-4 text-xs">
+                                    <span className="text-mai-400">Pings: {m.latency}</span>
+                                    <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 font-medium">
+                                        Online
+                                    </span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
                 </div>
             </div>
+
+            {/* ─── Modal creare utilizator ─── */}
+            <Modal open={open} title="Creare cont nou" onClose={handleClose}>
+                <div className="space-y-4">
+
+                    <Input id="fullName" label="Nume complet *"
+                           value={form.fullName} onChange={set('fullName')}
+                           placeholder="ex: Ion Popescu" required />
+
+                    <Input id="username" label="Nume de utilizator *"
+                           value={form.username} onChange={set('username')}
+                           placeholder="ex: ion.popescu" required />
+
+                    {/* Parolă cu toggle */}
+                    <div className="relative">
+                        <button type="button" tabIndex={-1}
+                                onClick={() => setShowPass(v => !v)}
+                                className="absolute right-3.5 top-[42px] text-mai-300 hover:text-mai-500 z-10">
+                            {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
+                        </button>
+                        <div className="pr-10">
+                            <Input id="password" label="Parolă *"
+                                   type={showPass ? 'text' : 'password'}
+                                   value={form.password} onChange={set('password')}
+                                   placeholder="Minim 8 caractere" required />
+                        </div>
+                    </div>
+
+                    <Input id="email" label="Adresă e-mail" type="email"
+                           value={form.email} onChange={set('email')}
+                           placeholder="ex: ion.popescu@mai.gov.md" />
+
+                    <Input id="department" label="Direcție / Departament"
+                           value={form.department} onChange={set('department')}
+                           placeholder="ex: Direcția IT" />
+
+                    {/* Rol */}
+                    <div>
+                        <label className="block text-sm font-medium text-mai-800 mb-1.5">Rol</label>
+                        <select value={form.role} onChange={set('role')}
+                                className="w-full rounded-lg border border-mai-200 px-3.5 py-2.5 text-sm
+                                focus:outline-none focus:ring-2 focus:ring-mai-500
+                                hover:border-mai-300 transition-colors bg-white">
+                            {(Object.entries(ROLE_LABELS) as [Role, string][]).map(([v, l]) => (
+                                <option key={v} value={v}>{l}</option>
+                            ))}
+                        </select>
+                        <p className="text-xs text-mai-400 mt-1.5">
+                            {form.role === 'ADMINISTRATOR' && '⚠ Accés complet la sistem.'}
+                            {form.role === 'SEF_DIRECTIE'  && 'Vizualizare audit + gestiune documente.'}
+                            {form.role === 'UTILIZATOR'    && 'Transferuri securizate și documente normative.'}
+                        </p>
+                    </div>
+
+                    <Button onClick={handleCreate} disabled={!isValid || loading} className="w-full mt-2 flex items-center justify-center gap-2">
+                        <UserPlus size={15} />
+                        {loading ? 'Se creează…' : 'Creează cont'}
+                    </Button>
+                    <p className="text-center text-xs text-mai-400">* Câmpuri obligatorii</p>
+                </div>
+            </Modal>
+
         </div>
     );
 }

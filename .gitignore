@@ -66,3 +66,8 @@ obj/
 .vs/
 .idea/
 *.user
+
+# Secrete locale și configurații de mediu
+appsettings.Development.json
+appsettings.Production.json
+*.env

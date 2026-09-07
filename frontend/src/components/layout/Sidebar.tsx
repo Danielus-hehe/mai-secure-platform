@@ -6,26 +6,28 @@ import {
 import { useAuth } from '../../context/AuthContext';
 
 const NAV_MAIN = [
-    { to: '/',          label: 'Panou principal',       icon: LayoutDashboard, end: true },
-    { to: '/transfers', label: 'Transferuri securizate', icon: ArrowLeftRight  },
-    { to: '/documents', label: 'Documente normative',    icon: Landmark        },
+    // FIX: era to: '/' care redirecta la /login; acum merge corect la /dashboard
+    { to: '/dashboard',  label: 'Panou principal',        icon: LayoutDashboard, end: true },
+    { to: '/transfers',  label: 'Transferuri securizate',  icon: ArrowLeftRight   },
+    { to: '/documents',  label: 'Documente normative',     icon: Landmark         },
 ];
 
 const NAV_SEF = [
-    { to: '/audit',     label: 'Jurnal de audit',        icon: ScrollText      },
+    { to: '/audit',      label: 'Jurnal de audit',         icon: ScrollText       },
 ];
 
 const NAV_ADMIN = [
-    { to: '/users',     label: 'Gestiune utilizatori',   icon: Users           },
-    { to: '/admin',     label: 'Administrare & rapoarte', icon: ShieldCheck     },
+    { to: '/users',      label: 'Gestiune utilizatori',    icon: Users            },
+    { to: '/admin',      label: 'Administrare & rapoarte',  icon: ShieldCheck      },
 ];
 
 export default function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
     const { user } = useAuth();
+
+    // role este string normalizat din AuthContext ('ADMINISTRATOR', 'SEF_DIRECTIE', 'UTILIZATOR')
     const isAdmin = user?.role === 'ADMINISTRATOR';
     const isSef   = isAdmin || user?.role === 'SEF_DIRECTIE';
 
-    // hover:bg-white/15 — mult mai vizibil decât white/5
     const cls = ({ isActive }: { isActive: boolean }) =>
         `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
             isActive
