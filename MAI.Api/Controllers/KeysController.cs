@@ -1,8 +1,11 @@
-﻿using MAI.DataAccessLayer;
+﻿using MAI.Api.Security;
+using MAI.BusinessLogic.Interfaces;
+using MAI.DataAccessLayer;
 using MAI.Domain.Entities;
 using MAI.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -24,7 +27,13 @@ namespace MAI.Api.Controllers
     public class KeysController : ControllerBase
     {
         private readonly AppDbContext _context;
-        public KeysController(AppDbContext context) => _context = context;
+        private readonly IPasswordHasher _passwordHasher;
+
+        public KeysController(AppDbContext context, IPasswordHasher passwordHasher)
+        {
+            _context        = context;
+            _passwordHasher = passwordHasher;
+        }
 
         private Guid CurrentUserId =>
             Guid.Parse(HttpContext.User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
@@ -57,7 +66,45 @@ namespace MAI.Api.Controllers
                 wrapIv                  = user.KeyWrapIv,
                 suite                   = user.CryptoSuite,
                 keysCreatedAt           = user.KeysCreatedAt,
+                fingerprint             = Fingerprint(user.PublicKeyEncryption),
             });
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // POST api/Keys/verify-password — confirmă parola înainte de generare
+        // ─────────────────────────────────────────────────────────────────────
+        /// <summary>
+        /// Cheile private se încuie cu o cheie derivată din parola contului. Dacă
+        /// utilizatorul tastează greșit parola pe ecranul de generare, cheile se
+        /// încuie cu o parolă care nu există nicăieri, iar la următoarea
+        /// autentificare nu se mai pot descuia — pierdere permanentă și tăcută.
+        ///
+        /// Endpointul elimină exact acest scenariu. Nu returnează nimic în afara
+        /// unui bool și consumă din cota de rate limiting pentru operații cu
+        /// parole, ca să nu poată fi folosit ca oracol de forță brută de către un
+        /// token furat.
+        /// </summary>
+        [HttpPost("verify-password")]
+        [EnableRateLimiting(RateLimitPolicies.PasswordWrite)]
+        public async Task<IActionResult> VerifyPassword(
+            [FromBody] VerifyPasswordDto dto, CancellationToken ct)
+        {
+            if (string.IsNullOrEmpty(dto.Password))
+                return BadRequest(new { message = "Parola este obligatorie." });
+
+            var user = await _context.Users
+                .AsNoTracking()
+                .FirstOrDefaultAsync(u => u.Id == CurrentUserId, ct);
+
+            if (user is null)
+            {
+                // Consumă același timp de calcul ca o verificare reală.
+                await _passwordHasher.SimulateVerificationAsync(ct);
+                return Ok(new { valid = false });
+            }
+
+            var result = await _passwordHasher.VerifyPasswordAsync(dto.Password, user.PasswordHash, ct);
+            return Ok(new { valid = result != PasswordVerificationResult.Failed });
         }
 
         // ─────────────────────────────────────────────────────────────────────
@@ -130,6 +177,9 @@ namespace MAI.Api.Controllers
             {
                 return BadRequest(new { message = "Pachet de chei incomplet." });
             }
+
+            if (dto.KeyDerivationIterations < 100_000)
+                return BadRequest(new { message = "Numărul de iterații PBKDF2 este prea mic (minim 100.000)." });
 
             user.EncryptedPrivateBundle  = dto.EncryptedPrivateBundle;
             user.KeyDerivationSalt       = dto.KeyDerivationSalt;
@@ -311,5 +361,10 @@ namespace MAI.Api.Controllers
         public string KeyDerivationSalt { get; set; } = string.Empty;
         public int KeyDerivationIterations { get; set; }
         public string WrapIv { get; set; } = string.Empty;
+    }
+
+    public class VerifyPasswordDto
+    {
+        public string Password { get; set; } = string.Empty;
     }
 }

@@ -9,6 +9,12 @@
     <ItemGroup>
         <!-- Argon2id - implementare .NET pura, fara dependinte native -->
         <PackageReference Include="Konscious.Security.Cryptography.Argon2" Version="1.3.1" />
+
+        <!-- Client S3: acopera MinIO, Amazon S3, Cloudflare R2, Supabase Storage -->
+        <PackageReference Include="AWSSDK.S3" Version="3.7.*" />
+
+        <!-- ILogger in stratul de business, fara referinta la ASP.NET Core -->
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
     </ItemGroup>
 
     <ItemGroup>

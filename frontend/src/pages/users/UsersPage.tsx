@@ -1,18 +1,18 @@
-import { useState, useEffect, useCallback } from 'react';
-import { UserPlus, Power, KeyRound, Loader2 } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { UserPlus, Power, KeyRound, Loader2, Search, Unlock } from 'lucide-react';
 import PageHeader    from '../../components/ui/PageHeader';
 import Badge         from '../../components/ui/Badge';
 import Button        from '../../components/ui/Button';
 import Modal         from '../../components/ui/Modal';
 import Input         from '../../components/ui/Input';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
+import Pagination    from '../../components/ui/Pagination';
 import { ROLE_LABELS, ROLE_BADGE_CLASSES } from '../../utils/constants';
 import { formatDateTime } from '../../utils/format';
 import { useToast }  from '../../context/ToastContext';
-import { useAuth }   from '../../context/AuthContext';
+import api from '../../api/client';
+import { apiErrorMessage } from '../../api/errors';
 import type { Role, User } from '../../types';
-
-const API = 'http://localhost:5000';
 
 // Backend UserRole enum: Utilizator=1, SefDirectie=2, Administrator=3
 const ROLE_NUM: Record<number, Role> = {
@@ -31,10 +31,29 @@ interface ApiUser {
     id: string; fullName: string; username: string;
     email: string; role: number; department: string;
     isActive: boolean; createdAt: string;
+    isLockedOut: boolean; lockoutEndsAt: string | null;
+    lastLoginAt: string | null;
 }
 
+/** Forma reală a răspunsului: obiect paginat, nu array. */
+interface PagedUsers {
+    items: ApiUser[];
+    totalCount: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+    hasPrevious: boolean;
+    hasNext: boolean;
+}
+
+type AppUser = User & {
+    isLockedOut: boolean;
+    lockoutEndsAt: string | null;
+    lastLoginAt: string | null;
+};
+
 /** Convertim role numeric → string enum folosit de frontend */
-const toUser = (u: ApiUser): User => ({
+const toUser = (u: ApiUser): AppUser => ({
     ...u,
     role: ROLE_NUM[u.role] ?? 'UTILIZATOR',
 });
@@ -50,124 +69,146 @@ const EMPTY_FORM: CreateForm = {
 
 export default function UsersPage() {
     const toast = useToast();
-    const { user: me } = useAuth();
 
-    const [users,         setUsers]         = useState<User[]>([]);
+    const [users,         setUsers]         = useState<AppUser[]>([]);
+    const [total,         setTotal]         = useState(0);
+    const [totalPages,    setTotalPages]    = useState(0);
+    const [page,          setPage]          = useState(1);
+    const [pageSize,      setPageSize]      = useState(25);
+    const [searchInput,   setSearchInput]   = useState('');
+    const [search,        setSearch]        = useState('');
+
     const [loading,       setLoading]       = useState(true);
     const [createOpen,    setCreateOpen]    = useState(false);
     const [createLoading, setCreateLoading] = useState(false);
-    const [confirmTarget, setConfirmTarget] = useState<User | null>(null);
+    const [confirmTarget, setConfirmTarget] = useState<AppUser | null>(null);
     const [form, setForm] = useState<CreateForm>(EMPTY_FORM);
 
-    /** Headers comune pentru toate request-urile autentificate */
-    const hdrs = useCallback(
-        () => ({
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${me?.token ?? ''}`,
-        }),
-        [me?.token],
-    );
+    // Căutarea pleacă abia după ce utilizatorul se oprește din tastat.
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            setSearch(searchInput.trim());
+            setPage(1);
+        }, 350);
+        return () => window.clearTimeout(timer);
+    }, [searchInput]);
+
+    const abortRef = useRef<AbortController | null>(null);
 
     /* ── Citire utilizatori din DB ───────────────────────────────────── */
     const fetchUsers = useCallback(async () => {
+        abortRef.current?.abort();
+        const controller = new AbortController();
+        abortRef.current = controller;
+
         setLoading(true);
         try {
-            const res = await fetch(`${API}/api/Users`, { headers: hdrs() });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const data: ApiUser[] = await res.json();
-            setUsers(data.map(toUser));
-        } catch {
-            toast.error('Nu s-au putut încărca utilizatorii.');
-        } finally {
-            setLoading(false);
-        }
-    }, [hdrs, toast]);
+            // API-ul întoarce PagedResult<UserDto>, adică un OBIECT cu `items`.
+            // Codul vechi îl citea ca array și apela `.map` direct pe el, deci
+            // arunca TypeError și lista rămânea goală cu mesajul „Nu s-au putut
+            // încărca utilizatorii".
+            const { data } = await api.get<PagedUsers>('/Users', {
+                params: {
+                    search: search || undefined,
+                    page,
+                    pageSize,
+                },
+                signal: controller.signal,
+            });
 
-    useEffect(() => { fetchUsers(); }, [fetchUsers]);
+            setUsers((data.items ?? []).map(toUser));
+            setTotal(data.totalCount ?? 0);
+            setTotalPages(data.totalPages ?? 0);
+        } catch (e: unknown) {
+            if (controller.signal.aborted) return;
+            toast.error(apiErrorMessage(e, 'Nu s-au putut încărca utilizatorii.'));
+        } finally {
+            if (!controller.signal.aborted) setLoading(false);
+        }
+    }, [search, page, pageSize, toast]);
+
+    useEffect(() => {
+        void fetchUsers();
+        return () => abortRef.current?.abort();
+    }, [fetchUsers]);
 
     /* ── Creare utilizator nou ───────────────────────────────────────── */
     const handleCreate = async () => {
         if (!form.fullName || !form.username || !form.password) return;
         setCreateLoading(true);
         try {
-            const res = await fetch(`${API}/api/Users`, {
-                method: 'POST',
-                headers: hdrs(),
-                body: JSON.stringify({
-                    fullName:   form.fullName,
-                    username:   form.username,
-                    password:   form.password,
-                    email:      form.email,
-                    department: form.department,
-                    role:       ROLE_STR[form.role],
-                }),
+            await api.post('/Users', {
+                fullName:   form.fullName,
+                username:   form.username,
+                password:   form.password,
+                email:      form.email,
+                department: form.department,
+                role:       ROLE_STR[form.role],
             });
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
-                throw new Error(err.message);
-            }
+
             toast.success(`Contul @${form.username} a fost creat.`);
             setCreateOpen(false);
             setForm(EMPTY_FORM);
-            fetchUsers();
+            setPage(1);
+            void fetchUsers();
         } catch (e: unknown) {
-            toast.error(`Eroare: ${e instanceof Error ? e.message : 'Eroare necunoscută'}`);
+            toast.error(apiErrorMessage(e, 'Contul nu a putut fi creat.'));
         } finally {
             setCreateLoading(false);
         }
     };
 
     /* ── Schimbare rol ───────────────────────────────────────────────── */
-    const handleRoleChange = async (u: User, newRole: Role) => {
+    const handleRoleChange = async (u: AppUser, newRole: Role) => {
         try {
-            const res = await fetch(`${API}/api/Users/${u.id}/role`, {
-                method: 'PATCH',
-                headers: hdrs(),
-                body: JSON.stringify({ role: ROLE_STR[newRole] }),
-            });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            await api.patch(`/Users/${u.id}/role`, { role: ROLE_STR[newRole] });
             toast.info(`Rolul lui ${u.fullName} → ${ROLE_LABELS[newRole]}.`);
-            fetchUsers();
-        } catch {
-            toast.error('Eroare la schimbarea rolului.');
+            void fetchUsers();
+        } catch (e: unknown) {
+            toast.error(apiErrorMessage(e, 'Rolul nu a putut fi schimbat.'));
         }
     };
 
     /* ── Dezactivare / Activare ──────────────────────────────────────── */
-    const handleToggleActive = (u: User) => {
+    const handleToggleActive = (u: AppUser) => {
         if (u.isActive) {
             setConfirmTarget(u);           // cere confirmare
         } else {
-            activateUser(u);
+            void activateUser(u);
         }
     };
 
-    const activateUser = async (u: User) => {
+    const activateUser = async (u: AppUser) => {
         try {
-            const res = await fetch(`${API}/api/Users/${u.id}/activate`, {
-                method: 'PATCH', headers: hdrs(),
-            });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            await api.patch(`/Users/${u.id}/activate`);
             toast.info(`Contul ${u.fullName} a fost activat.`);
-            fetchUsers();
-        } catch {
-            toast.error('Eroare la activarea contului.');
+            void fetchUsers();
+        } catch (e: unknown) {
+            toast.error(apiErrorMessage(e, 'Contul nu a putut fi activat.'));
         }
     };
 
     const handleConfirmDeactivate = async () => {
         if (!confirmTarget) return;
         try {
-            const res = await fetch(`${API}/api/Users/${confirmTarget.id}/deactivate`, {
-                method: 'PATCH', headers: hdrs(),
-            });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            await api.patch(`/Users/${confirmTarget.id}/deactivate`);
             toast.warning(`Contul ${confirmTarget.fullName} a fost dezactivat.`);
-            fetchUsers();
-        } catch {
-            toast.error('Eroare la dezactivarea contului.');
+            void fetchUsers();
+        } catch (e: unknown) {
+            toast.error(apiErrorMessage(e, 'Contul nu a putut fi dezactivat.'));
         } finally {
             setConfirmTarget(null);
+        }
+    };
+
+    /* ── Deblocare cont după prea multe încercări eșuate ─────────────── */
+    const handleUnlock = async (u: AppUser) => {
+        try {
+            await api.post(`/Users/${u.id}/unlock`);
+            toast.success(`Contul @${u.username} a fost deblocat.`);
+            void fetchUsers();
+        } catch (e: unknown) {
+            toast.error(apiErrorMessage(e, 'Contul nu a putut fi deblocat.'));
         }
     };
 
@@ -185,6 +226,18 @@ export default function UsersPage() {
                 }
             />
 
+            {/* Căutare server-side */}
+            <div className="relative w-full max-w-md">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-mai-300" />
+                <input
+                    value={searchInput}
+                    onChange={e => setSearchInput(e.target.value)}
+                    placeholder="Caută după nume, utilizator, email sau direcție…"
+                    className="w-full rounded-lg border border-mai-200 py-2 pl-9 pr-3 text-sm
+                               focus:border-mai-500 focus:outline-none focus:ring-2 focus:ring-mai-500/20"
+                />
+            </div>
+
             <div className="bg-white rounded-xl shadow-card border border-mai-100/50 overflow-hidden">
 
                 {/* Loading */}
@@ -198,84 +251,112 @@ export default function UsersPage() {
                 {/* Gol */}
                 {!loading && users.length === 0 && (
                     <div className="text-center py-16 text-mai-400 text-sm">
-                        Niciun utilizator găsit în baza de date.
+                        {search
+                            ? 'Niciun utilizator nu corespunde căutării.'
+                            : 'Niciun utilizator găsit în baza de date.'}
                     </div>
                 )}
 
                 {/* Tabelul */}
                 {!loading && users.length > 0 && (
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
-                            <thead>
-                            <tr className="bg-mai-50 text-left text-xs uppercase tracking-wide text-mai-500">
-                                <th className="px-5 py-3 font-semibold">Utilizator</th>
-                                <th className="px-5 py-3 font-semibold">Direcție</th>
-                                <th className="px-5 py-3 font-semibold">Rol</th>
-                                <th className="px-5 py-3 font-semibold">Creat la</th>
-                                <th className="px-5 py-3 font-semibold">Status</th>
-                                <th className="px-5 py-3 font-semibold text-right">Acțiuni</th>
-                            </tr>
-                            </thead>
-                            <tbody className="divide-y divide-mai-50">
-                            {users.map(u => (
-                                <tr key={u.id} className="hover:bg-mai-100/60 transition-colors">
-
-                                    <td className="px-5 py-3.5">
-                                        <p className="font-medium text-mai-900">{u.fullName || u.username}</p>
-                                        <p className="text-xs text-mai-400">@{u.username}</p>
-                                    </td>
-
-                                    <td className="px-5 py-3.5 text-mai-500 whitespace-nowrap">
-                                        {u.department || '—'}
-                                    </td>
-
-                                    {/* Dropdown rol — schimbă direct în DB */}
-                                    <td className="px-5 py-3.5">
-                                        <select
-                                            value={u.role}
-                                            onChange={e => handleRoleChange(u, e.target.value as Role)}
-                                            className={`rounded-full px-2.5 py-1 text-[11px] font-semibold
-                                                    border-0 cursor-pointer focus:outline-none focus:ring-2
-                                                    focus:ring-mai-500 transition-opacity hover:opacity-80
-                                                    ${ROLE_BADGE_CLASSES[u.role]}`}
-                                        >
-                                            {(Object.entries(ROLE_LABELS) as [Role, string][]).map(([v, l]) => (
-                                                <option key={v} value={v}>{l}</option>
-                                            ))}
-                                        </select>
-                                    </td>
-
-                                    <td className="px-5 py-3.5 text-xs text-mai-400 whitespace-nowrap">
-                                        {formatDateTime(u.createdAt)}
-                                    </td>
-
-                                    <td className="px-5 py-3.5">
-                                        <Badge tone={u.isActive ? 'green' : 'gray'}>
-                                            {u.isActive ? 'Activ' : 'Dezactivat'}
-                                        </Badge>
-                                    </td>
-
-                                    <td className="px-5 py-3.5 text-right whitespace-nowrap space-x-1">
-                                        <Button variant="ghost" className="px-2 py-1.5"
-                                                title="Resetează parola"
-                                                onClick={() => toast.info(`Link de resetare trimis la ${u.email || u.username}.`)}>
-                                            <KeyRound size={14} />
-                                        </Button>
-                                        <Button
-                                            variant={u.isActive ? 'danger' : 'secondary'}
-                                            className="px-2.5 py-1.5"
-                                            onClick={() => handleToggleActive(u)}
-                                        >
-                                            <Power size={13} />
-                                            {u.isActive ? 'Dezactivează' : 'Activează'}
-                                        </Button>
-                                    </td>
-
+                    <>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <thead>
+                                <tr className="bg-mai-50 text-left text-xs uppercase tracking-wide text-mai-500">
+                                    <th className="px-5 py-3 font-semibold">Utilizator</th>
+                                    <th className="px-5 py-3 font-semibold">Direcție</th>
+                                    <th className="px-5 py-3 font-semibold">Rol</th>
+                                    <th className="px-5 py-3 font-semibold">Creat la</th>
+                                    <th className="px-5 py-3 font-semibold">Status</th>
+                                    <th className="px-5 py-3 font-semibold text-right">Acțiuni</th>
                                 </tr>
-                            ))}
-                            </tbody>
-                        </table>
-                    </div>
+                                </thead>
+                                <tbody className="divide-y divide-mai-50">
+                                {users.map(u => (
+                                    <tr key={u.id} className="hover:bg-mai-100/60 transition-colors">
+
+                                        <td className="px-5 py-3.5">
+                                            <p className="font-medium text-mai-900">{u.fullName || u.username}</p>
+                                            <p className="text-xs text-mai-400">@{u.username}</p>
+                                        </td>
+
+                                        <td className="px-5 py-3.5 text-mai-500 whitespace-nowrap">
+                                            {u.department || '—'}
+                                        </td>
+
+                                        {/* Dropdown rol — schimbă direct în DB */}
+                                        <td className="px-5 py-3.5">
+                                            <select
+                                                value={u.role}
+                                                onChange={e => void handleRoleChange(u, e.target.value as Role)}
+                                                className={`rounded-full px-2.5 py-1 text-[11px] font-semibold
+                                                        border-0 cursor-pointer focus:outline-none focus:ring-2
+                                                        focus:ring-mai-500 transition-opacity hover:opacity-80
+                                                        ${ROLE_BADGE_CLASSES[u.role]}`}
+                                            >
+                                                {(Object.entries(ROLE_LABELS) as [Role, string][]).map(([v, l]) => (
+                                                    <option key={v} value={v}>{l}</option>
+                                                ))}
+                                            </select>
+                                        </td>
+
+                                        <td className="px-5 py-3.5 text-xs text-mai-400 whitespace-nowrap">
+                                            {formatDateTime(u.createdAt)}
+                                        </td>
+
+                                        <td className="px-5 py-3.5">
+                                            <div className="flex flex-col gap-1">
+                                                <Badge tone={u.isActive ? 'green' : 'gray'}>
+                                                    {u.isActive ? 'Activ' : 'Dezactivat'}
+                                                </Badge>
+                                                {u.isLockedOut && (
+                                                    <Badge tone="red">Blocat</Badge>
+                                                )}
+                                            </div>
+                                        </td>
+
+                                        <td className="px-5 py-3.5 text-right whitespace-nowrap space-x-1">
+                                            {u.isLockedOut && (
+                                                <Button variant="secondary" className="px-2 py-1.5"
+                                                        title="Deblochează contul"
+                                                        onClick={() => void handleUnlock(u)}>
+                                                    <Unlock size={14} />
+                                                </Button>
+                                            )}
+                                            <Button variant="ghost" className="px-2 py-1.5"
+                                                    title="Resetare parolă (din contul de administrator)"
+                                                    onClick={() => toast.info(
+                                                        `Resetarea parolei pentru @${u.username} se face din secțiunea de administrare.`
+                                                    )}>
+                                                <KeyRound size={14} />
+                                            </Button>
+                                            <Button
+                                                variant={u.isActive ? 'danger' : 'secondary'}
+                                                className="px-2.5 py-1.5"
+                                                onClick={() => handleToggleActive(u)}
+                                            >
+                                                <Power size={13} />
+                                                {u.isActive ? 'Dezactivează' : 'Activează'}
+                                            </Button>
+                                        </td>
+
+                                    </tr>
+                                ))}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <Pagination
+                            page={page}
+                            pageSize={pageSize}
+                            totalCount={total}
+                            totalPages={totalPages}
+                            onPageChange={setPage}
+                            onPageSizeChange={size => { setPageSize(size); setPage(1); }}
+                            itemLabel="utilizatori"
+                        />
+                    </>
                 )}
             </div>
 
@@ -296,7 +377,7 @@ export default function UsersPage() {
                     <Input id="password" label="Parolă *" type="password"
                            value={form.password}
                            onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-                           placeholder="Minim 8 caractere" required />
+                           placeholder="Minim 12 caractere, cu majusculă, cifră și simbol" required />
 
                     <Input id="email" label="Adresă e-mail" type="email"
                            value={form.email}
@@ -323,8 +404,16 @@ export default function UsersPage() {
                         </select>
                     </div>
 
+                    <div className="rounded-lg bg-mai-50 border border-mai-100 px-3.5 py-2.5">
+                        <p className="text-xs leading-relaxed text-mai-500">
+                            Contul nou nu are chei criptografice. Ele se generează automat la prima
+                            autentificare a utilizatorului. Până atunci, nu i se pot trimite fișiere
+                            criptate și nu apare în lista de destinatari.
+                        </p>
+                    </div>
+
                     <Button
-                        onClick={handleCreate}
+                        onClick={() => void handleCreate()}
                         disabled={!form.fullName || !form.username || !form.password || createLoading}
                         className="w-full flex items-center justify-center gap-2"
                     >
@@ -341,7 +430,7 @@ export default function UsersPage() {
                 message={`Ești sigur că vrei să dezactivezi contul lui ${confirmTarget?.fullName}? Utilizatorul nu va mai putea accesa sistemul.`}
                 confirmLabel="Dezactivează"
                 variant="danger"
-                onConfirm={handleConfirmDeactivate}
+                onConfirm={() => void handleConfirmDeactivate()}
                 onCancel={() => setConfirmTarget(null)}
             />
 

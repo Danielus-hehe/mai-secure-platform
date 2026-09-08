@@ -5,8 +5,7 @@ import StatCard   from '../../components/ui/StatCard';
 import Badge      from '../../components/ui/Badge';
 import { useAuth }  from '../../context/AuthContext';
 import { formatDateTime, formatFileSize } from '../../utils/format';
-
-const API = 'http://localhost:5000';
+import api from '../../api/client';
 
 // Backend TransferStatus.ToString(): "Pending" | "Downloaded" | "Expired"
 const STATUS_LABEL: Record<string, string> = {
@@ -47,11 +46,11 @@ export default function DashboardPage() {
     const fetchStats = useCallback(async () => {
         setLoading(true);
         try {
-            const res = await fetch(`${API}/api/Stats`, {
-                headers: { Authorization: `Bearer ${user?.token ?? ''}` },
-            });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            setStats(await res.json());
+            // Prin clientul `api`: tokenul se ataseaza si se reimprospateaza
+            // automat. Varianta veche citea user.token, care nu mai exista pe
+            // obiectul User, deci trimitea mereu "Bearer undefined".
+            const { data } = await api.get<Stats>('/Stats');
+            setStats(data);
         } catch {
             // Dacă API-ul nu e disponibil, afișăm zerouri
             setStats({
@@ -61,12 +60,9 @@ export default function DashboardPage() {
         } finally {
             setLoading(false);
         }
-    }, [user?.token]);
+    }, []);
 
     useEffect(() => { fetchStats(); }, [fetchStats]);
-
-    const initials = (user?.fullName ?? user?.username ?? '')
-        .split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2) || '?';
 
     return (
         <div className="space-y-6">

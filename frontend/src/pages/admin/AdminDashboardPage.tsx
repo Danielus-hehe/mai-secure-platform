@@ -7,12 +7,11 @@ import PageHeader from '../../components/ui/PageHeader';
 import Button     from '../../components/ui/Button';
 import Modal      from '../../components/ui/Modal';
 import Input      from '../../components/ui/Input';
-import { useAuth }  from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { ROLE_LABELS } from '../../utils/constants';
 import type { Role } from '../../types';
-
-const API_URL = 'http://localhost:5000';
+import api from '../../api/client';
+import { apiErrorMessage } from '../../api/errors';
 
 // UserRole enum backend: Utilizator=1, SefDirectie=2, Administrator=3
 const ROLE_TO_NUM: Record<Role, number> = {
@@ -31,8 +30,7 @@ const EMPTY: CreateForm = {
 };
 
 export default function AdminDashboardPage() {
-    const { user }  = useAuth();
-    const toast     = useToast();
+    const toast = useToast();
 
     const [open, setOpen]       = useState(false);
     const [loading, setLoading] = useState(false);
@@ -49,31 +47,19 @@ export default function AdminDashboardPage() {
         if (!form.fullName || !form.username || !form.password) return;
         setLoading(true);
         try {
-            const res = await fetch(`${API_URL}/api/Users`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${user?.token ?? ''}`,
-                },
-                body: JSON.stringify({
-                    fullName:   form.fullName,
-                    username:   form.username,
-                    password:   form.password,
-                    email:      form.email,
-                    department: form.department,
-                    role:       ROLE_TO_NUM[form.role],
-                }),
+            await api.post('/Users', {
+                fullName:   form.fullName,
+                username:   form.username,
+                password:   form.password,
+                email:      form.email,
+                department: form.department,
+                role:       ROLE_TO_NUM[form.role],
             });
-
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
-                throw new Error(err.message ?? `HTTP ${res.status}`);
-            }
 
             toast.success(`Contul @${form.username} (${ROLE_LABELS[form.role]}) creat cu succes.`);
             handleClose();
         } catch (e: unknown) {
-            toast.error(`Eroare: ${e instanceof Error ? e.message : 'Eroare necunoscută'}`);
+            toast.error(apiErrorMessage(e, 'Contul nu a putut fi creat.'));
         } finally {
             setLoading(false);
         }

@@ -1,0 +1,121 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# SGDM — infrastructura locala de stocare
+#
+# Ridica un MinIO auto-gazduit (S3-compatible) in care API-ul .NET pune
+# cifrotextul transferurilor. Serverul nu poate citi continutul: fisierele
+# ajung aici deja criptate AES-256-GCM in browser, iar cheia de fisier e
+# impachetata RSA-OAEP pentru destinatar. MinIO vede doar octeti opaci.
+#
+# Pornire:   docker compose up -d
+# Oprire:    docker compose down          (datele raman in volum)
+# Stergere:  docker compose down -v       (STERGE si datele!)
+# Consola:   http://localhost:9001
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  minio:
+    # Pentru demonstratie/practica 'latest' e in regula. In productie se
+    # pineaza o versiune exacta (ex. minio/minio:RELEASE.2025-04-22T22-12-26Z)
+    # ca un update automat sa nu schimbe comportamentul sub picioarele tale.
+    image: minio/minio:latest
+    container_name: sgdm-minio
+    restart: unless-stopped
+
+    # server /data   → unde tine obiectele
+    # --console-address → portul interfetei web de administrare
+    command: server /data --console-address ":9001"
+
+    environment:
+      # Credentialele de administrator ale MinIO. In .env, NU aici.
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+
+      # Browserul descarca cifrotextul direct de la MinIO (URL presemnat),
+      # deci originea frontend-ului trebuie permisa explicit. In productie
+      # se pune doar domeniul real al aplicatiei, nu '*'.
+      MINIO_API_CORS_ALLOW_ORIGIN: "http://localhost:5173,http://localhost:3000"
+
+      # Regiunea nu conteaza functional la MinIO, dar SDK-ul AWS o cere.
+      MINIO_REGION_NAME: us-east-1
+
+    ports:
+      - "9000:9000"   # API S3 — aici vorbeste .NET si browserul
+      - "9001:9001"   # Consola web de administrare
+
+    volumes:
+      - minio-data:/data
+
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Container efemer: creeaza bucketul si politica de retentie, apoi iese.
+  # Ruleaza la fiecare 'up', dar operatiile sunt idempotente.
+  # ───────────────────────────────────────────────────────────────────────────
+  minio-init:
+    image: minio/mc:latest
+    container_name: sgdm-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      SGDM_BUCKET: ${STORAGE_BUCKET:-sgdm-transfers}
+    entrypoint: >
+      /bin/sh -c "
+      set -e;
+      mc alias set local http://minio:9000 \"$$MINIO_ROOT_USER\" \"$$MINIO_ROOT_PASSWORD\";
+
+      mc mb --ignore-existing local/$$SGDM_BUCKET;
+
+      echo '→ bucket privat (fara acces anonim)';
+      mc anonymous set none local/$$SGDM_BUCKET;
+
+      echo '→ versionare activata: o suprascriere accidentala nu distruge obiectul';
+      mc version enable local/$$SGDM_BUCKET;
+
+      echo '→ retentie: obiectele se sterg automat dupa 30 de zile';
+      mc ilm rule add --expire-days 30 local/$$SGDM_BUCKET || true;
+
+      echo '';
+      echo '=== MinIO pregatit ===';
+      mc ls local;
+      "
+
+volumes:
+  minio-data:
+    driver: local
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OPTIONAL — PostgreSQL local, daca vrei sa demonstrezi ca NIMIC nu iese din
+# intranet (fara Supabase). Decomenteaza si schimba connection string-ul din
+# appsettings.json in:
+#   Host=localhost;Port=5432;Database=sgdm;Username=sgdm;Password=...
+#
+#  postgres:
+#    image: postgres:16-alpine
+#    container_name: sgdm-postgres
+#    restart: unless-stopped
+#    environment:
+#      POSTGRES_DB: sgdm
+#      POSTGRES_USER: sgdm
+#      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+#    ports:
+#      - "5432:5432"
+#    volumes:
+#      - pg-data:/var/lib/postgresql/data
+#    healthcheck:
+#      test: ["CMD-SHELL", "pg_isready -U sgdm"]
+#      interval: 10s
+#      timeout: 5s
+#      retries: 10
+#
+# si adauga in sectiunea volumes:
+#  pg-data:
+# ─────────────────────────────────────────────────────────────────────────────

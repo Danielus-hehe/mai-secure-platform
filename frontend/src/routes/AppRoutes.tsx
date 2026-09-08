@@ -9,6 +9,7 @@ import UsersPage          from '../pages/users/UsersPage';
 import AdminDashboardPage from '../pages/admin/AdminDashboardPage';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { AppLayout }      from '../components/layout/AppLayout';
+import KeysGate           from '../components/keys/KeysGate';
 
 // UserRole enum backend: Utilizator=1, SefDirectie=2, Administrator=3
 
@@ -22,23 +23,32 @@ export function AppRoutes() {
             <Route element={<ProtectedRoute />}>
                 <Route element={<AppLayout />}>
 
-                    {/* Rute accesibile oricărui utilizator autentificat */}
-                    <Route path="/dashboard" element={<DashboardPage />} />
-                    <Route path="/transfers" element={<TransfersPage />} />
-                    <Route path="/documents" element={<DocumentsPage />} />
-                    <Route path="/profile"   element={<ProfilePage />} />
+                    {/*
+                      Poarta criptografică: nicio pagină nu se randează până când
+                      cheile private nu sunt descuiate în fila curentă. Este pusă
+                      INTERIOR față de AppLayout ca utilizatorul să vadă în
+                      continuare meniul și butonul de deconectare.
+                    */}
+                    <Route element={<KeysGate />}>
 
-                    {/* Supervizare: SefDirectie(2) + Administrator(3) */}
-                    <Route element={<ProtectedRoute allowedRoles={[2, 3]} />}>
-                        <Route path="/audit" element={<AuditPage />} />
+                        {/* Rute accesibile oricărui utilizator autentificat */}
+                        <Route path="/dashboard" element={<DashboardPage />} />
+                        <Route path="/transfers" element={<TransfersPage />} />
+                        <Route path="/documents" element={<DocumentsPage />} />
+                        <Route path="/profile"   element={<ProfilePage />} />
+
+                        {/* Supervizare: SefDirectie(2) + Administrator(3) */}
+                        <Route element={<ProtectedRoute allowedRoles={[2, 3]} />}>
+                            <Route path="/audit" element={<AuditPage />} />
+                        </Route>
+
+                        {/* Administrare: exclusiv Administrator(3) */}
+                        <Route element={<ProtectedRoute allowedRoles={[3]} />}>
+                            <Route path="/users" element={<UsersPage />} />
+                            <Route path="/admin" element={<AdminDashboardPage />} />
+                        </Route>
+
                     </Route>
-
-                    {/* Administrare: exclusiv Administrator(3) */}
-                    <Route element={<ProtectedRoute allowedRoles={[3]} />}>
-                        <Route path="/users" element={<UsersPage />} />
-                        <Route path="/admin" element={<AdminDashboardPage />} />
-                    </Route>
-
                 </Route>
             </Route>
 

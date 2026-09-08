@@ -12,8 +12,8 @@ import { useAuth }  from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { formatDateTime } from '../../utils/format';
 import type { DocCategory } from '../../types';
-
-const API = 'http://localhost:5000';
+import api from '../../api/client';
+import { apiErrorMessage } from '../../api/errors';
 
 const CATEGORY_LABELS: Record<DocCategory, string> = {
     ORDIN:      'Ordin intern',
@@ -52,7 +52,7 @@ interface Doc {
 }
 
 export default function DocumentsPage() {
-    const { user, hasRole } = useAuth();
+    const { hasRole } = useAuth();
     const toast = useToast();
 
     const [docs,         setDocs]         = useState<Doc[]>([]);
@@ -75,24 +75,23 @@ export default function DocumentsPage() {
 
     const canPublish = hasRole('SEF_DIRECTIE');
 
-    const hdrs = useCallback(() => ({
-        Authorization: `Bearer ${user?.token ?? ''}`,
-    }), [user?.token]);
-
     // ── Citire documente ─────────────────────────────────────────────────
+    // Toate apelurile trec prin clientul `api`, care ataseaza tokenul si il
+    // reimprospateaza singur. Varianta veche construia antetul din user.token,
+    // camp care nu mai exista pe obiectul User de la migrarea la refresh tokens.
     const fetchDocs = useCallback(async (search?: string) => {
         setLoading(true);
         try {
-            const params = search ? `?search=${encodeURIComponent(search)}` : '';
-            const res = await fetch(`${API}/api/Documents${params}`, { headers: hdrs() });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            setDocs(await res.json());
+            const { data } = await api.get<Doc[]>('/Documents', {
+                params: search ? { search } : undefined,
+            });
+            setDocs(data);
         } catch {
             toast.error('Nu s-au putut încărca documentele.');
         } finally {
             setLoading(false);
         }
-    }, [hdrs, toast]);
+    }, [toast]);
 
     useEffect(() => { fetchDocs(); }, [fetchDocs]);
 
@@ -119,21 +118,14 @@ export default function DocumentsPage() {
             fd.append('keywords', keywords);
             fd.append('file',     docFile);
 
-            const res = await fetch(`${API}/api/Documents`, {
-                method: 'POST',
-                headers: hdrs(),
-                body: fd,
-            });
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
-                throw new Error(err.message);
-            }
+            await api.post('/Documents', fd);
+
             toast.success(`Documentul „${title}" a fost publicat cu succes.`);
             setPublishOpen(false);
             setTitle(''); setNumber(''); setKeywords(''); setDocFile(null); setCategory('ORDIN');
             fetchDocs();
         } catch (e: unknown) {
-            toast.error(`Eroare: ${e instanceof Error ? e.message : 'Eroare necunoscută'}`);
+            toast.error(apiErrorMessage(e, 'Documentul nu a putut fi publicat.'));
         } finally {
             setPublishing(false);
         }
@@ -148,20 +140,13 @@ export default function DocumentsPage() {
             fd.append('file',        updateFile);
             fd.append('changeNotes', changeNote);
 
-            const res = await fetch(`${API}/api/Documents/${updateTarget}/versions`, {
-                method: 'POST',
-                headers: hdrs(),
-                body: fd,
-            });
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
-                throw new Error(err.message);
-            }
+            await api.post(`/Documents/${updateTarget}/versions`, fd);
+
             toast.info('Versiune nouă publicată — versiunea anterioară a fost arhivată.');
             setUpdateTarget(null); setUpdateFile(null); setChangeNote('');
             fetchDocs();
         } catch (e: unknown) {
-            toast.error(`Eroare: ${e instanceof Error ? e.message : 'Eroare necunoscută'}`);
+            toast.error(apiErrorMessage(e, 'Versiunea nouă nu a putut fi publicată.'));
         } finally {
             setUpdating(false);
         }
@@ -170,10 +155,11 @@ export default function DocumentsPage() {
     // ── Descărcare versiune curentă ──────────────────────────────────────
     const handleDownload = async (doc: Doc) => {
         try {
-            const res = await fetch(`${API}/api/Documents/${doc.id}/download`, { headers: hdrs() });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const blob = await res.blob();
-            const url  = URL.createObjectURL(blob);
+            const { data: blob } = await api.get<Blob>(`/Documents/${doc.id}/download`, {
+                responseType: 'blob',
+                timeout: 300_000,
+            });
+            const url = URL.createObjectURL(blob);
             const a    = document.createElement('a');
             a.href = url; a.download = doc.title;
             a.click();
