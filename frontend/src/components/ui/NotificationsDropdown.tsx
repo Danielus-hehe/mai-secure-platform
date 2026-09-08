@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Bell, FileDown, Check } from 'lucide-react';
-import { useAuth }  from '../../context/AuthContext';
+import { useAuth } from '../../context/AuthContext';
 import { formatDateTime, formatFileSize } from '../../utils/format';
-
-const API = 'http://localhost:5000';
+import api from '../../api/client';
 
 interface Notif {
     id:         string;
@@ -14,27 +13,41 @@ interface Notif {
     status:     string;
 }
 
+interface PagedTransfers {
+    items: (Notif & { isMine: boolean })[];
+    totalCount: number;
+}
+
 export default function NotificationsDropdown() {
-    const { user } = useAuth();
+    const { isAuthenticated } = useAuth();
     const [open,     setOpen]     = useState(false);
     const [notifs,   setNotifs]   = useState<Notif[]>([]);
     const [readIds,  setReadIds]  = useState<Set<string>>(new Set());
     const ref = useRef<HTMLDivElement>(null);
 
     const fetchPending = useCallback(async () => {
-        if (!user?.token) return;
+        if (!isAuthenticated) return;
         try {
-            const res = await fetch(`${API}/api/Transfers`, {
-                headers: { Authorization: `Bearer ${user.token}` },
+            // Filtrarea se face pe server, nu in browser: cerem direct
+            // transferurile PRIMITE si in asteptare, primele 10. Varianta veche
+            // aducea toate transferurile si le filtra local, iar de la migrarea
+            // la raspuns paginat primea un obiect acolo unde astepta un array,
+            // deci `all.filter` arunca TypeError si dropdown-ul ramanea gol.
+            const { data } = await api.get<PagedTransfers>('/Transfers', {
+                params: {
+                    direction: 'received',
+                    status: 'Pending',
+                    page: 1,
+                    pageSize: 10,
+                },
             });
-            if (!res.ok) return;
-            const all: (Notif & { isMine: boolean })[] = await res.json();
-            // Afișăm doar fișierele PRIMITE care sunt în așteptare
-            setNotifs(all.filter(t => !t.isMine && t.status === 'Pending'));
-        } catch { /* silently fail */ }
-    }, [user?.token]);
+            setNotifs(data.items ?? []);
+        } catch {
+            // Esec silentios: o notificare lipsa nu merita un toast de eroare.
+        }
+    }, [isAuthenticated]);
 
-    useEffect(() => { fetchPending(); }, [fetchPending]);
+    useEffect(() => { void fetchPending(); }, [fetchPending]);
 
     // Închide dropdown-ul când se dă click în afara lui
     useEffect(() => {

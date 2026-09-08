@@ -2,8 +2,10 @@
 using MAI.BusinessLogic.Interfaces;
 using MAI.BusinessLogic.Security;
 using MAI.BusinessLogic.Services;
+using MAI.BusinessLogic.Storage;
 using MAI.DataAccessLayer;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.EntityFrameworkCore;
@@ -62,10 +64,46 @@ builder.Services.AddSwaggerGen(options =>
     });
 });
 
-// ─── Kestrel — 50 MB pentru upload fișiere ────────────────────────────────
+// ─── Stocarea fișierelor ───────────────────────────────────────────────────
+// Provider configurabil: MinIO/S3 în producție, filesystem local în dezvoltare.
+// Restul aplicației vede doar IFileStorage și nu știe care rulează.
+
+var storageOptions = new StorageOptions();
+builder.Configuration.GetSection("Storage").Bind(storageOptions);
+
+// Credențialele preferabil din variabile de mediu, nu din fișierul de configurare
+// care ajunge în Git.
+var storageAccessKey = Environment.GetEnvironmentVariable("MAI_STORAGE_ACCESS_KEY");
+var storageSecretKey = Environment.GetEnvironmentVariable("MAI_STORAGE_SECRET_KEY");
+if (!string.IsNullOrWhiteSpace(storageAccessKey)) storageOptions.AccessKey = storageAccessKey;
+if (!string.IsNullOrWhiteSpace(storageSecretKey)) storageOptions.SecretKey = storageSecretKey;
+
+storageOptions.Validate();
+builder.Services.AddSingleton(storageOptions);
+
+if (storageOptions.IsS3)
+    builder.Services.AddSingleton<IFileStorage, S3FileStorage>();
+else
+    builder.Services.AddSingleton<IFileStorage, LocalFileStorage>();
+
+// ─── Kestrel și multipart — limita de upload ───────────────────────────────
+// Cele două limite trebuie ținute sincron cu Storage:MaxFileSizeMb și cu
+// atributul [RequestSizeLimit] de pe endpointul de upload. Dacă diverg,
+// utilizatorul primește o eroare de rețea opacă în loc de un mesaj clar.
+
 builder.Services.Configure<KestrelServerOptions>(options =>
 {
-    options.Limits.MaxRequestBodySize = 52_428_800;
+    options.Limits.MaxRequestBodySize = storageOptions.MaxFileSizeBytes + 1_048_576; // +1 MB antet multipart
+});
+
+builder.Services.Configure<FormOptions>(options =>
+{
+    options.MultipartBodyLengthLimit = storageOptions.MaxFileSizeBytes + 1_048_576;
+
+    // Peste acest prag, ASP.NET bufferizează corpul pe disc, nu în memorie.
+    // Valoarea implicită (64 KB) e deja bună; o fixăm explicit ca să nu se
+    // schimbe pe tăcute la un upgrade.
+    options.MemoryBufferThreshold = 65_536;
 });
 
 // ─── Argon2id: profile de cost + limită de concurență ─────────────────────
@@ -158,6 +196,12 @@ app.Logger.LogInformation(
     argon2Options.PrivilegedProfile,
     argon2Options.MaxConcurrentHashes,
     argon2Options.EstimatedPeakMemoryMib);
+
+app.Logger.LogInformation(
+    "Stocare fisiere: {Provider}, limita {Limit} MB, URL presemnat {Presigned}",
+    app.Services.GetRequiredService<IFileStorage>().ProviderName,
+    storageOptions.MaxFileSizeMb,
+    storageOptions.UsePresignedDownload ? "activat" : "dezactivat");
 
 if (app.Environment.IsDevelopment())
 {

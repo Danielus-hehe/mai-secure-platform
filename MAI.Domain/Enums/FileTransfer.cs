@@ -11,18 +11,53 @@ namespace MAI.Domain.Entities
         public Guid RecipientId { get; set; }
         public User? Recipient { get; set; }
 
+        /// <summary>
+        /// Numele original al fișierului.
+        ///
+        /// LIMITARE conștientă, de menționat în raport: numele NU este criptat.
+        /// Serverul îl vede, pentru că listele și căutarea server-side au nevoie
+        /// de el. Într-o variantă strictă ar intra și el în plicul criptografic,
+        /// iar listele ar afișa nume decriptate în browser — cu prețul pierderii
+        /// căutării în baza de date.
+        /// </summary>
         public string FileName { get; set; } = string.Empty;
-        public string EncryptedStoragePath { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Cheia obiectului în depozit, ex. "transfers/2026/09/{guid}.enc".
+        ///
+        /// Cheie, NU cale de sistem. Coloana veche EncryptedStoragePath conținea
+        /// o cale absolută, care era pasată direct la File.ReadAllBytes: orice
+        /// bug care ar fi permis scrierea coloanei devenea citire arbitrară de
+        /// fișiere de pe server.
+        /// </summary>
+        public string StorageKey { get; set; } = string.Empty;
 
         /// <summary>Dimensiunea conținutului în clar, raportată de client (informativă).</summary>
         public long FileSize { get; set; }
 
-        /// <summary>SHA-256 al CIFROTEXTULUI. Detectează coruperea la stocare sau transport.</summary>
+        /// <summary>Dimensiunea reală a cifrotextului stocat. Cu ea se face contabilitatea.</summary>
+        public long CiphertextSize { get; set; }
+
+        /// <summary>
+        /// SHA-256 (hex) al CIFROTEXTULUI, calculat de client înainte de upload
+        /// și recalculat de server în timpul scrierii. Detectează coruperea la
+        /// transport sau la stocare.
+        ///
+        /// Este o proprietate diferită de semnătură: aici verificăm că octeții
+        /// stocați sunt cei primiți; semnătura dovedește cine i-a produs.
+        /// </summary>
         public string ChecksumSHA256 { get; set; } = string.Empty;
 
         public TransferStatus Status { get; set; } = TransferStatus.Pending;
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime? DownloadedAt { get; set; }
+
+        /// <summary>
+        /// După acest moment transferul nu mai poate fi descărcat, iar obiectul
+        /// din depozit se șterge (lifecycle policy pe bucket). Reduce fereastra
+        /// în care un document sensibil stă degeaba pe server.
+        /// </summary>
+        public DateTime? ExpiresAt { get; set; }
 
         // ── Plicul criptografic ──────────────────────────────────────────────
         // Serverul stochează aceste valori dar nu le poate folosi: cheile de fișier
@@ -53,5 +88,15 @@ namespace MAI.Domain.Entities
 
         /// <summary>False pentru transferurile vechi, necriptate, dinainte de migrare.</summary>
         public bool IsEncrypted { get; set; }
+
+        // ── Legacy ───────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Calea absolută folosită de implementarea veche, pe filesystem. Rămâne
+        /// în model doar ca transferurile create înainte de migrare să nu devină
+        /// invizibile. Cod nou NU scrie aici niciodată.
+        /// </summary>
+        [Obsolete("Folosește StorageKey. Coloana rămâne doar pentru transferurile dinaintea migrării.")]
+        public string? EncryptedStoragePath { get; set; }
     }
 }
