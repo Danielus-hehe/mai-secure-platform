@@ -1,4 +1,6 @@
-﻿using MAI.Api.Security;
+﻿using MAI.Api.BackgroundJobs;
+using MAI.Api.Middleware;
+using MAI.Api.Security;
 using MAI.BusinessLogic.Interfaces;
 using MAI.BusinessLogic.Security;
 using MAI.BusinessLogic.Services;
@@ -119,6 +121,16 @@ if (argon2Options.Pepper == "YOUR_ARGON2_PEPPER_HERE")
 
 argon2Options.Validate();
 
+// Acceptarea parolelor în clar are sens doar cât timp mai există conturi
+// nemigrate, adică în dezvoltare. În producție, lăsată pe true, transformă o
+// scurgere a bazei de date într-o listă de parole utilizabile direct.
+if (!builder.Environment.IsDevelopment() && argon2Options.AllowLegacyPlaintext)
+{
+    throw new InvalidOperationException(
+        "Argon2:AllowLegacyPlaintext=true nu este permis în afara dezvoltării. " +
+        "Migrați conturile rămase (login o dată cu fiecare cont) și puneți valoarea pe false.");
+}
+
 builder.Services.AddSingleton(argon2Options);
 builder.Services.AddSingleton<IPasswordHasher, Argon2PasswordHasher>();
 
@@ -127,6 +139,36 @@ var passwordPolicyOptions = new PasswordPolicyOptions();
 builder.Configuration.GetSection("PasswordPolicy").Bind(passwordPolicyOptions);
 builder.Services.AddSingleton(passwordPolicyOptions);
 builder.Services.AddSingleton<PasswordPolicy>();
+
+// ─── Autentificare în doi pași (TOTP) — opțională, per utilizator ──────────
+// Nimic nu se activează global. Fiecare utilizator decide din pagina de profil;
+// un cont fără 2FA se autentifică exact ca înainte.
+
+var twoFactorOptions = new TwoFactorOptions();
+builder.Configuration.GetSection("TwoFactor").Bind(twoFactorOptions);
+
+// Cheia de cifrare a secretelor TOTP vine din mediu, nu din fișierul care ajunge
+// în Git. Fără ea, în dezvoltare, derivăm una din cheia JWT ca aplicația să
+// pornească — dar NU în producție: o cheie derivată dintr-un secret partajat
+// înseamnă că scurgerea unuia le compromite pe amândouă.
+var twoFactorKeyFromEnv = Environment.GetEnvironmentVariable("MAI_TWOFACTOR_KEY");
+if (!string.IsNullOrWhiteSpace(twoFactorKeyFromEnv))
+    twoFactorOptions.EncryptionKey = twoFactorKeyFromEnv;
+
+if (string.IsNullOrWhiteSpace(twoFactorOptions.EncryptionKey))
+{
+    if (builder.Environment.IsDevelopment())
+        twoFactorOptions.EncryptionKey = builder.Configuration["Jwt:Key"] + ":2fa";
+    else
+        throw new InvalidOperationException(
+            "MAI_TWOFACTOR_KEY lipsește. Generați: openssl rand -base64 32");
+}
+
+twoFactorOptions.Validate();
+
+builder.Services.AddSingleton(twoFactorOptions);
+builder.Services.AddSingleton<TotpService>();
+builder.Services.AddSingleton<SecretProtector>();
 
 // ─── Blocare cont după încercări eșuate ────────────────────────────────────
 var lockoutOptions = new LockoutOptions();
@@ -157,6 +199,15 @@ if (rateLimitOptions.BehindReverseProxy)
 var jwtKey = builder.Configuration["Jwt:Key"]
     ?? throw new InvalidOperationException("Jwt:Key lipsește din appsettings!");
 
+// HS256 cu o cheie de 20 de caractere se poate sparge offline. Verificarea
+// oprește pornirea în loc să lase serverul să ruleze cu tokenuri falsificabile.
+if (Encoding.UTF8.GetByteCount(jwtKey) < 32 || jwtKey == "YOUR_JWT_SECRET_KEY_HERE")
+{
+    throw new InvalidOperationException(
+        "Jwt:Key trebuie să aibă cel puțin 32 de octeți de entropie reală și să nu fie valoarea-șablon. " +
+        "Generați: openssl rand -base64 48");
+}
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -171,11 +222,14 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 
 // ─── CORS ──────────────────────────────────────────────────────────────────
+var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+    ?? ["http://localhost:5173", "http://localhost:3000"];
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.WithOrigins("http://localhost:5173", "http://localhost:3000")
+        policy.WithOrigins(allowedOrigins)
               .AllowAnyHeader()
               .AllowAnyMethod()
               .WithExposedHeaders("Retry-After")   // frontend-ul îl citește la 429/503
@@ -186,6 +240,34 @@ builder.Services.AddCors(options =>
 // ─── Database ──────────────────────────────────────────────────────────────
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+// ─── Job de expirare a transferurilor ──────────────────────────────────────
+// Fără el, "Expirat" era doar o etichetă calculată la afișare: coloana Status
+// rămânea Pending, iar cifrotextul stătea în bucket până la lifecycle policy.
+// Interfața promitea o garanție pe care codul nu o dădea.
+//
+// Se înregistrează ca singleton ȘI ca hosted service, aceeași instanță: astfel
+// StatsController îl poate injecta direct pentru butonul "Rulează acum", fără
+// să scotocească prin lista de IHostedService.
+
+// ─── Restricție de acces la rețeaua internă ────────────────────────────────
+// Implicit DEZACTIVATĂ. Se activează în appsettings.Production.json, după ce ai
+// confirmat plajele reale — un API care refuză toată lumea la deploy e mai rău
+// decât unul deschis în laborator. Vezi Intranet:AuditOnly pentru rodaj.
+
+var intranetOptions = new IntranetOptions();
+builder.Configuration.GetSection("Intranet").Bind(intranetOptions);
+intranetOptions.Validate();
+builder.Services.AddSingleton(intranetOptions);
+
+var expirationOptions = new TransferExpirationOptions();
+builder.Configuration.GetSection("TransferExpiration").Bind(expirationOptions);
+expirationOptions.Validate();
+
+builder.Services.AddSingleton(expirationOptions);
+builder.Services.AddSingleton<TransferExpirationState>();
+builder.Services.AddSingleton<TransferExpirationService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TransferExpirationService>());
 
 var app = builder.Build();
 
@@ -203,6 +285,18 @@ app.Logger.LogInformation(
     storageOptions.MaxFileSizeMb,
     storageOptions.UsePresignedDownload ? "activat" : "dezactivat");
 
+app.Logger.LogInformation(
+    "Expirare transferuri: {State}, la fiecare {Interval} min, purjare obiecte {Purge}",
+    expirationOptions.Enabled ? "activata" : "DEZACTIVATA",
+    expirationOptions.IntervalMinutes,
+    expirationOptions.PurgeObjects ? "activata" : "dezactivata");
+
+app.Logger.LogInformation(
+    "Restrictie intranet: {State}{Mode}. 2FA optional: disponibil, cerut pentru roluri privilegiate = {Required}",
+    intranetOptions.Enabled ? "activata" : "dezactivata",
+    intranetOptions.Enabled && intranetOptions.AuditOnly ? " (doar audit)" : string.Empty,
+    twoFactorOptions.RequiredForPrivilegedRoles);
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -211,6 +305,11 @@ if (app.Environment.IsDevelopment())
 
 if (rateLimitOptions.BehindReverseProxy)
     app.UseForwardedHeaders();
+
+// Perimetrul, înaintea oricărei alte prelucrări: o cerere din afara intranetului
+// nu merită nici un ciclu de Argon2, nici un slot de rate limit.
+// Trebuie să vină DUPĂ UseForwardedHeaders, altfel filtrează după IP-ul proxy-ului.
+app.UseIntranetOnly();
 
 app.UseHttpsRedirection();
 app.UseCors("AllowFrontend");
