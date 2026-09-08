@@ -28,6 +28,9 @@ namespace MAI.Api.Controllers
         private readonly PasswordPolicy _policy;
         private readonly Argon2Options _argon2;
         private readonly LockoutOptions _lockout;
+        private readonly TwoFactorOptions _twoFactor;
+        private readonly TotpService _totp;
+        private readonly SecretProtector _protector;
         private readonly ILogger<AuthController> _logger;
 
         public AuthController(
@@ -37,15 +40,21 @@ namespace MAI.Api.Controllers
             PasswordPolicy policy,
             Argon2Options argon2,
             LockoutOptions lockout,
+            TwoFactorOptions twoFactor,
+            TotpService totp,
+            SecretProtector protector,
             ILogger<AuthController> logger)
         {
-            _context = context;
-            _config  = config;
-            _hasher  = hasher;
-            _policy  = policy;
-            _argon2  = argon2;
-            _lockout = lockout;
-            _logger  = logger;
+            _context   = context;
+            _config    = config;
+            _hasher    = hasher;
+            _policy    = policy;
+            _argon2    = argon2;
+            _lockout   = lockout;
+            _twoFactor = twoFactor;
+            _totp      = totp;
+            _protector = protector;
+            _logger    = logger;
         }
 
         private int AccessTokenMinutes =>
@@ -129,10 +138,41 @@ namespace MAI.Api.Controllers
                     AddAudit(user.Id, username, AuditAction.UserUpdated, "SUCCES: Hash parola migrat la Argon2id");
                 }
 
-                // Login reușit: resetăm contorul de eșecuri.
+                // Parola e corectă: contorul de eșecuri se resetează aici, indiferent
+                // dacă mai urmează sau nu pasul doi. Altfel, un utilizator cu 2FA
+                // activ ar rămâne cu eșecuri vechi neșterse și s-ar bloca aparent
+                // din senin la o greșeală ulterioară.
                 user.FailedLoginAttempts = 0;
                 user.LockoutEndsAt       = null;
-                user.LastLoginAt         = DateTime.UtcNow;
+
+                // ── Pasul doi, DOAR dacă utilizatorul l-a activat singur ──────
+                //
+                // 2FA este opțional. Un cont fără 2FA se autentifică exact ca
+                // înainte — comportamentul vechi rămâne calea implicită, iar
+                // activarea se face din pagina de profil, de către utilizator.
+                if (user.TwoFactorEnabled && !string.IsNullOrEmpty(user.TwoFactorSecret))
+                {
+                    var challenge = IssueTwoFactorChallenge(user);
+
+                    AddAudit(user.Id, username, AuditAction.Login,
+                        "SUCCES: Parola corecta, se asteapta codul 2FA");
+
+                    await _context.SaveChangesAsync(ct);
+
+                    // 200, nu 401: parola a fost corectă. Autentificarea nu a
+                    // eșuat, doar nu s-a încheiat.
+                    return Ok(new
+                    {
+                        twoFactorRequired = true,
+                        challengeToken    = challenge.Token,
+                        expiresAt         = challenge.ExpiresAt,
+                        // Frontend-ul afișează câte coduri de recuperare mai există,
+                        // ca utilizatorul să știe dacă are pe ce conta.
+                        recoveryAvailable = user.RemainingRecoveryCodes > 0,
+                    });
+                }
+
+                user.LastLoginAt = DateTime.UtcNow;
 
                 var response = IssueTokens(user);
 
@@ -145,6 +185,164 @@ namespace MAI.Api.Controllers
             {
                 return CapacityResponse(ex);
             }
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // POST api/Auth/2fa/verify — pasul doi
+        // ─────────────────────────────────────────────────────────────────────
+        /// <summary>
+        /// Schimbă provocarea emisă de /login pe tokenurile reale, dacă vine
+        /// însoțită de un cod TOTP valid sau de un cod de recuperare.
+        ///
+        /// Provocarea este un token opac cu stare pe server, nu un JWT. Un JWT
+        /// „pe jumătate autentificat” riscă mereu să fie acceptat de middleware-ul
+        /// de autentificare pe alte rute; un șir aleatoriu verificat manual aici
+        /// nu are cum să fie.
+        /// </summary>
+        [AllowAnonymous]
+        [EnableRateLimiting(RateLimitPolicies.Login)]
+        [HttpPost("2fa/verify")]
+        public async Task<IActionResult> VerifyTwoFactor(
+            [FromBody] TwoFactorVerifyDto dto, CancellationToken ct)
+        {
+            const string genericError = "Cod invalid sau sesiune expirată. Autentificați-vă din nou.";
+
+            if (string.IsNullOrWhiteSpace(dto.ChallengeToken) || string.IsNullOrWhiteSpace(dto.Code))
+                return Unauthorized(new { message = genericError });
+
+            var hash = HashOpaqueToken(dto.ChallengeToken);
+
+            var user = await _context.Users
+                .FirstOrDefaultAsync(u => u.TwoFactorChallengeHash == hash, ct);
+
+            if (user is null)
+            {
+                await WriteAuditAsync(null, "necunoscut", AuditAction.Login,
+                    "ESEC: Provocare 2FA invalida sau deja folosita");
+                return Unauthorized(new { message = genericError });
+            }
+
+            if (user.TwoFactorChallengeExpiresAt is null ||
+                user.TwoFactorChallengeExpiresAt <= DateTime.UtcNow)
+            {
+                ClearChallenge(user);
+                await WriteAuditAsync(user.Id, user.Username, AuditAction.Login, "ESEC: Provocare 2FA expirata");
+                return Unauthorized(new { message = genericError });
+            }
+
+            if (!user.IsActive || user.IsLockedOut)
+            {
+                ClearChallenge(user);
+                await WriteAuditAsync(user.Id, user.Username, AuditAction.Login,
+                    "ESEC: Verificare 2FA pe cont dezactivat sau blocat");
+                return Unauthorized(new { message = genericError });
+            }
+
+            if (user.TwoFactorChallengeAttempts >= _twoFactor.MaxChallengeAttempts)
+            {
+                ClearChallenge(user);
+                await WriteAuditAsync(user.Id, user.Username, AuditAction.Login,
+                    $"ESEC: Provocare 2FA anulata dupa {_twoFactor.MaxChallengeAttempts} coduri gresite");
+                return Unauthorized(new { message = genericError });
+            }
+
+            var usedRecoveryCode = false;
+            var accepted         = false;
+
+            // Codul TOTP are exact Digits cifre. Orice altceva e tratat ca posibil
+            // cod de recuperare — nu-l trimitem degeaba prin HMAC.
+            var digitsOnly = new string(dto.Code.Where(char.IsDigit).ToArray());
+
+            if (digitsOnly.Length == _twoFactor.Digits)
+            {
+                try
+                {
+                    var secret = _protector.Unprotect(user.TwoFactorSecret!);
+                    accepted = _totp.VerifyCode(secret, dto.Code);
+                }
+                catch (CryptographicException ex)
+                {
+                    // Secretul nu se mai poate descifra: cheia de cifrare s-a
+                    // schimbat sau coloana a fost alterată. Nu are rost să pretindem
+                    // că e o greșeală de tastare a utilizatorului.
+                    _logger.LogError(ex,
+                        "Secretul 2FA al utilizatorului {Username} nu poate fi descifrat.", user.Username);
+
+                    await WriteAuditAsync(user.Id, user.Username, AuditAction.Login,
+                        "ESEC: Secret 2FA indescifrabil");
+
+                    return StatusCode(500, new
+                    {
+                        message = "Configurarea 2FA a acestui cont nu mai poate fi citită. " +
+                                  "Contactați administratorul de sistem.",
+                    });
+                }
+            }
+
+            if (!accepted)
+            {
+                accepted = TryConsumeRecoveryCode(user, dto.Code);
+                usedRecoveryCode = accepted;
+            }
+
+            if (!accepted)
+            {
+                user.TwoFactorChallengeAttempts++;
+
+                var remaining = _twoFactor.MaxChallengeAttempts - user.TwoFactorChallengeAttempts;
+
+                AddAudit(user.Id, user.Username, AuditAction.Login,
+                    $"ESEC: Cod 2FA incorect ({user.TwoFactorChallengeAttempts}/{_twoFactor.MaxChallengeAttempts})");
+
+                await _context.SaveChangesAsync(ct);
+
+                return Unauthorized(new
+                {
+                    message = remaining > 0
+                        ? $"Cod incorect. Mai aveți {remaining} încercări."
+                        : genericError,
+                    attemptsRemaining = Math.Max(remaining, 0),
+                });
+            }
+
+            // Provocarea se consumă indiferent de ce urmează: un token de unică
+            // folosință care rămâne valid după utilizare nu mai e de unică folosință.
+            ClearChallenge(user);
+
+            user.LastLoginAt = DateTime.UtcNow;
+
+            var response = IssueTokens(user);
+
+            AddAudit(user.Id, user.Username, AuditAction.Login,
+                usedRecoveryCode
+                    ? $"SUCCES: Autentificare cu COD DE RECUPERARE 2FA ({user.RemainingRecoveryCodes} ramase)"
+                    : "SUCCES: Autentificare reusita cu 2FA");
+
+            await _context.SaveChangesAsync(ct);
+
+            if (usedRecoveryCode)
+            {
+                _logger.LogWarning(
+                    "Utilizatorul {Username} s-a autentificat cu un cod de recuperare. Ramase: {Left}",
+                    user.Username, user.RemainingRecoveryCodes);
+            }
+
+            return Ok(new
+            {
+                response.Id,
+                response.Username,
+                response.FullName,
+                response.Department,
+                response.Role,
+                response.AccessToken,
+                response.Token,
+                response.RefreshToken,
+                response.ExpiresIn,
+                response.AccessTokenExpiresAt,
+                response.RefreshTokenExpiresAt,
+                usedRecoveryCode,
+                remainingRecoveryCodes = user.RemainingRecoveryCodes,
+            });
         }
 
         // ─────────────────────────────────────────────────────────────────────
@@ -163,7 +361,7 @@ namespace MAI.Api.Controllers
             // SHA-256, nu Argon2: tokenul are 512 biți de entropie generată criptografic,
             // deci nu există atac prin dicționar, iar refresh-ul trebuie să fie ieftin.
             // Dacă am folosi Argon2 aici, /refresh ar deveni un vector de DoS mai bun decât /login.
-            var hash = HashRefreshToken(dto.RefreshToken);
+            var hash = HashOpaqueToken(dto.RefreshToken);
 
             var user = await _context.Users.FirstOrDefaultAsync(u => u.RefreshTokenHash == hash, ct);
 
@@ -215,7 +413,7 @@ namespace MAI.Api.Controllers
 
             if (user is null && !string.IsNullOrWhiteSpace(dto?.RefreshToken))
             {
-                var hash = HashRefreshToken(dto.RefreshToken);
+                var hash = HashOpaqueToken(dto.RefreshToken);
                 user = await _context.Users.FirstOrDefaultAsync(u => u.RefreshTokenHash == hash, ct);
             }
 
@@ -223,6 +421,10 @@ namespace MAI.Api.Controllers
             {
                 user.RefreshTokenHash      = null;
                 user.RefreshTokenExpiresAt = null;
+
+                // O provocare 2FA rămasă în aer nu are ce căuta după delogare.
+                ClearChallenge(user);
+
                 AddAudit(user.Id, user.Username, AuditAction.Logout, "SUCCES: Delogare, refresh token revocat");
                 await _context.SaveChangesAsync(ct);
             }
@@ -269,6 +471,11 @@ namespace MAI.Api.Controllers
                 // Schimbarea parolei invalidează sesiunile de pe alte dispozitive.
                 user.RefreshTokenHash      = null;
                 user.RefreshTokenExpiresAt = null;
+
+                // Atenție: secretul 2FA NU se atinge. Este independent de parolă —
+                // exact ăsta e rostul celui de-al doilea factor. Dacă l-am reseta
+                // aici, o schimbare de parolă ar dezactiva pe tăcute protecția.
+                ClearChallenge(user);
 
                 AddAudit(user.Id, user.Username, AuditAction.UserUpdated,
                     "SUCCES: Parola schimbata (Argon2id), sesiuni revocate");
@@ -322,6 +529,69 @@ namespace MAI.Api.Controllers
         }
 
         // ─────────────────────────────────────────────────────────────────────
+        // Provocarea 2FA
+        // ─────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Emite o provocare de unică folosință. În baza de date ajunge doar
+        /// hash-ul, ca și în cazul refresh token-ului: un dump al bazei nu trebuie
+        /// să conțină nimic care să poată fi rejucat.
+        /// </summary>
+        private (string Token, DateTime ExpiresAt) IssueTwoFactorChallenge(User user)
+        {
+            var token     = GenerateOpaqueToken(32);
+            var expiresAt = DateTime.UtcNow.AddSeconds(_twoFactor.ChallengeLifetimeSeconds);
+
+            user.TwoFactorChallengeHash        = HashOpaqueToken(token);
+            user.TwoFactorChallengeExpiresAt   = expiresAt;
+            user.TwoFactorChallengeAttempts    = 0;
+
+            return (token, expiresAt);
+        }
+
+        private static void ClearChallenge(User user)
+        {
+            user.TwoFactorChallengeHash      = null;
+            user.TwoFactorChallengeExpiresAt = null;
+            user.TwoFactorChallengeAttempts  = 0;
+        }
+
+        /// <summary>
+        /// Verifică un cod de recuperare și, dacă e valid, îl șterge din listă.
+        ///
+        /// Consumarea e obligatorie: un cod de recuperare refolosibil e o a doua
+        /// parolă permanentă, scrisă pe hârtie.
+        /// </summary>
+        private static bool TryConsumeRecoveryCode(User user, string code)
+        {
+            if (string.IsNullOrEmpty(user.TwoFactorRecoveryCodeHashes)) return false;
+
+            var candidate = TotpService.HashRecoveryCode(code);
+
+            var hashes = user.TwoFactorRecoveryCodeHashes
+                .Split(';', StringSplitOptions.RemoveEmptyEntries)
+                .ToList();
+
+            // Comparație în timp constant peste toată lista, fără ieșire devreme.
+            var matchIndex = -1;
+            for (var i = 0; i < hashes.Count; i++)
+            {
+                var equal = CryptographicOperations.FixedTimeEquals(
+                    Encoding.ASCII.GetBytes(hashes[i]),
+                    Encoding.ASCII.GetBytes(candidate));
+
+                if (equal) matchIndex = i;
+            }
+
+            if (matchIndex < 0) return false;
+
+            hashes.RemoveAt(matchIndex);
+            user.TwoFactorRecoveryCodeHashes = hashes.Count > 0 ? string.Join(';', hashes) : null;
+
+            return true;
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
         // Emitere tokenuri
         // ─────────────────────────────────────────────────────────────────────
 
@@ -332,9 +602,9 @@ namespace MAI.Api.Controllers
             var refreshExpires = now.AddDays(RefreshTokenDays);
 
             var accessToken  = GenerateJwtToken(user, accessExpires);
-            var refreshToken = GenerateRefreshToken();
+            var refreshToken = GenerateOpaqueToken(64);
 
-            user.RefreshTokenHash      = HashRefreshToken(refreshToken);
+            user.RefreshTokenHash      = HashOpaqueToken(refreshToken);
             user.RefreshTokenIssuedAt  = now;
             user.RefreshTokenExpiresAt = refreshExpires;
 
@@ -362,12 +632,17 @@ namespace MAI.Api.Controllers
             var key   = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
-            var claims = new[]
+            var claims = new List<Claim>
             {
-                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-                new Claim(ClaimTypes.Name,           user.Username),
-                new Claim(ClaimTypes.Role,           user.Role.ToString()),
-                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+                new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                new(ClaimTypes.Name,           user.Username),
+                new(ClaimTypes.Role,           user.Role.ToString()),
+                new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+
+                // "amr" (authentication methods references), RFC 8176. Consemnează
+                // cu ce a fost obținut tokenul. Nu schimbă nimic azi, dar face
+                // posibil mai târziu ca operațiile sensibile să ceară "mfa".
+                new("amr", user.TwoFactorEnabled ? "mfa" : "pwd"),
             };
 
             var token = new JwtSecurityToken(
@@ -379,16 +654,17 @@ namespace MAI.Api.Controllers
             return new JwtSecurityTokenHandler().WriteToken(token);
         }
 
-        private static string GenerateRefreshToken()
+        /// <summary>Token opac base64url, fără padding. Folosit pentru refresh și pentru provocarea 2FA.</summary>
+        private static string GenerateOpaqueToken(int byteLength)
         {
-            var bytes = RandomNumberGenerator.GetBytes(64);
+            var bytes = RandomNumberGenerator.GetBytes(byteLength);
             return Convert.ToBase64String(bytes)
                 .Replace('+', '-')
                 .Replace('/', '_')
                 .TrimEnd('=');
         }
 
-        private static string HashRefreshToken(string token)
+        private static string HashOpaqueToken(string token)
         {
             var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(token));
             return Convert.ToHexString(bytes).ToLowerInvariant();
@@ -427,5 +703,15 @@ namespace MAI.Api.Controllers
             AddAudit(userId, username, action, details);
             await _context.SaveChangesAsync();
         }
+    }
+
+    /// <summary>Corpul cererii POST /api/Auth/2fa/verify.</summary>
+    public class TwoFactorVerifyDto
+    {
+        /// <summary>Provocarea primită de la /login.</summary>
+        public string ChallengeToken { get; set; } = string.Empty;
+
+        /// <summary>Codul din aplicația de autentificare SAU un cod de recuperare.</summary>
+        public string Code { get; set; } = string.Empty;
     }
 }

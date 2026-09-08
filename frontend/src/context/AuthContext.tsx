@@ -12,6 +12,7 @@ import type { Role } from '../types';
 import { ROLE_HIERARCHY } from '../utils/constants';
 import { api, refreshAccessToken, setOnSessionExpired } from '../api/client';
 import { tokenStorage } from '../api/tokenStorage';
+import { isTwoFactorChallenge, type TwoFactorChallenge } from '../api/twoFactor';
 
 export interface User {
     id: string | number;
@@ -33,6 +34,28 @@ interface LoginResponse {
     expiresIn: number;
     accessTokenExpiresAt: string;
     refreshTokenExpiresAt: string;
+    /** Prezente doar cand autentificarea s-a incheiat prin pasul 2FA. */
+    usedRecoveryCode?: boolean;
+    remainingRecoveryCodes?: number;
+}
+
+/**
+ * Rezultatul unui login.
+ *
+ * `login` nu mai returneaza intotdeauna un utilizator: daca acel cont si-a
+ * activat 2FA, returneaza provocarea, iar sesiunea se deschide abia dupa
+ * `verifyTwoFactor`. Tipul uniune obliga apelantul sa trateze ambele cazuri —
+ * un `User` returnat direct ar fi ascuns pasul lipsa in tipuri si l-ar fi
+ * transformat intr-un bug la runtime.
+ */
+export type LoginResult =
+    | { kind: 'session'; user: User }
+    | { kind: 'twoFactor'; challenge: TwoFactorChallenge };
+
+export interface TwoFactorSuccess {
+    user: User;
+    usedRecoveryCode: boolean;
+    remainingRecoveryCodes: number;
 }
 
 interface AuthContextType {
@@ -40,7 +63,9 @@ interface AuthContextType {
     isAuthenticated: boolean;
     /** True cat timp se verifica sesiunea salvata la pornirea aplicatiei. */
     isInitializing: boolean;
-    login: (username: string, password: string) => Promise<User>;
+    login: (username: string, password: string) => Promise<LoginResult>;
+    /** Pasul doi. Se apeleaza doar daca `login` a returnat kind: 'twoFactor'. */
+    verifyTwoFactor: (challengeToken: string, code: string) => Promise<TwoFactorSuccess>;
     logout: () => Promise<void>;
     /** Returneaza true daca utilizatorul curent are cel putin rolul cerut (ierarhic) */
     hasRole: (minRole: Role) => boolean;
@@ -171,10 +196,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
     }, []);
 
-    const login = useCallback(
-        async (username: string, password: string): Promise<User> => {
-            const { data } = await api.post<LoginResponse>('/Auth/login', { username, password });
-
+    /** Comun intre login direct si login incheiat prin 2FA. */
+    const openSession = useCallback(
+        (data: LoginResponse): User => {
             tokenStorage.save({
                 accessToken: data.accessToken ?? data.token,
                 refreshToken: data.refreshToken,
@@ -189,6 +213,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return loggedUser;
         },
         [scheduleRefresh]
+    );
+
+    const login = useCallback(
+        async (username: string, password: string): Promise<LoginResult> => {
+            const { data } = await api.post<LoginResponse | TwoFactorChallenge>(
+                '/Auth/login', { username, password }
+            );
+
+            // Contul are 2FA activ: parola a fost corecta, dar nu s-a emis niciun
+            // token. Nu salvam absolut nimic in localStorage in acest punct —
+            // pana la codul corect, nu exista sesiune.
+            if (isTwoFactorChallenge(data)) {
+                return { kind: 'twoFactor', challenge: data };
+            }
+
+            return { kind: 'session', user: openSession(data as LoginResponse) };
+        },
+        [openSession]
+    );
+
+    const verifyTwoFactor = useCallback(
+        async (challengeToken: string, code: string): Promise<TwoFactorSuccess> => {
+            const { data } = await api.post<LoginResponse>(
+                '/Auth/2fa/verify', { challengeToken, code }
+            );
+
+            return {
+                user: openSession(data),
+                usedRecoveryCode: data.usedRecoveryCode ?? false,
+                remainingRecoveryCodes: data.remainingRecoveryCodes ?? 0,
+            };
+        },
+        [openSession]
     );
 
     const logout = useCallback(async (): Promise<void> => {
@@ -219,10 +276,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             isAuthenticated: !!user && !!tokenStorage.getAccessToken(),
             isInitializing,
             login,
+            verifyTwoFactor,
             logout,
             hasRole,
         }),
-        [user, isInitializing, login, logout, hasRole]
+        [user, isInitializing, login, verifyTwoFactor, logout, hasRole]
     );
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

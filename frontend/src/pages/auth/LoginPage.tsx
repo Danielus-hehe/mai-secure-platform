@@ -1,13 +1,15 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShieldCheck, Lock, User, EyeOff, Eye } from 'lucide-react';
+import { ShieldCheck, Lock, User, EyeOff, Eye, Smartphone, ArrowLeft } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
+import { apiErrorMessage } from '../../api/errors';
+import type { TwoFactorChallenge } from '../../api/twoFactor';
 
 export default function LoginPage() {
-    const { login } = useAuth();
+    const { login, verifyTwoFactor } = useAuth();
     const navigate = useNavigate();
     const toast = useToast();
 
@@ -16,24 +18,93 @@ export default function LoginPage() {
     const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
 
+    // ── Pasul doi, doar pentru conturile care si-au activat 2FA ──────────────
+    const [challenge, setChallenge] = useState<TwoFactorChallenge | null>(null);
+    const [code, setCode] = useState('');
+    const [useRecovery, setUseRecovery] = useState(false);
+    const [secondsLeft, setSecondsLeft] = useState(0);
+
+    const codeInputRef = useRef<HTMLInputElement>(null);
+
+    const goAfterLogin = (role: string) => {
+        navigate(role === 'ADMINISTRATOR' ? '/admin' : '/dashboard', { replace: true });
+    };
+
+    // Numaratoare inversa pentru provocare. Utilizatorul trebuie sa vada cat timp
+    // mai are: o provocare expirata in tacere l-ar lasa sa tasteze un cod corect
+    // si sa primeasca "invalid", fara sa inteleaga de ce.
+    useEffect(() => {
+        if (!challenge) return;
+
+        const tick = () => {
+            const left = Math.max(0, Math.floor((new Date(challenge.expiresAt).getTime() - Date.now()) / 1000));
+            setSecondsLeft(left);
+            if (left === 0) {
+                setChallenge(null);
+                setCode('');
+                toast.error('Sesiunea de verificare a expirat. Autentificați-vă din nou.');
+            }
+        };
+
+        tick();
+        const id = window.setInterval(tick, 1000);
+        return () => window.clearInterval(id);
+    }, [challenge, toast]);
+
+    useEffect(() => {
+        if (challenge) codeInputRef.current?.focus();
+    }, [challenge]);
+
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault();
         setLoading(true);
 
         try {
-            const loggedUser = await login(username, password);
+            const result = await login(username, password);
 
-            // role este acum string normalizat ('ADMINISTRATOR', 'SEF_DIRECTIE', 'UTILIZATOR')
-            if (loggedUser.role === 'ADMINISTRATOR') {
-                navigate('/admin', { replace: true });
-            } else {
-                navigate('/dashboard', { replace: true });
+            if (result.kind === 'twoFactor') {
+                setChallenge(result.challenge);
+                return;
             }
-        } catch {
-            toast.error('Nume de utilizator sau parolă incorectă. Încercați din nou.');
+
+            goAfterLogin(result.user.role);
+        } catch (err: unknown) {
+            toast.error(apiErrorMessage(err, 'Nume de utilizator sau parolă incorectă. Încercați din nou.'));
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleVerify = async (e: FormEvent) => {
+        e.preventDefault();
+        if (!challenge) return;
+
+        setLoading(true);
+        try {
+            const result = await verifyTwoFactor(challenge.challengeToken, code);
+
+            if (result.usedRecoveryCode) {
+                toast.success(
+                    `Ați folosit un cod de recuperare. Vă mai rămân ${result.remainingRecoveryCodes}. ` +
+                    'Reconfigurați 2FA din profil dacă v-ați pierdut telefonul.'
+                );
+            }
+
+            goAfterLogin(result.user.role);
+        } catch (err: unknown) {
+            toast.error(apiErrorMessage(err, 'Cod invalid.'));
+            setCode('');
+            codeInputRef.current?.focus();
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const cancelTwoFactor = () => {
+        setChallenge(null);
+        setCode('');
+        setUseRecovery(false);
+        setPassword('');
     };
 
     return (
@@ -81,7 +152,7 @@ export default function LoginPage() {
                 </p>
             </div>
 
-            {/* Formularul de autentificare */}
+            {/* Formularul */}
             <div className="flex-1 flex items-center justify-center p-6 bg-mai-50">
                 <div className="w-full max-w-md">
                     <div className="lg:hidden flex items-center justify-center gap-3 mb-8">
@@ -92,54 +163,124 @@ export default function LoginPage() {
                     </div>
 
                     <div className="bg-white rounded-2xl shadow-card p-8">
-                        <h1 className="text-xl font-bold text-mai-900">Autentificare</h1>
-                        <p className="text-sm text-mai-400 mt-1 mb-6">
-                            Introduceți datele de acces primite de la administratorul de sistem.
-                        </p>
+                        {!challenge ? (
+                            <>
+                                <h1 className="text-xl font-bold text-mai-900">Autentificare</h1>
+                                <p className="text-sm text-mai-400 mt-1 mb-6">
+                                    Introduceți datele de acces primite de la administratorul de sistem.
+                                </p>
 
-                        <form onSubmit={handleSubmit} className="space-y-4">
-                            <div className="relative">
-                                <User size={16} className="absolute left-3.5 top-[42px] text-mai-300 z-10" />
-                                <div className="pl-9">
-                                    <Input
-                                        id="username"
-                                        label="Nume de utilizator"
-                                        value={username}
-                                        onChange={e => setUsername(e.target.value)}
-                                        placeholder="ex: nume.prenume"
-                                        required
-                                        autoComplete="username"
-                                    />
+                                <form onSubmit={handleSubmit} className="space-y-4">
+                                    <div className="relative">
+                                        <User size={16} className="absolute left-3.5 top-[42px] text-mai-300 z-10" />
+                                        <div className="pl-9">
+                                            <Input
+                                                id="username"
+                                                label="Nume de utilizator"
+                                                value={username}
+                                                onChange={e => setUsername(e.target.value)}
+                                                placeholder="ex: nume.prenume"
+                                                required
+                                                autoComplete="username"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="relative">
+                                        <Lock size={16} className="absolute left-3.5 top-[42px] text-mai-300 z-10" />
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowPassword(v => !v)}
+                                            className="absolute right-3.5 top-[42px] text-mai-300 hover:text-mai-500 z-10"
+                                        >
+                                            {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                        </button>
+                                        <div className="pl-9 pr-10">
+                                            <Input
+                                                id="password"
+                                                label="Parolă"
+                                                type={showPassword ? 'text' : 'password'}
+                                                value={password}
+                                                onChange={e => setPassword(e.target.value)}
+                                                placeholder="••••••••"
+                                                required
+                                                autoComplete="current-password"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <Button type="submit" disabled={loading} className="w-full mt-2">
+                                        {loading ? 'Se autentifică…' : 'Autentificare'}
+                                    </Button>
+                                </form>
+                            </>
+                        ) : (
+                            <>
+                                <div className="flex items-center gap-3 mb-1">
+                                    <div className="w-10 h-10 rounded-xl bg-mai-50 text-mai-600 flex items-center justify-center shrink-0">
+                                        <Smartphone size={20} />
+                                    </div>
+                                    <h1 className="text-xl font-bold text-mai-900">Verificare în doi pași</h1>
                                 </div>
-                            </div>
 
-                            <div className="relative">
-                                <Lock size={16} className="absolute left-3.5 top-[42px] text-mai-300 z-10" />
-                                <button
-                                    type="button"
-                                    onClick={() => setShowPassword(v => !v)}
-                                    className="absolute right-3.5 top-[42px] text-mai-300 hover:text-mai-500 z-10"
-                                >
-                                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                                </button>
-                                <div className="pl-9 pr-10">
+                                <p className="text-sm text-mai-400 mt-2 mb-6">
+                                    {useRecovery
+                                        ? 'Introduceți unul dintre codurile de recuperare salvate la activare. Codul se consumă după folosire.'
+                                        : 'Introduceți codul afișat de aplicația de autentificare pentru contul dumneavoastră.'}
+                                </p>
+
+                                <form onSubmit={handleVerify} className="space-y-4">
                                     <Input
-                                        id="password"
-                                        label="Parolă"
-                                        type={showPassword ? 'text' : 'password'}
-                                        value={password}
-                                        onChange={e => setPassword(e.target.value)}
-                                        placeholder="••••••••"
+                                        ref={codeInputRef}
+                                        id="code"
+                                        label={useRecovery ? 'Cod de recuperare' : 'Cod din aplicație'}
+                                        value={code}
+                                        onChange={e => setCode(e.target.value)}
+                                        placeholder={useRecovery ? 'XXXX-XXXX' : '000000'}
                                         required
-                                        autoComplete="current-password"
+                                        autoComplete="one-time-code"
+                                        inputMode={useRecovery ? 'text' : 'numeric'}
+                                        className={useRecovery ? '' : 'tracking-[0.4em] text-center text-lg'}
                                     />
-                                </div>
-                            </div>
 
-                            <Button type="submit" disabled={loading} className="w-full mt-2">
-                                {loading ? 'Se autentifică…' : 'Autentificare'}
-                            </Button>
-                        </form>
+                                    <div className="flex items-center justify-between text-xs">
+                                        <span className={secondsLeft < 30 ? 'text-red-600 font-medium' : 'text-mai-400'}>
+                                            Expiră în {Math.floor(secondsLeft / 60)}:
+                                            {String(secondsLeft % 60).padStart(2, '0')}
+                                        </span>
+
+                                        {challenge.recoveryAvailable && (
+                                            <button
+                                                type="button"
+                                                onClick={() => { setUseRecovery(v => !v); setCode(''); }}
+                                                className="text-mai-600 hover:text-mai-800 font-medium"
+                                            >
+                                                {useRecovery ? 'Folosesc aplicația' : 'Am pierdut telefonul'}
+                                            </button>
+                                        )}
+                                    </div>
+
+                                    <Button type="submit" disabled={loading || !code.trim()} className="w-full">
+                                        {loading ? 'Se verifică…' : 'Confirmă'}
+                                    </Button>
+
+                                    <button
+                                        type="button"
+                                        onClick={cancelTwoFactor}
+                                        className="w-full flex items-center justify-center gap-1.5 text-xs text-mai-400 hover:text-mai-600 pt-1"
+                                    >
+                                        <ArrowLeft size={13} /> Înapoi la autentificare
+                                    </button>
+                                </form>
+
+                                {!challenge.recoveryAvailable && (
+                                    <p className="text-xs text-gold-600 bg-gold-500/10 rounded-lg p-3 mt-5">
+                                        Nu mai aveți coduri de recuperare disponibile. Dacă nu puteți accesa
+                                        aplicația de autentificare, contactați administratorul de sistem.
+                                    </p>
+                                )}
+                            </>
+                        )}
                     </div>
 
                     <p className="text-center text-xs text-mai-400 mt-6">

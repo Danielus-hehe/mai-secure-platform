@@ -76,6 +76,57 @@ namespace MAI.Domain.Entities
 
         public DateTime? KeysCreatedAt { get; set; }
 
+        // ── Autentificare în doi pași (TOTP, RFC 6238) ───────────────────────
+        //
+        // Secretul TOTP este stocat CIFRAT (AES-256-GCM, cheie din variabilă de
+        // mediu), nu ca hash. Diferența față de parolă e esențială: serverul
+        // trebuie să poată reconstitui secretul ca să genereze codul așteptat,
+        // deci hash-ul nu e o opțiune. Rămâne cifrarea, cu cheia ținută în afara
+        // bazei de date.
+
+        /// <summary>True dacă 2FA a fost activat și confirmat cu un cod valid.</summary>
+        public bool TwoFactorEnabled { get; set; }
+
+        /// <summary>Secretul TOTP activ, cifrat. Null dacă 2FA nu e activat.</summary>
+        public string? TwoFactorSecret { get; set; }
+
+        /// <summary>
+        /// Secretul generat la înrolare, înainte de confirmare. Cifrat, la fel.
+        ///
+        /// Se ține separat de cel activ ca o înrolare abandonată sau eșuată să nu
+        /// distrugă un 2FA deja funcțional: dacă utilizatorul își reconfigurează
+        /// telefonul și se răzgândește la jumătate, vechiul secret rămâne intact.
+        /// </summary>
+        public string? TwoFactorPendingSecret { get; set; }
+
+        public DateTime? TwoFactorEnrolledAt { get; set; }
+
+        /// <summary>
+        /// Hash-urile SHA-256 ale codurilor de recuperare neconsumate, separate
+        /// prin ';'. Codurile în clar se afișează o singură dată, la activare.
+        /// </summary>
+        public string? TwoFactorRecoveryCodeHashes { get; set; }
+
+        /// <summary>
+        /// SHA-256 al provocării emise între parola corectă și codul TOTP.
+        ///
+        /// Provocarea NU este un JWT. Un token opac, cu stare pe server, nu poate
+        /// fi confundat de middleware-ul de autentificare cu un access token
+        /// valid — riscul cel mai mare al implementărilor de 2FA făcute cu un JWT
+        /// „pe jumătate autentificat”.
+        /// </summary>
+        public string? TwoFactorChallengeHash { get; set; }
+
+        public DateTime? TwoFactorChallengeExpiresAt { get; set; }
+
+        /// <summary>
+        /// Coduri greșite pe provocarea curentă. Fără contor, provocarea devine un
+        /// oracol în care se pot încerca coduri de 6 cifre la nesfârșit.
+        /// </summary>
+        public int TwoFactorChallengeAttempts { get; set; }
+
+        // ── Proprietăți calculate ────────────────────────────────────────────
+
         /// <summary>True dacă utilizatorul și-a generat cheile și poate primi fișiere.</summary>
         [NotMapped]
         public bool HasKeys => !string.IsNullOrEmpty(PublicKeyEncryption);
@@ -86,5 +137,12 @@ namespace MAI.Domain.Entities
         /// </summary>
         [NotMapped]
         public bool IsLockedOut => LockoutEndsAt.HasValue && LockoutEndsAt.Value > DateTime.UtcNow;
+
+        /// <summary>Câte coduri de recuperare mai sunt neconsumate.</summary>
+        [NotMapped]
+        public int RemainingRecoveryCodes =>
+            string.IsNullOrEmpty(TwoFactorRecoveryCodeHashes)
+                ? 0
+                : TwoFactorRecoveryCodeHashes.Split(';', StringSplitOptions.RemoveEmptyEntries).Length;
     }
 }
