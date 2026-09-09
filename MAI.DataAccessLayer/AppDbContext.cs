@@ -18,6 +18,7 @@ namespace MAI.DataAccessLayer
         {
             base.OnModelCreating(modelBuilder);
             modelBuilder.ApplyConfiguration(new FileTransferConfiguration());
+            modelBuilder.ApplyConfiguration(new AuditLogConfiguration());
         }
     }
 }
