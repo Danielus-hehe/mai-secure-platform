@@ -176,9 +176,9 @@ namespace MAI.Api.BackgroundJobs
                         Username  = "sistem",
                         Action    = AuditAction.TransferExpired,
                         Details   = purged && _options.PurgeObjects && !string.IsNullOrEmpty(transfer.StorageKey)
-                            ? $"SUCCES: Transfer expirat '{transfer.FileName}' (id {transfer.Id}); " +
+                            ? $"Transfer expirat '{transfer.FileName}' (id {transfer.Id}); " +
                               $"cifrotext sters din depozit ({transfer.CiphertextSize} octeti)"
-                            : $"SUCCES: Transfer expirat '{transfer.FileName}' (id {transfer.Id}); " +
+                            : $"Transfer expirat '{transfer.FileName}' (id {transfer.Id}); " +
                               "fara obiect de sters in depozit",
                         IpAddress = "sistem",
                         Timestamp = DateTime.UtcNow,

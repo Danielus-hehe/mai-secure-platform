@@ -62,7 +62,7 @@ namespace MAI.Api.Controllers
             var failedLoginsLast24h = canSeeSecurityMetrics
                 ? await _context.AuditLogs.CountAsync(a =>
                     a.Action == AuditAction.Login &&
-                    a.Details.StartsWith("ESEC") &&
+                    a.Result == AuditResult.Failure &&
                     a.Timestamp >= yesterday, ct)
                 : 0;
 
@@ -172,12 +172,12 @@ namespace MAI.Api.Controllers
             // ── Securitate ───────────────────────────────────────────────────
             var failedLoginsLast24h = await _context.AuditLogs.CountAsync(a =>
                 a.Action == AuditAction.Login &&
-                a.Details.StartsWith("ESEC") &&
+                a.Result == AuditResult.Failure &&
                 a.Timestamp >= last24h, ct);
 
             var successfulLoginsLast24h = await _context.AuditLogs.CountAsync(a =>
                 a.Action == AuditAction.Login &&
-                a.Details.StartsWith("SUCCES") &&
+                a.Result == AuditResult.Success &&
                 a.Timestamp >= last24h, ct);
 
             // Semnaturi invalide raportate de clienti. Zero e valoarea asteptata;
@@ -185,7 +185,7 @@ namespace MAI.Api.Controllers
             // ceva ce merita investigat manual.
             var invalidSignatures = await _context.AuditLogs.CountAsync(a =>
                 a.Action == AuditAction.FileDownload &&
-                a.Details.StartsWith("ATENTIE"), ct);
+                a.Result == AuditResult.Warning, ct);
 
             // ── Serii temporale ──────────────────────────────────────────────
             // Gruparea se face in baza de date (date_trunc), nu in memorie: pe un
@@ -206,7 +206,7 @@ namespace MAI.Api.Controllers
             var failedLoginsByDay = await _context.AuditLogs
                 .Where(a => a.Timestamp >= since
                          && a.Action == AuditAction.Login
-                         && a.Details.StartsWith("ESEC"))
+                         && a.Result == AuditResult.Failure)
                 .GroupBy(a => a.Timestamp.Date)
                 .Select(g => new { Day = g.Key, Count = g.Count() })
                 .ToListAsync(ct);

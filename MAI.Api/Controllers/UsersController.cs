@@ -168,7 +168,7 @@ namespace MAI.Api.Controllers
                     UserId    = user.Id,
                     Username  = CallerUsername,
                     Action    = AuditAction.UserCreated,
-                    Details   = $"SUCCES: Cont creat @{user.Username} ({user.Role}) - Argon2id/{ProfileFor(dto.Role)}",
+                    Details   = $"Cont creat @{user.Username} ({user.Role}) - Argon2id/{ProfileFor(dto.Role)}",
                     IpAddress = CallerIp,
                     Timestamp = DateTime.UtcNow,
                 });
@@ -219,7 +219,7 @@ namespace MAI.Api.Controllers
                 UserId    = user.Id,
                 Username  = CallerUsername,
                 Action    = AuditAction.UserUpdated,
-                Details   = $"SUCCES: Parola resetata administrativ pentru @{user.Username}, sesiuni revocate",
+                Details   = $"Parola resetata administrativ pentru @{user.Username}, sesiuni revocate",
                 IpAddress = CallerIp,
                 Timestamp = DateTime.UtcNow,
             });
@@ -244,7 +244,7 @@ namespace MAI.Api.Controllers
                 UserId    = user.Id,
                 Username  = CallerUsername,
                 Action    = AuditAction.UserUpdated,
-                Details   = $"SUCCES: Cont deblocat @{user.Username}",
+                Details   = $"Cont deblocat @{user.Username}",
                 IpAddress = CallerIp,
                 Timestamp = DateTime.UtcNow,
             });
@@ -277,7 +277,7 @@ namespace MAI.Api.Controllers
                 {
                     Username  = CallerUsername,
                     Action    = AuditAction.UserUpdated,
-                    Details   = $"SUCCES: Migrare parole plain text -> Argon2id ({legacyUsers.Count} conturi)",
+                    Details   = $"Migrare parole plain text -> Argon2id ({legacyUsers.Count} conturi)",
                     IpAddress = CallerIp,
                     Timestamp = DateTime.UtcNow,
                 });
@@ -310,7 +310,7 @@ namespace MAI.Api.Controllers
                 UserId    = user.Id,
                 Username  = CallerUsername,
                 Action    = AuditAction.UserUpdated,
-                Details   = $"SUCCES: Rol schimbat @{user.Username}: {old} -> {dto.Role}",
+                Details   = $"Rol schimbat @{user.Username}: {old} -> {dto.Role}",
                 IpAddress = CallerIp,
                 Timestamp = DateTime.UtcNow,
             });
@@ -335,7 +335,7 @@ namespace MAI.Api.Controllers
                 UserId    = user.Id,
                 Username  = CallerUsername,
                 Action    = AuditAction.UserUpdated,
-                Details   = $"SUCCES: Cont dezactivat @{user.Username}, sesiuni revocate",
+                Details   = $"Cont dezactivat @{user.Username}, sesiuni revocate",
                 IpAddress = CallerIp,
                 Timestamp = DateTime.UtcNow,
             });
@@ -356,7 +356,7 @@ namespace MAI.Api.Controllers
                 UserId    = user.Id,
                 Username  = CallerUsername,
                 Action    = AuditAction.UserUpdated,
-                Details   = $"SUCCES: Cont activat @{user.Username}",
+                Details   = $"Cont activat @{user.Username}",
                 IpAddress = CallerIp,
                 Timestamp = DateTime.UtcNow,
             });
