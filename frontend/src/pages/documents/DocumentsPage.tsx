@@ -183,12 +183,12 @@ export default function DocumentsPage() {
             />
 
             {/* Căutare */}
-            <div className="relative w-full max-w-md">
+            <div className="relative w-full sm:max-w-md">
                 <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-mai-300" />
                 <input value={query} onChange={e => setQuery(e.target.value)}
                        placeholder="Căutare după titlu, număr sau cuvinte cheie…"
-                       className="w-full rounded-lg border border-mai-200 bg-white pl-9 pr-3 py-2.5 text-sm
-                        focus:outline-none focus:ring-2 focus:ring-mai-500" />
+                       className="w-full rounded-lg border border-mai-200 dark:border-mai-600 bg-white dark:bg-mai-800 dark:text-mai-200 pl-9 pr-3 py-2.5 text-sm
+                        focus:outline-none focus:ring-2 focus:ring-mai-500 dark:focus:ring-mai-400" />
             </div>
 
             {/* Loading */}
@@ -201,13 +201,13 @@ export default function DocumentsPage() {
 
             {/* Lista */}
             {!loading && results.length === 0 && (
-                <div className="bg-white rounded-xl shadow-card border border-mai-100/50 py-14 text-center">
-                    <Landmark size={36} className="mx-auto text-mai-200 mb-3" />
-                    <p className="text-sm font-medium text-mai-400">
+                <div className="bg-white dark:bg-mai-800 rounded-xl shadow-card dark:shadow-none border border-mai-100/50 dark:border-mai-700 py-14 text-center">
+                    <Landmark size={36} className="mx-auto text-mai-200 dark:text-mai-600 mb-3" />
+                    <p className="text-sm font-medium text-mai-400 dark:text-mai-400">
                         {query ? 'Niciun document găsit.' : 'Niciun document publicat.'}
                     </p>
                     {canPublish && !query && (
-                        <p className="text-xs text-mai-300 mt-1">
+                        <p className="text-xs text-mai-300 dark:text-mai-500 mt-1">
                             Publicați primul document folosind butonul de mai sus.
                         </p>
                     )}
@@ -218,23 +218,23 @@ export default function DocumentsPage() {
                 <div className="space-y-3">
                     {results.map(d => (
                         <div key={d.id}
-                             className="bg-white rounded-xl shadow-card border border-mai-100/50 overflow-hidden">
+                             className="bg-white dark:bg-mai-800 rounded-xl shadow-card dark:shadow-none border border-mai-100/50 dark:border-mai-700 overflow-hidden">
 
                             {/* Header card */}
                             <button
                                 onClick={() => setExpanded(expanded === d.id ? null : d.id)}
-                                className="w-full flex items-center gap-4 px-5 py-4 text-left hover:bg-mai-50/50 transition-colors">
+                                className="w-full flex items-center gap-4 px-5 py-4 text-left hover:bg-mai-50/50 dark:hover:bg-mai-700/30 transition-colors">
                                 {expanded === d.id
                                     ? <ChevronDown  size={18} className="text-mai-400 shrink-0" />
                                     : <ChevronRight size={18} className="text-mai-400 shrink-0" />}
 
-                                <div className="w-10 h-10 rounded-lg bg-mai-50 text-mai-600 flex items-center justify-center shrink-0">
+                                <div className="w-10 h-10 rounded-lg bg-mai-50 text-mai-600 dark:text-mai-300 flex items-center justify-center shrink-0">
                                     <Landmark size={18} />
                                 </div>
 
                                 <div className="flex-1 min-w-0">
-                                    <p className="font-semibold text-mai-900 truncate">{d.title}</p>
-                                    <p className="text-xs text-mai-400 mt-0.5">
+                                    <p className="font-semibold text-mai-900 dark:text-mai-100 truncate">{d.title}</p>
+                                    <p className="text-xs text-mai-400 dark:text-mai-500 mt-0.5">
                                         Nr. {d.number} · Publicat de {d.publishedBy} · {formatDateTime(d.publishedAt)}
                                     </p>
                                 </div>
@@ -243,7 +243,7 @@ export default function DocumentsPage() {
                                     <Badge tone={CATEGORY_BADGE[d.category as DocCategory] ?? 'gray'}>
                                         {CATEGORY_LABELS[d.category as DocCategory] ?? d.category}
                                     </Badge>
-                                    <span className="text-xs text-mai-400 bg-mai-50 px-2 py-1 rounded-full">
+                                    <span className="text-xs text-mai-400 bg-mai-50 dark:bg-mai-700 px-2 py-1 rounded-full">
                                         v{d.currentVersion}
                                     </span>
                                 </div>
@@ -251,12 +251,12 @@ export default function DocumentsPage() {
 
                             {/* Body expandat */}
                             {expanded === d.id && (
-                                <div className="px-5 pb-5 border-t border-mai-100 pt-4 space-y-4">
+                                <div className="px-5 pb-5 border-t border-mai-100 dark:border-mai-700 pt-4 space-y-4">
                                     {d.keywords.length > 0 && (
                                         <div className="flex flex-wrap gap-1.5">
                                             {d.keywords.map(k => (
                                                 <span key={k}
-                                                      className="text-xs bg-mai-50 text-mai-600 px-2.5 py-1 rounded-full border border-mai-100">
+                                                      className="text-xs bg-mai-50 dark:bg-mai-700 text-mai-600 dark:text-mai-300 px-2.5 py-1 rounded-full border border-mai-100 dark:border-mai-700">
                                                     {k}
                                                 </span>
                                             ))}
@@ -272,7 +272,7 @@ export default function DocumentsPage() {
                                             {d.versions.map(v => (
                                                 <div key={v.version}
                                                      className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm
-                                                        ${v.isArchived ? 'bg-mai-50/50 text-mai-400' : 'bg-mai-700 text-white'}`}>
+                                                        ${v.isArchived ? 'bg-mai-50/50 dark:bg-mai-700/30 text-mai-400' : 'bg-mai-700 dark:bg-mai-600 text-white'}`}>
                                                     <span className="font-mono text-xs font-semibold">v{v.version}</span>
                                                     <span className="flex-1 truncate">{v.fileName}</span>
                                                     {v.changeNotes && (
@@ -318,10 +318,10 @@ export default function DocumentsPage() {
                            onChange={e => setNumber(e.target.value)}
                            placeholder="ex: MAI-2026-142" />
                     <div>
-                        <label className="block text-sm font-medium text-mai-800 mb-1.5">Categorie</label>
+                        <label className="block text-sm font-medium text-mai-800 dark:text-mai-200 mb-1.5">Categorie</label>
                         <select value={category} onChange={e => setCategory(e.target.value as DocCategory)}
                                 className="w-full rounded-lg border border-mai-200 px-3.5 py-2.5 text-sm
-                                focus:outline-none focus:ring-2 focus:ring-mai-500">
+                                focus:outline-none focus:ring-2 focus:ring-mai-500 dark:focus:ring-mai-400 dark:bg-mai-800 dark:text-mai-200 dark:border-mai-600">
                             {Object.entries(CATEGORY_LABELS).map(([v, l]) => (
                                 <option key={v} value={v}>{l}</option>
                             ))}
@@ -331,13 +331,13 @@ export default function DocumentsPage() {
                            onChange={e => setKeywords(e.target.value)}
                            placeholder="ex: securitate, acces, date personale" />
                     <div>
-                        <label className="block text-sm font-medium text-mai-800 mb-1.5">Fișier *</label>
-                        <label className="flex items-center gap-3 px-4 py-3 rounded-lg border border-dashed
-                            border-mai-200 hover:border-mai-400 cursor-pointer bg-mai-50/50 transition-colors">
+                        <label className="block text-sm font-medium text-mai-800 dark:text-mai-200 mb-1.5">Fișier *</label>
+                        <label className="flex items-center gap-3 px-4 py-3 rounded-lg border border-dashed dark:border-mai-600
+                            border-mai-200 dark:border-mai-600 hover:border-mai-400 dark:hover:border-mai-500 cursor-pointer bg-mai-50/50 dark:bg-mai-700/30 transition-colors">
                             <input type="file" className="hidden" accept=".pdf,.doc,.docx"
                                    onChange={e => setDocFile(e.target.files?.[0] ?? null)} />
                             <FilePlus2 size={18} className="text-mai-400" />
-                            <span className="text-sm text-mai-500">
+                            <span className="text-sm text-mai-500 dark:text-mai-300">
                                 {docFile ? docFile.name : 'Selectează fișier PDF sau DOC(X)'}
                             </span>
                         </label>
@@ -354,15 +354,15 @@ export default function DocumentsPage() {
             <Modal open={!!updateTarget} title="Adaugă versiune nouă"
                    onClose={() => { setUpdateTarget(null); setUpdateFile(null); setChangeNote(''); }}>
                 <div className="space-y-4">
-                    <p className="text-sm text-mai-500">
+                    <p className="text-sm text-mai-500 dark:text-mai-300">
                         Versiunea anterioară va fi arhivată automat. Încărcați fișierul actualizat:
                     </p>
-                    <label className="flex items-center gap-3 px-4 py-3 rounded-lg border border-dashed
-                        border-mai-200 hover:border-mai-400 cursor-pointer bg-mai-50/50 transition-colors">
+                    <label className="flex items-center gap-3 px-4 py-3 rounded-lg border border-dashed dark:border-mai-600
+                        border-mai-200 dark:border-mai-600 hover:border-mai-400 dark:hover:border-mai-500 cursor-pointer bg-mai-50/50 dark:bg-mai-700/30 transition-colors">
                         <input type="file" className="hidden" accept=".pdf,.doc,.docx"
                                onChange={e => setUpdateFile(e.target.files?.[0] ?? null)} />
                         <FilePlus2 size={18} className="text-mai-400" />
-                        <span className="text-sm text-mai-500">
+                        <span className="text-sm text-mai-500 dark:text-mai-300">
                             {updateFile ? updateFile.name : 'Selectează fișier PDF sau DOC(X)'}
                         </span>
                     </label>

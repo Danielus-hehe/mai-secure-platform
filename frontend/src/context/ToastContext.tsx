@@ -42,24 +42,24 @@ function ToastBubble({ id, message, variant, count, onDismiss }: ToastData & { o
     return (
         <div
             className={`toast-enter pointer-events-auto relative overflow-hidden rounded-xl
-                border bg-white shadow-xl flex items-start gap-3 px-4 py-3.5 ${border}`}
+                border bg-white dark:bg-mai-800 shadow-xl dark:shadow-none flex items-start gap-3 px-4 py-3.5 ${border}`}
             role="alert"
         >
             <div className={`absolute inset-y-0 left-0 w-1 ${bar}`} />
             <div className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${iconBg}`}>
                 <Icon size={16} className={iconColor} />
             </div>
-            <p className="flex-1 text-sm font-medium text-mai-900 leading-snug pt-0.5">
+            <p className="flex-1 text-sm font-medium text-mai-900 dark:text-mai-100 leading-snug pt-0.5">
                 {message}
                 {count > 1 && (
-                    <span className="ml-2 rounded-full bg-mai-100 px-1.5 py-0.5 text-xs font-semibold text-mai-500">
+                    <span className="ml-2 rounded-full bg-mai-100 dark:bg-mai-700 px-1.5 py-0.5 text-xs font-semibold text-mai-500 dark:text-mai-400">
                         ×{count}
                     </span>
                 )}
             </p>
             <button
                 onClick={() => onDismiss(id)}
-                className="shrink-0 text-mai-300 hover:text-mai-600 mt-0.5 transition-colors"
+                className="shrink-0 text-mai-300 dark:text-mai-500 hover:text-mai-600 dark:hover:text-mai-300 mt-0.5 transition-colors"
             >
                 <X size={15} />
             </button>

@@ -9,14 +9,13 @@ export function AppLayout() {
     const [sidebarOpen, setSidebarOpen] = useState(false);
 
     return (
-        <div className="min-h-screen bg-mai-50">
+        <div className="min-h-screen bg-mai-50 dark:bg-mai-950">
             <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
             <div className="lg:pl-64 flex flex-col min-h-screen">
                 <TopBar onMenuClick={() => setSidebarOpen(true)} />
-                <main className="flex-1 p-6">
-                    {/* ErrorBoundary: prinde crash-urile din pagini și afișează fallback
-                        în loc de ecranul alb care blochează toată aplicația */}
+                {/* p-4 pe mobil, p-6 pe desktop — câștig de ~32px pe ecran mic */}
+                <main className="flex-1 p-4 sm:p-6">
                     <ErrorBoundary>
                         <Outlet />
                     </ErrorBoundary>

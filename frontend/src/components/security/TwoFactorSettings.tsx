@@ -180,9 +180,9 @@ export default function TwoFactorSettings() {
 
     if (loading) {
         return (
-            <div className="bg-white rounded-2xl shadow-card border border-mai-100 p-6 flex items-center gap-3">
+            <div className="bg-white dark:bg-mai-800 rounded-2xl shadow-card dark:shadow-none border border-mai-100 dark:border-mai-700 p-6 flex items-center gap-3">
                 <Loader2 size={18} className="animate-spin text-mai-400" />
-                <span className="text-sm text-mai-500">Se verifică setările de securitate…</span>
+                <span className="text-sm text-mai-500 dark:text-mai-400 dark:text-mai-300">Se verifică setările de securitate…</span>
             </div>
         );
     }
@@ -190,25 +190,25 @@ export default function TwoFactorSettings() {
     const enabled = status?.enabled ?? false;
 
     return (
-        <div className="bg-white rounded-2xl shadow-card border border-mai-100 p-6 space-y-5">
+        <div className="bg-white dark:bg-mai-800 rounded-2xl shadow-card dark:shadow-none border border-mai-100 dark:border-mai-700 p-6 space-y-5">
 
             {/* Antet */}
             <div className="flex items-start justify-between gap-4">
                 <div className="flex items-start gap-3">
                     <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0
-                        ${enabled ? 'bg-emerald-50 text-emerald-600' : 'bg-mai-50 text-mai-500'}`}>
+                        ${enabled ? 'bg-emerald-50 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400' : 'bg-mai-50 dark:bg-mai-700 text-mai-500 dark:text-mai-300'}`}>
                         {enabled ? <ShieldCheck size={20} /> : <ShieldOff size={20} />}
                     </div>
                     <div>
-                        <h2 className="text-lg font-bold text-mai-900">Autentificare în doi pași</h2>
-                        <p className="text-xs text-mai-500 mt-0.5">
+                        <h2 className="text-lg font-bold text-mai-900 dark:text-white">Autentificare în doi pași</h2>
+                        <p className="text-xs text-mai-500 dark:text-mai-400 mt-0.5">
                             Un cod generat pe telefon, cerut după parolă. Opțional.
                         </p>
                     </div>
                 </div>
 
                 <span className={`px-2.5 py-1 rounded-full text-xs font-medium shrink-0
-                    ${enabled ? 'bg-emerald-50 text-emerald-700' : 'bg-mai-100 text-mai-600'}`}>
+                    ${enabled ? 'bg-emerald-50 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400' : 'bg-mai-100 dark:bg-mai-700 text-mai-600 dark:text-mai-300'}`}>
                     {enabled ? 'Activă' : 'Inactivă'}
                 </span>
             </div>
@@ -223,7 +223,7 @@ export default function TwoFactorSettings() {
                     </p>
 
                     {status?.recommended && (
-                        <p className="text-xs text-gold-600 bg-gold-500/10 rounded-lg p-3">
+                        <p className="text-xs text-gold-600 dark:text-gold-400 bg-gold-500/10 dark:bg-gold-500/15 rounded-lg p-3">
                             Contul dumneavoastră are drepturi extinse. Activarea este recomandată,
                             dar rămâne la alegerea dumneavoastră.
                         </p>
@@ -238,7 +238,7 @@ export default function TwoFactorSettings() {
             {/* ─── Pasul 1: parola ─── */}
             {stage === 'password' && (
                 <div className="space-y-4">
-                    <p className="text-sm text-mai-600">
+                    <p className="text-sm text-mai-600 dark:text-mai-300">
                         Confirmați parola. Fără această verificare, cineva care găsește
                         calculatorul deblocat ar putea înrola propriul telefon pe contul dumneavoastră.
                     </p>
@@ -261,13 +261,13 @@ export default function TwoFactorSettings() {
             {/* ─── Pasul 2: scanare + confirmare ─── */}
             {stage === 'scan' && setup && (
                 <div className="space-y-4">
-                    <p className="text-sm text-mai-600">
+                    <p className="text-sm text-mai-600 dark:text-mai-300">
                         Scanați codul cu aplicația de autentificare, apoi introduceți codul de
                         {' '}{setup.digits} cifre pe care îl afișează.
                     </p>
 
                     <div className="flex flex-col sm:flex-row gap-5 items-start">
-                        <div className="p-4 bg-white border border-mai-200 rounded-xl shrink-0 mx-auto sm:mx-0">
+                        <div className="p-4 bg-white border border-mai-200 dark:border-mai-600 rounded-xl shrink-0 mx-auto sm:mx-0">
                             <QRCodeSVG value={setup.otpauthUri} size={168} level="M" />
                         </div>
 
@@ -283,7 +283,7 @@ export default function TwoFactorSettings() {
                                 <button
                                     type="button"
                                     onClick={() => setShowSecret(v => !v)}
-                                    className="text-xs text-mai-600 hover:text-mai-800 font-medium"
+                                    className="text-xs text-mai-600 dark:text-mai-300 hover:text-mai-800 dark:hover:text-white font-medium"
                                 >
                                     {showSecret ? 'Ascunde cheia' : 'Nu pot scana codul QR'}
                                 </button>
@@ -293,7 +293,7 @@ export default function TwoFactorSettings() {
                                         <p className="text-xs text-mai-500 mb-1">
                                             Introduceți manual această cheie, tip „time-based”:
                                         </p>
-                                        <code className="block text-sm font-mono bg-mai-50 rounded-lg p-2.5 break-all text-mai-900">
+                                        <code className="block text-sm font-mono bg-mai-50 dark:bg-mai-900 rounded-lg p-2.5 break-all text-mai-900 dark:text-white">
                                             {setup.secretFormatted}
                                         </code>
                                     </div>
@@ -329,7 +329,7 @@ export default function TwoFactorSettings() {
                 <div className="space-y-4">
                     <div className="flex items-start gap-3 p-3 rounded-xl bg-gold-500/10">
                         <AlertTriangle size={16} className="text-gold-600 mt-0.5 shrink-0" />
-                        <p className="text-xs text-gold-700 leading-relaxed">
+                        <p className="text-xs text-gold-700 dark:text-gold-300 leading-relaxed">
                             Salvați aceste coduri acum, într-un loc sigur, în afara telefonului.
                             <strong> Nu vor mai fi afișate niciodată.</strong> Fiecare cod
                             funcționează o singură dată și este singura cale de intrare dacă
@@ -339,7 +339,7 @@ export default function TwoFactorSettings() {
 
                     <div className="grid grid-cols-2 gap-2">
                         {recovery.map(c => (
-                            <code key={c} className="text-sm font-mono bg-mai-50 rounded-lg px-3 py-2 text-center text-mai-900">
+                            <code key={c} className="text-sm font-mono bg-mai-50 dark:bg-mai-900 rounded-lg px-3 py-2 text-center text-mai-900 dark:text-white">
                                 {c}
                             </code>
                         ))}
@@ -362,8 +362,8 @@ export default function TwoFactorSettings() {
                 <>
                     <div className="space-y-2 text-sm">
                         <div className="flex items-center justify-between">
-                            <span className="text-mai-500">Activată la</span>
-                            <span className="font-medium text-mai-900">
+                            <span className="text-mai-500 dark:text-mai-400 dark:text-mai-300">Activată la</span>
+                            <span className="font-medium text-mai-900 dark:text-white">
                                 {status?.enrolledAt
                                     ? new Date(status.enrolledAt).toLocaleString('ro-RO', {
                                         dateStyle: 'short', timeStyle: 'short',
@@ -372,7 +372,7 @@ export default function TwoFactorSettings() {
                             </span>
                         </div>
                         <div className="flex items-center justify-between">
-                            <span className="text-mai-500">Coduri de recuperare rămase</span>
+                            <span className="text-mai-500 dark:text-mai-400 dark:text-mai-300">Coduri de recuperare rămase</span>
                             <span className={`font-medium ${
                                 (status?.remainingRecoveryCodes ?? 0) <= 2 ? 'text-gold-600' : 'text-mai-900'
                             }`}>
@@ -382,7 +382,7 @@ export default function TwoFactorSettings() {
                     </div>
 
                     {(status?.remainingRecoveryCodes ?? 0) <= 2 && (
-                        <p className="text-xs text-gold-600 bg-gold-500/10 rounded-lg p-3">
+                        <p className="text-xs text-gold-600 dark:text-gold-400 bg-gold-500/10 dark:bg-gold-500/15 rounded-lg p-3">
                             Vă rămân puține coduri de recuperare. Regenerați-le cât timp mai aveți
                             acces la aplicația de autentificare.
                         </p>
@@ -406,7 +406,7 @@ export default function TwoFactorSettings() {
             {/* ─── Dezactivare / regenerare: parolă + cod ─── */}
             {stage === 'disable' && (
                 <div className="space-y-4">
-                    <p className="text-sm text-mai-600">
+                    <p className="text-sm text-mai-600 dark:text-mai-300">
                         Sunt necesare <strong>și parola, și un cod valid</strong>. Dacă ar fi
                         suficientă parola, cineva care v-o află ar putea pur și simplu să oprească
                         al doilea factor — iar 2FA nu ar mai apăra de nimic.

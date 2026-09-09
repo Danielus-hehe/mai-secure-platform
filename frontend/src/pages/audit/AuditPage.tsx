@@ -20,13 +20,13 @@ const ACTION_LABELS: Record<ActionKey, string> = {
     ADMIN: 'Administrare',
 };
 
-const selectCls = `rounded-lg border border-mai-200 bg-white px-3 py-2 text-sm
+const selectCls = `rounded-lg border border-mai-200 dark:border-mai-600 bg-white dark:bg-mai-800 dark:text-mai-200 px-3 py-2 text-sm
     focus:outline-none focus:ring-2 focus:ring-mai-500 cursor-pointer
-    hover:border-mai-400 transition-colors`;
+    hover:border-mai-400 dark:hover:border-mai-500 transition-colors`;
 
-const inputCls = `rounded-lg border border-mai-200 bg-white px-3 py-2 text-sm
+const inputCls = `rounded-lg border border-mai-200 dark:border-mai-600 bg-white dark:bg-mai-800 dark:text-mai-200 px-3 py-2 text-sm
     focus:outline-none focus:ring-2 focus:ring-mai-500
-    hover:border-mai-400 transition-colors`;
+    hover:border-mai-400 dark:hover:border-mai-500 transition-colors`;
 
 interface AuditEntry {
     id: string;
@@ -212,7 +212,7 @@ export default function AuditPage() {
 
             {/* Filtre */}
             <div className="space-y-3">
-                <div className="flex flex-wrap items-center gap-3">
+                <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-3">
                     <div className="relative">
                         <Search
                             size={15}
@@ -223,7 +223,7 @@ export default function AuditPage() {
                             value={searchInput}
                             onChange={(e) => setSearchInput(e.target.value)}
                             placeholder="Caută în utilizator, detalii, IP…"
-                            className={`${inputCls} w-72 pl-9`}
+                            className={`${inputCls} w-full sm:w-72 pl-9 dark:text-mai-200`}
                         />
                     </div>
 
@@ -262,8 +262,8 @@ export default function AuditPage() {
                     </select>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-3">
-                    <label className="flex items-center gap-2 text-sm text-mai-500">
+                <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-3">
+                    <label className="flex items-center gap-2 text-sm text-mai-500 dark:text-mai-400 dark:text-mai-400">
                         De la
                         <input
                             type="date"
@@ -273,7 +273,7 @@ export default function AuditPage() {
                         />
                     </label>
 
-                    <label className="flex items-center gap-2 text-sm text-mai-500">
+                    <label className="flex items-center gap-2 text-sm text-mai-500 dark:text-mai-400 dark:text-mai-400">
                         Până la
                         <input
                             type="date"
@@ -292,7 +292,7 @@ export default function AuditPage() {
                         </button>
                     )}
 
-                    <p className="ml-auto flex items-center gap-1.5 self-center text-sm text-mai-400">
+                    <p className="ml-auto flex items-center gap-1.5 self-center text-sm text-mai-400 dark:text-mai-400">
                         <ScrollText size={14} />
                         {totalCount.toLocaleString('ro-RO')} înregistrări
                     </p>
@@ -300,16 +300,16 @@ export default function AuditPage() {
             </div>
 
             {/* Tabel */}
-            <div className="overflow-hidden rounded-xl border border-mai-100/50 bg-white shadow-card">
+            <div className="overflow-hidden rounded-xl border border-mai-100/50 dark:border-mai-700 bg-white dark:bg-mai-800 shadow-card dark:shadow-none">
                 {loading ? (
-                    <div className="flex items-center justify-center gap-3 py-14 text-mai-400">
+                    <div className="flex items-center justify-center gap-3 py-14 text-mai-400 dark:text-mai-400">
                         <Loader2 size={20} className="animate-spin" />
                         <span className="text-sm">Se încarcă jurnalul…</span>
                     </div>
                 ) : entries.length === 0 ? (
                     <div className="py-14 text-center">
                         <ScrollText size={36} className="mx-auto mb-3 text-mai-200" />
-                        <p className="text-sm font-medium text-mai-400">
+                        <p className="text-sm font-medium text-mai-400 dark:text-mai-400">
                             Nicio înregistrare pentru filtrele selectate.
                         </p>
                     </div>
@@ -318,7 +318,7 @@ export default function AuditPage() {
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm">
                                 <thead>
-                                <tr className="bg-mai-50 text-left text-xs uppercase tracking-wide text-mai-500">
+                                <tr className="bg-mai-50 dark:bg-mai-900 text-left text-xs uppercase tracking-wide text-mai-500 dark:text-mai-400 dark:text-mai-400">
                                     <th className="px-5 py-3 font-semibold">Timestamp</th>
                                     <th className="px-5 py-3 font-semibold">Utilizator</th>
                                     <th className="px-5 py-3 font-semibold">Acțiune</th>
@@ -327,26 +327,26 @@ export default function AuditPage() {
                                     <th className="px-5 py-3 font-semibold">Rezultat</th>
                                 </tr>
                                 </thead>
-                                <tbody className="divide-y divide-mai-50">
+                                <tbody className="divide-y divide-mai-50 dark:divide-mai-700">
                                 {entries.map((e) => (
                                     <tr
                                         key={e.id}
-                                        className={`transition-colors hover:bg-mai-100/60
-                                            ${e.result === 'ESEC' ? 'bg-red-50/60' : ''}`}
+                                        className={`transition-colors hover:bg-mai-100/60 dark:hover:bg-mai-700/40
+                                            ${e.result === 'ESEC' ? 'bg-red-50/60 dark:bg-red-900/20' : ''}`}
                                     >
-                                        <td className="whitespace-nowrap px-5 py-3 text-mai-500">
+                                        <td className="whitespace-nowrap px-5 py-3 text-mai-500 dark:text-mai-400 dark:text-mai-400">
                                             {formatDateTime(e.timestamp)}
                                         </td>
-                                        <td className="whitespace-nowrap px-5 py-3 font-medium text-mai-900">
+                                        <td className="whitespace-nowrap px-5 py-3 font-medium text-mai-900 dark:text-mai-100 dark:text-white">
                                             {e.userName}
                                         </td>
                                         <td className="whitespace-nowrap px-5 py-3">
                                             {ACTION_LABELS[e.action as ActionKey] ?? e.action}
                                         </td>
-                                        <td className="max-w-xs truncate px-5 py-3 text-mai-500">
+                                        <td className="max-w-xs truncate px-5 py-3 text-mai-500 dark:text-mai-400 dark:text-mai-400">
                                             {e.target}
                                         </td>
-                                        <td className="whitespace-nowrap px-5 py-3 font-mono text-xs text-mai-400">
+                                        <td className="whitespace-nowrap px-5 py-3 font-mono text-xs text-mai-400 dark:text-mai-500 dark:text-mai-400">
                                             {e.ipAddress}
                                         </td>
                                         <td className="px-5 py-3">

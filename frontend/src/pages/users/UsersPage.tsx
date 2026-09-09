@@ -227,18 +227,18 @@ export default function UsersPage() {
             />
 
             {/* Căutare server-side */}
-            <div className="relative w-full max-w-md">
-                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-mai-300" />
+            <div className="relative w-full sm:max-w-md">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-mai-300 dark:text-mai-500" />
                 <input
                     value={searchInput}
                     onChange={e => setSearchInput(e.target.value)}
                     placeholder="Caută după nume, utilizator, email sau direcție…"
-                    className="w-full rounded-lg border border-mai-200 py-2 pl-9 pr-3 text-sm
-                               focus:border-mai-500 focus:outline-none focus:ring-2 focus:ring-mai-500/20"
+                    className="w-full rounded-lg border border-mai-200 dark:border-mai-600 bg-white dark:bg-mai-800 dark:text-mai-200 py-2 pl-9 pr-3 text-sm
+                               dark:focus:border-mai-400 focus:border-mai-500 focus:outline-none focus:ring-2 focus:ring-mai-500/20"
                 />
             </div>
 
-            <div className="bg-white rounded-xl shadow-card border border-mai-100/50 overflow-hidden">
+            <div className="bg-white dark:bg-mai-800 rounded-xl shadow-card dark:shadow-none border border-mai-100/50 dark:border-mai-700 overflow-hidden">
 
                 {/* Loading */}
                 {loading && (
@@ -250,7 +250,7 @@ export default function UsersPage() {
 
                 {/* Gol */}
                 {!loading && users.length === 0 && (
-                    <div className="text-center py-16 text-mai-400 text-sm">
+                    <div className="text-center py-16 text-mai-400 dark:text-mai-400 text-sm">
                         {search
                             ? 'Niciun utilizator nu corespunde căutării.'
                             : 'Niciun utilizator găsit în baza de date.'}
@@ -263,7 +263,7 @@ export default function UsersPage() {
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm">
                                 <thead>
-                                <tr className="bg-mai-50 text-left text-xs uppercase tracking-wide text-mai-500">
+                                <tr className="bg-mai-50 dark:bg-mai-900 text-left text-xs uppercase tracking-wide text-mai-500">
                                     <th className="px-5 py-3 font-semibold">Utilizator</th>
                                     <th className="px-5 py-3 font-semibold">Direcție</th>
                                     <th className="px-5 py-3 font-semibold">Rol</th>
@@ -272,16 +272,16 @@ export default function UsersPage() {
                                     <th className="px-5 py-3 font-semibold text-right">Acțiuni</th>
                                 </tr>
                                 </thead>
-                                <tbody className="divide-y divide-mai-50">
+                                <tbody className="divide-y divide-mai-50 dark:divide-mai-700">
                                 {users.map(u => (
-                                    <tr key={u.id} className="hover:bg-mai-100/60 transition-colors">
+                                    <tr key={u.id} className="hover:bg-mai-100/60 dark:hover:bg-mai-700/40 transition-colors">
 
                                         <td className="px-5 py-3.5">
-                                            <p className="font-medium text-mai-900">{u.fullName || u.username}</p>
-                                            <p className="text-xs text-mai-400">@{u.username}</p>
+                                            <p className="font-medium text-mai-900 dark:text-white">{u.fullName || u.username}</p>
+                                            <p className="text-xs text-mai-400 dark:text-mai-500">@{u.username}</p>
                                         </td>
 
-                                        <td className="px-5 py-3.5 text-mai-500 whitespace-nowrap">
+                                        <td className="px-5 py-3.5 text-mai-500 dark:text-mai-300 whitespace-nowrap">
                                             {u.department || '—'}
                                         </td>
 
@@ -301,7 +301,7 @@ export default function UsersPage() {
                                             </select>
                                         </td>
 
-                                        <td className="px-5 py-3.5 text-xs text-mai-400 whitespace-nowrap">
+                                        <td className="px-5 py-3.5 text-xs text-mai-400 dark:text-mai-500 whitespace-nowrap">
                                             {formatDateTime(u.createdAt)}
                                         </td>
 
@@ -390,7 +390,7 @@ export default function UsersPage() {
                            placeholder="ex: Direcția TIC" />
 
                     <div>
-                        <label className="block text-sm font-medium text-mai-800 mb-1.5">Rol</label>
+                        <label className="block text-sm font-medium text-mai-800 dark:text-mai-200 mb-1.5">Rol</label>
                         <select
                             value={form.role}
                             onChange={e => setForm(f => ({ ...f, role: e.target.value as Role }))}
@@ -404,8 +404,8 @@ export default function UsersPage() {
                         </select>
                     </div>
 
-                    <div className="rounded-lg bg-mai-50 border border-mai-100 px-3.5 py-2.5">
-                        <p className="text-xs leading-relaxed text-mai-500">
+                    <div className="rounded-lg bg-mai-50 dark:bg-mai-900 border border-mai-100 dark:border-mai-700 px-3.5 py-2.5">
+                        <p className="text-xs leading-relaxed text-mai-500 dark:text-mai-400">
                             Contul nou nu are chei criptografice. Ele se generează automat la prima
                             autentificare a utilizatorului. Până atunci, nu i se pot trimite fișiere
                             criptate și nu apare în lista de destinatari.

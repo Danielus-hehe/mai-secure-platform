@@ -27,7 +27,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ArrowLeftRight, Upload, Download, Search, Trash2, Loader2,
-    ShieldCheck, ShieldAlert, Lock, Inbox, Send, FileWarning,
+    ShieldCheck, ShieldAlert, Lock, Inbox, Send, FileWarning, AlertTriangle,
 } from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader';
 import Badge from '../../components/ui/Badge';
@@ -92,8 +92,6 @@ export default function TransfersPage() {
     const [busyId, setBusyId] = useState<string | null>(null);
     const [deletingId, setDeletingId] = useState<string | null>(null);
 
-    // Căutarea se trimite abia după ce utilizatorul se oprește din tastat.
-    // Fără debounce, fiecare literă înseamnă o cerere și un ILIKE pe toată tabela.
     useEffect(() => {
         const timer = window.setTimeout(() => {
             setSearch(searchInput.trim());
@@ -246,9 +244,6 @@ export default function TransfersPage() {
 
             saveDecryptedFile(result.plaintext, envelope.fileName);
 
-            // Confirmarea se trimite abia acum: dacă statusul s-ar seta la
-            // emiterea URL-ului, un transfer eșuat ar apărea în jurnalul de
-            // audit ca preluat cu succes.
             if (transfer.recipientId === String(user?.id)) {
                 await confirmTransfer(transfer.id, result.signatureValid);
             }
@@ -291,8 +286,9 @@ export default function TransfersPage() {
     // ── Render ───────────────────────────────────────────────────────────────
 
     const selectClass =
-        'rounded-lg border border-mai-200 bg-white px-3 py-2 text-sm ' +
-        'focus:border-mai-500 focus:outline-none focus:ring-2 focus:ring-mai-500/20';
+        'rounded-lg border border-mai-200 dark:border-mai-600 bg-white dark:bg-mai-800 ' +
+        'dark:text-mai-200 px-3 py-2 text-sm ' +
+        'focus:border-mai-500 focus:outline-none focus:ring-2 focus:ring-mai-500/20 dark:focus:ring-mai-400/20';
 
     const recipientHasKeys = useMemo(
         () => recipients.length > 0,
@@ -313,26 +309,43 @@ export default function TransfersPage() {
             />
 
             {fingerprint && (
-                <div className="flex items-center gap-2 rounded-lg border border-mai-100 bg-mai-50 px-4 py-2.5">
-                    <ShieldCheck size={15} className="shrink-0 text-mai-600" />
-                    <p className="text-xs text-mai-500">
+                <div className="flex items-center gap-2 rounded-lg border border-mai-100 dark:border-mai-700
+                    bg-mai-50 dark:bg-mai-800 px-4 py-2.5">
+                    <ShieldCheck size={15} className="shrink-0 text-mai-600 dark:text-mai-400" />
+                    <p className="text-xs text-mai-500 dark:text-mai-400">
                         Amprenta cheii dumneavoastră publice:{' '}
-                        <span className="font-mono font-semibold text-mai-700">{fingerprint}</span>
+                        <span className="font-mono font-semibold text-mai-700 dark:text-mai-200">{fingerprint}</span>
                         {' '}— comparați-o cu colegii pe alt canal pentru a exclude substituirea cheilor.
                     </p>
                 </div>
             )}
 
+            {/* ── Banner: limitare nume fișiere necriptate ──────────────── */}
+            <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 dark:border-amber-700/50
+                bg-amber-50 dark:bg-amber-900/20 px-4 py-3">
+                <AlertTriangle size={15} className="shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+                <p className="text-xs text-amber-800 dark:text-amber-300 leading-relaxed">
+                    <span className="font-semibold">Limitare cunoscută:</span> conținutul fișierelor
+                    este criptat end-to-end, dar <strong>numele fișierelor nu sunt criptate</strong> — serverul
+                    le vede în clar, pentru a permite căutarea pe partea de server.
+                    Evitați includerea informațiilor sensibile în numele fișierelor.
+                </p>
+            </div>
+
             {/* ── Filtre ────────────────────────────────────────────────── */}
-            <div className="flex flex-wrap items-center gap-3">
-                <div className="relative min-w-56 flex-1">
-                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-mai-300" />
+            <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-3">
+                <div className="relative w-full sm:min-w-56 sm:flex-1">
+                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-mai-300 dark:text-mai-500" />
                     <input
                         value={searchInput}
                         onChange={(e) => setSearchInput(e.target.value)}
                         placeholder="Caută după fișier, expeditor sau destinatar…"
-                        className="w-full rounded-lg border border-mai-200 py-2 pl-9 pr-3 text-sm
-                                   focus:border-mai-500 focus:outline-none focus:ring-2 focus:ring-mai-500/20"
+                        className="w-full rounded-lg border border-mai-200 dark:border-mai-600
+                                   bg-white dark:bg-mai-800 dark:text-mai-100
+                                   py-2 pl-9 pr-3 text-sm
+                                   placeholder:text-mai-300 dark:placeholder:text-mai-500
+                                   focus:border-mai-500 focus:outline-none focus:ring-2 focus:ring-mai-500/20
+                                   dark:focus:ring-mai-400/20"
                     />
                 </div>
 
@@ -359,7 +372,8 @@ export default function TransfersPage() {
             </div>
 
             {/* ── Tabel ─────────────────────────────────────────────────── */}
-            <div className="overflow-hidden rounded-xl border border-mai-100 bg-white">
+            <div className="overflow-hidden rounded-xl border border-mai-100 dark:border-mai-700
+                bg-white dark:bg-mai-800">
                 {loading ? (
                     <div className="flex items-center justify-center gap-3 py-16 text-mai-400">
                         <Loader2 size={18} className="animate-spin" />
@@ -382,7 +396,8 @@ export default function TransfersPage() {
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm">
                                 <thead>
-                                <tr className="border-b border-mai-100 text-left text-xs uppercase tracking-wide text-mai-400">
+                                <tr className="border-b border-mai-100 dark:border-mai-700 text-left text-xs
+                                    uppercase tracking-wide text-mai-400">
                                     <th className="px-5 py-3 font-semibold">Fișier</th>
                                     <th className="px-5 py-3 font-semibold">Direcție</th>
                                     <th className="px-5 py-3 font-semibold">Contraparte</th>
@@ -393,14 +408,15 @@ export default function TransfersPage() {
                                 </thead>
                                 <tbody>
                                 {data.items.map((t) => (
-                                    <tr key={t.id} className="border-b border-mai-50 last:border-0 hover:bg-mai-50/40">
+                                    <tr key={t.id} className="border-b border-mai-50 dark:border-mai-700
+                                        last:border-0 hover:bg-mai-50/40 dark:hover:bg-mai-700/40">
                                         <td className="px-5 py-3">
                                             <div className="flex items-start gap-2">
                                                 {t.isEncrypted
-                                                    ? <Lock size={14} className="mt-0.5 shrink-0 text-green-600" />
-                                                    : <FileWarning size={14} className="mt-0.5 shrink-0 text-amber-500" />}
+                                                    ? <Lock size={14} className="mt-0.5 shrink-0 text-green-600 dark:text-green-400" />
+                                                    : <FileWarning size={14} className="mt-0.5 shrink-0 text-amber-500 dark:text-amber-400" />}
                                                 <div className="min-w-0">
-                                                    <p className="truncate font-medium text-mai-900">{t.fileName}</p>
+                                                    <p className="truncate font-medium text-mai-900 dark:text-mai-100">{t.fileName}</p>
                                                     <p className="text-xs text-mai-400">
                                                         {formatFileSize(t.fileSize)}
                                                         {t.sha256 && (
@@ -415,18 +431,18 @@ export default function TransfersPage() {
 
                                         <td className="px-5 py-3">
                                             {t.isMine ? (
-                                                <span className="inline-flex items-center gap-1.5 text-xs text-mai-500">
+                                                <span className="inline-flex items-center gap-1.5 text-xs text-mai-500 dark:text-mai-300">
                                                         <Send size={13} /> Trimis
                                                     </span>
                                             ) : (
-                                                <span className="inline-flex items-center gap-1.5 text-xs text-mai-500">
+                                                <span className="inline-flex items-center gap-1.5 text-xs text-mai-500 dark:text-mai-300">
                                                         <Inbox size={13} /> Primit
                                                     </span>
                                             )}
                                         </td>
 
                                         <td className="px-5 py-3">
-                                            <p className="text-mai-800">
+                                            <p className="text-mai-800 dark:text-mai-200">
                                                 {t.isMine ? t.recipientName : t.senderName}
                                             </p>
                                             <p className="text-xs text-mai-400">
@@ -434,7 +450,7 @@ export default function TransfersPage() {
                                             </p>
                                         </td>
 
-                                        <td className="px-5 py-3 whitespace-nowrap text-mai-500">
+                                        <td className="px-5 py-3 whitespace-nowrap text-mai-500 dark:text-mai-300">
                                             {formatDateTime(t.createdAt)}
                                         </td>
 
@@ -457,7 +473,8 @@ export default function TransfersPage() {
                                                 {t.isMine && (
                                                     <Button
                                                         variant="ghost"
-                                                        className="!px-2.5 !py-1.5 text-red-600 hover:bg-red-50"
+                                                        className="!px-2.5 !py-1.5 text-red-600 hover:bg-red-50
+                                                            dark:text-red-400 dark:hover:bg-red-900/30"
                                                         disabled={deletingId === t.id}
                                                         onClick={() => void handleDelete(t)}
                                                         title="Șterge transferul"
@@ -496,7 +513,7 @@ export default function TransfersPage() {
             >
                 <div className="space-y-4">
                     <div>
-                        <label htmlFor="recipient" className="mb-1.5 block text-sm font-medium text-mai-700">
+                        <label htmlFor="recipient" className="mb-1.5 block text-sm font-medium text-mai-700 dark:text-mai-200">
                             Destinatar
                         </label>
                         <select
@@ -515,7 +532,7 @@ export default function TransfersPage() {
                         </select>
 
                         {!recipientHasKeys && (
-                            <p className="mt-2 text-xs text-amber-700">
+                            <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
                                 Niciun coleg nu și-a generat încă cheile. Fișierele criptate se pot
                                 trimite doar către utilizatori care s-au autentificat cel puțin o dată
                                 după activarea criptării.
@@ -524,7 +541,7 @@ export default function TransfersPage() {
                     </div>
 
                     <div>
-                        <label htmlFor="file" className="mb-1.5 block text-sm font-medium text-mai-700">
+                        <label htmlFor="file" className="mb-1.5 block text-sm font-medium text-mai-700 dark:text-mai-200">
                             Fișier
                         </label>
                         <input
@@ -532,9 +549,11 @@ export default function TransfersPage() {
                             type="file"
                             disabled={sending}
                             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                            className="w-full rounded-lg border border-mai-200 px-3 py-2 text-sm
-                                       file:mr-3 file:rounded-md file:border-0 file:bg-mai-100
-                                       file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-mai-700"
+                            className="w-full rounded-lg border border-mai-200 dark:border-mai-600
+                                       bg-white dark:bg-mai-800 dark:text-mai-200 px-3 py-2 text-sm
+                                       file:mr-3 file:rounded-md file:border-0 file:bg-mai-100 dark:file:bg-mai-700
+                                       file:px-3 file:py-1.5 file:text-sm file:font-medium
+                                       file:text-mai-700 dark:file:text-mai-200"
                         />
                         {file && (
                             <p className="mt-1.5 text-xs text-mai-400">
@@ -543,24 +562,34 @@ export default function TransfersPage() {
                         )}
                     </div>
 
-                    <div className="rounded-lg border border-mai-100 bg-mai-50 px-4 py-3">
-                        <p className="text-xs leading-relaxed text-mai-500">
+                    <div className="rounded-lg border border-mai-100 dark:border-mai-700
+                        bg-mai-50 dark:bg-mai-900 px-4 py-3">
+                        <p className="text-xs leading-relaxed text-mai-500 dark:text-mai-400">
                             Fișierul se criptează pe acest calculator cu o cheie AES-256-GCM unică,
                             împachetată apoi cu cheia publică a destinatarului. Serverul primește doar
                             cifrotextul și nu îl poate deschide.
                         </p>
                     </div>
 
+                    {/* Avertisment: numele fișierului este vizibil serverului */}
+                    <div className="rounded-lg border border-amber-200 dark:border-amber-700/50
+                        bg-amber-50 dark:bg-amber-900/20 px-4 py-2.5">
+                        <p className="text-xs text-amber-700 dark:text-amber-400 leading-relaxed">
+                            <strong>Atenție:</strong> numele fișierului nu este criptat și va fi
+                            vizibil pe server. Nu includeți informații sensibile în numele fișierului.
+                        </p>
+                    </div>
+
                     {sending && (
                         <div className="space-y-2">
-                            <div className="flex items-center gap-2 text-sm text-mai-600">
+                            <div className="flex items-center gap-2 text-sm text-mai-600 dark:text-mai-300">
                                 <Loader2 size={15} className="animate-spin" />
                                 {sendStage}
                             </div>
                             {uploadPercent > 0 && (
-                                <div className="h-1.5 w-full overflow-hidden rounded-full bg-mai-100">
+                                <div className="h-1.5 w-full overflow-hidden rounded-full bg-mai-100 dark:bg-mai-700">
                                     <div
-                                        className="h-full bg-mai-600 transition-all"
+                                        className="h-full bg-mai-600 dark:bg-mai-400 transition-all"
                                         style={{ width: `${uploadPercent}%` }}
                                     />
                                 </div>
