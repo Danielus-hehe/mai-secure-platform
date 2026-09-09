@@ -37,27 +37,27 @@ export default class ErrorBoundary extends Component<Props, State> {
 
         return (
             <div className="flex flex-col items-center justify-center min-h-[60vh] gap-5 p-8 text-center">
-                <div className="w-16 h-16 rounded-full bg-red-50 flex items-center justify-center">
-                    <AlertTriangle size={28} className="text-red-500" />
+                <div className="w-16 h-16 rounded-full bg-red-50 dark:bg-red-900/40 flex items-center justify-center">
+                    <AlertTriangle size={28} className="text-red-500 dark:text-red-400" />
                 </div>
 
                 <div>
-                    <h2 className="text-lg font-bold text-mai-900">Eroare neașteptată</h2>
-                    <p className="text-sm text-mai-500 mt-1 max-w-sm">
+                    <h2 className="text-lg font-bold text-mai-900 dark:text-white">Eroare neașteptată</h2>
+                    <p className="text-sm text-mai-500 dark:text-mai-300 dark:text-mai-500 mt-1 max-w-sm">
                         {this.state.error?.message ?? 'A apărut o eroare la randarea acestei pagini.'}
                     </p>
                 </div>
 
                 <button
                     onClick={this.handleRetry}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-mai-700 text-white
-                        rounded-xl text-sm font-medium hover:bg-mai-800 transition-colors"
+                    className="flex items-center gap-2 px-5 py-2.5 bg-mai-700 dark:bg-mai-600 text-white
+                        rounded-xl text-sm font-medium hover:bg-mai-800 dark:hover:bg-mai-500 transition-colors"
                 >
                     <RefreshCw size={15} />
                     Reîncercați
                 </button>
 
-                <p className="text-xs text-mai-300">
+                <p className="text-xs text-mai-300 dark:text-mai-500">
                     Dacă problema persistă, reîncărcați pagina complet (F5).
                 </p>
             </div>

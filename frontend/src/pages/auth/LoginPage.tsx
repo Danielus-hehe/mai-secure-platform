@@ -153,26 +153,26 @@ export default function LoginPage() {
             </div>
 
             {/* Formularul */}
-            <div className="flex-1 flex items-center justify-center p-6 bg-mai-50">
+            <div className="flex-1 flex items-center justify-center p-4 sm:p-6 bg-mai-50 dark:bg-mai-950">
                 <div className="w-full max-w-md">
                     <div className="lg:hidden flex items-center justify-center gap-3 mb-8">
                         <div className="w-11 h-11 rounded-full bg-gold-500 flex items-center justify-center text-mai-900 font-bold text-sm">
                             MAI
                         </div>
-                        <p className="text-mai-900 font-bold">Ministerul Afacerilor Interne</p>
+                        <p className="text-mai-900 dark:text-white font-bold">Ministerul Afacerilor Interne</p>
                     </div>
 
-                    <div className="bg-white rounded-2xl shadow-card p-8">
+                    <div className="bg-white dark:bg-mai-800 rounded-2xl shadow-card dark:shadow-none p-5 sm:p-8">
                         {!challenge ? (
                             <>
-                                <h1 className="text-xl font-bold text-mai-900">Autentificare</h1>
+                                <h1 className="text-xl font-bold text-mai-900 dark:text-white">Autentificare</h1>
                                 <p className="text-sm text-mai-400 mt-1 mb-6">
                                     Introduceți datele de acces primite de la administratorul de sistem.
                                 </p>
 
                                 <form onSubmit={handleSubmit} className="space-y-4">
                                     <div className="relative">
-                                        <User size={16} className="absolute left-3.5 top-[42px] text-mai-300 z-10" />
+                                        <User size={16} className="absolute left-3.5 top-[42px] text-mai-300 dark:text-mai-500 z-10" />
                                         <div className="pl-9">
                                             <Input
                                                 id="username"
@@ -187,11 +187,12 @@ export default function LoginPage() {
                                     </div>
 
                                     <div className="relative">
-                                        <Lock size={16} className="absolute left-3.5 top-[42px] text-mai-300 z-10" />
+                                        <Lock size={16} className="absolute left-3.5 top-[42px] text-mai-300 dark:text-mai-500 z-10" />
                                         <button
                                             type="button"
                                             onClick={() => setShowPassword(v => !v)}
-                                            className="absolute right-3.5 top-[42px] text-mai-300 hover:text-mai-500 z-10"
+                                            className="absolute right-3.5 top-[42px] text-mai-300 hover:text-mai-500
+                                                dark:text-mai-500 dark:hover:text-mai-300 z-10"
                                         >
                                             {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                                         </button>
@@ -217,10 +218,11 @@ export default function LoginPage() {
                         ) : (
                             <>
                                 <div className="flex items-center gap-3 mb-1">
-                                    <div className="w-10 h-10 rounded-xl bg-mai-50 text-mai-600 flex items-center justify-center shrink-0">
+                                    <div className="w-10 h-10 rounded-xl bg-mai-50 dark:bg-mai-700 text-mai-600 dark:text-mai-300
+                                        flex items-center justify-center shrink-0">
                                         <Smartphone size={20} />
                                     </div>
-                                    <h1 className="text-xl font-bold text-mai-900">Verificare în doi pași</h1>
+                                    <h1 className="text-xl font-bold text-mai-900 dark:text-white">Verificare în doi pași</h1>
                                 </div>
 
                                 <p className="text-sm text-mai-400 mt-2 mb-6">
@@ -244,7 +246,7 @@ export default function LoginPage() {
                                     />
 
                                     <div className="flex items-center justify-between text-xs">
-                                        <span className={secondsLeft < 30 ? 'text-red-600 font-medium' : 'text-mai-400'}>
+                                        <span className={secondsLeft < 30 ? 'text-red-600 dark:text-red-400 font-medium' : 'text-mai-400'}>
                                             Expiră în {Math.floor(secondsLeft / 60)}:
                                             {String(secondsLeft % 60).padStart(2, '0')}
                                         </span>
@@ -253,7 +255,7 @@ export default function LoginPage() {
                                             <button
                                                 type="button"
                                                 onClick={() => { setUseRecovery(v => !v); setCode(''); }}
-                                                className="text-mai-600 hover:text-mai-800 font-medium"
+                                                className="text-mai-600 dark:text-mai-300 hover:text-mai-800 dark:hover:text-white font-medium"
                                             >
                                                 {useRecovery ? 'Folosesc aplicația' : 'Am pierdut telefonul'}
                                             </button>
@@ -267,14 +269,15 @@ export default function LoginPage() {
                                     <button
                                         type="button"
                                         onClick={cancelTwoFactor}
-                                        className="w-full flex items-center justify-center gap-1.5 text-xs text-mai-400 hover:text-mai-600 pt-1"
+                                        className="w-full flex items-center justify-center gap-1.5 text-xs
+                                            text-mai-400 hover:text-mai-600 dark:hover:text-mai-200 pt-1"
                                     >
                                         <ArrowLeft size={13} /> Înapoi la autentificare
                                     </button>
                                 </form>
 
                                 {!challenge.recoveryAvailable && (
-                                    <p className="text-xs text-gold-600 bg-gold-500/10 rounded-lg p-3 mt-5">
+                                    <p className="text-xs text-gold-600 dark:text-gold-400 bg-gold-500/10 dark:bg-gold-500/15 rounded-lg p-3 mt-5">
                                         Nu mai aveți coduri de recuperare disponibile. Dacă nu puteți accesa
                                         aplicația de autentificare, contactați administratorul de sistem.
                                     </p>

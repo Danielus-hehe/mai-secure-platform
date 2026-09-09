@@ -46,13 +46,9 @@ export default function DashboardPage() {
     const fetchStats = useCallback(async () => {
         setLoading(true);
         try {
-            // Prin clientul `api`: tokenul se ataseaza si se reimprospateaza
-            // automat. Varianta veche citea user.token, care nu mai exista pe
-            // obiectul User, deci trimitea mereu "Bearer undefined".
             const { data } = await api.get<Stats>('/Stats');
             setStats(data);
         } catch {
-            // Dacă API-ul nu e disponibil, afișăm zerouri
             setStats({
                 activeUsers: 0, totalTransfers: 0, pendingTransfers: 0,
                 totalDocuments: 0, failedLoginsLast24h: 0, recentTransfers: [],
@@ -65,7 +61,7 @@ export default function DashboardPage() {
     useEffect(() => { fetchStats(); }, [fetchStats]);
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6">
             <PageHeader
                 title={`Bun venit, ${user?.fullName ?? user?.username ?? ''}`}
                 subtitle={`${user?.department ?? ''} · Prezentare generală a activității`}
@@ -107,12 +103,13 @@ export default function DashboardPage() {
             )}
 
             {/* Ultimele transferuri */}
-            <div className="bg-white rounded-xl shadow-card border border-mai-100/50 overflow-hidden">
-                <div className="flex items-center justify-between px-5 py-4 border-b border-mai-100">
-                    <h2 className="font-semibold text-mai-900 flex items-center gap-2">
+            <div className="bg-white dark:bg-mai-800 rounded-xl shadow-card dark:shadow-none
+                border border-mai-100/50 dark:border-mai-700 overflow-hidden">
+                <div className="flex items-center justify-between px-5 py-4 border-b border-mai-100 dark:border-mai-700">
+                    <h2 className="font-semibold text-mai-900 dark:text-white flex items-center gap-2">
                         <Clock size={16} className="text-mai-400" /> Ultimele transferuri
                     </h2>
-                    <span className="text-xs text-mai-400 bg-mai-50 px-2.5 py-1 rounded-full">
+                    <span className="text-xs text-mai-400 bg-mai-50 dark:bg-mai-700 px-2.5 py-1 rounded-full">
                         {stats?.totalTransfers ?? 0} total
                     </span>
                 </div>
@@ -124,9 +121,9 @@ export default function DashboardPage() {
                     </div>
                 ) : !stats?.recentTransfers.length ? (
                     <div className="py-14 text-center">
-                        <ArrowLeftRight size={36} className="mx-auto text-mai-200 mb-3" />
+                        <ArrowLeftRight size={36} className="mx-auto text-mai-200 dark:text-mai-600 mb-3" />
                         <p className="text-sm font-medium text-mai-400">Niciun transfer înregistrat</p>
-                        <p className="text-xs text-mai-300 mt-1">
+                        <p className="text-xs text-mai-300 dark:text-mai-500 mt-1">
                             Trimiteți primul fișier din secțiunea Transferuri
                         </p>
                     </div>
@@ -134,7 +131,7 @@ export default function DashboardPage() {
                     <div className="overflow-x-auto">
                         <table className="w-full text-sm">
                             <thead>
-                            <tr className="bg-mai-50 text-left text-xs uppercase tracking-wide text-mai-500">
+                            <tr className="bg-mai-50 dark:bg-mai-900 text-left text-xs uppercase tracking-wide text-mai-500 dark:text-mai-400">
                                 <th className="px-5 py-3 font-semibold">Fișier</th>
                                 <th className="px-5 py-3 font-semibold">Expeditor → Destinatar</th>
                                 <th className="px-5 py-3 font-semibold">Dimensiune</th>
@@ -142,19 +139,19 @@ export default function DashboardPage() {
                                 <th className="px-5 py-3 font-semibold">Status</th>
                             </tr>
                             </thead>
-                            <tbody className="divide-y divide-mai-50">
+                            <tbody className="divide-y divide-mai-50 dark:divide-mai-700">
                             {stats.recentTransfers.map(t => (
-                                <tr key={t.id} className="hover:bg-mai-100/60 transition-colors">
-                                    <td className="px-5 py-3.5 font-medium text-mai-900 whitespace-nowrap">
+                                <tr key={t.id} className="hover:bg-mai-100/60 dark:hover:bg-mai-700/40 transition-colors">
+                                    <td className="px-5 py-3.5 font-medium text-mai-900 dark:text-mai-100 whitespace-nowrap">
                                         {t.fileName}
                                     </td>
-                                    <td className="px-5 py-3.5 text-mai-500 whitespace-nowrap">
+                                    <td className="px-5 py-3.5 text-mai-500 dark:text-mai-300 whitespace-nowrap">
                                         {t.senderName} → {t.recipientName}
                                     </td>
-                                    <td className="px-5 py-3.5 text-mai-500 whitespace-nowrap">
+                                    <td className="px-5 py-3.5 text-mai-500 dark:text-mai-300 whitespace-nowrap">
                                         {formatFileSize(t.fileSize)}
                                     </td>
-                                    <td className="px-5 py-3.5 text-mai-500 whitespace-nowrap">
+                                    <td className="px-5 py-3.5 text-mai-500 dark:text-mai-300 whitespace-nowrap">
                                         {formatDateTime(t.createdAt)}
                                     </td>
                                     <td className="px-5 py-3.5">

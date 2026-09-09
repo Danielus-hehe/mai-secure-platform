@@ -150,20 +150,20 @@ export default function ProfilePage() {
                 subtitle="Informațiile contului și setările de securitate"
             />
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
 
                 {/* ── Card stânga: date cont ─────────────────────────── */}
-                <div className="bg-white rounded-xl shadow-card border border-mai-100/50 p-6
+                <div className="bg-white dark:bg-mai-800 rounded-xl shadow-card dark:shadow-none border border-mai-100/50 dark:border-mai-700 p-6
                     flex flex-col items-center text-center gap-5">
 
-                    <div className="w-20 h-20 rounded-full bg-mai-700 flex items-center
+                    <div className="w-20 h-20 rounded-full bg-mai-700 dark:bg-mai-600 flex items-center
                         justify-center text-white text-2xl font-bold select-none shadow-md">
                         {initials}
                     </div>
 
                     <div>
-                        <p className="text-lg font-bold text-mai-900">{user.fullName}</p>
-                        <p className="text-sm text-mai-400 mt-0.5">@{user.username}</p>
+                        <p className="text-lg font-bold text-mai-900 dark:text-white dark:text-white">{user.fullName}</p>
+                        <p className="text-sm text-mai-400 dark:text-mai-500 mt-0.5">@{user.username}</p>
                     </div>
 
                     <span className={`text-xs px-3 py-1.5 rounded-full font-semibold ${ROLE_BADGE_CLASSES[user.role]}`}>
@@ -177,12 +177,12 @@ export default function ProfilePage() {
                       compilarea eșua. Le-am înlocuit cu informația criptografică,
                       care e mai relevantă aici și e disponibilă oricărui cont.
                     */}
-                    <div className="w-full border-t border-mai-100 pt-4 space-y-3.5 text-left">
+                    <div className="w-full border-t border-mai-100 dark:border-mai-700 pt-4 space-y-3.5 text-left">
                         <div className="flex items-start gap-2.5">
                             <Building2 size={15} className="text-mai-400 mt-0.5 shrink-0" />
                             <div>
                                 <p className="text-[11px] text-mai-400 uppercase tracking-wide">Direcție</p>
-                                <p className="text-sm text-mai-800 font-medium break-all">
+                                <p className="text-sm text-mai-800 dark:text-mai-200 font-medium break-all">
                                     {user.department || '—'}
                                 </p>
                             </div>
@@ -192,7 +192,7 @@ export default function ProfilePage() {
                             <Fingerprint size={15} className="text-mai-400 mt-0.5 shrink-0" />
                             <div className="min-w-0">
                                 <p className="text-[11px] text-mai-400 uppercase tracking-wide">Amprentă chei</p>
-                                <p className="text-xs text-mai-800 font-mono font-medium break-all">
+                                <p className="text-xs text-mai-800 dark:text-mai-200 font-mono font-medium break-all">
                                     {fingerprint || '—'}
                                 </p>
                             </div>
@@ -202,15 +202,15 @@ export default function ProfilePage() {
                             <CalendarClock size={15} className="text-mai-400 mt-0.5 shrink-0" />
                             <div>
                                 <p className="text-[11px] text-mai-400 uppercase tracking-wide">Chei generate</p>
-                                <p className="text-sm text-mai-800 font-medium">
+                                <p className="text-sm text-mai-800 dark:text-mai-200 font-medium">
                                     {keysCreatedAt ? formatDateTime(keysCreatedAt) : '—'}
                                 </p>
                             </div>
                         </div>
                     </div>
 
-                    <div className="w-full rounded-lg bg-green-50 border border-green-100 px-3 py-2.5 text-center">
-                        <p className="text-xs font-semibold text-green-700">● Cont activ</p>
+                    <div className="w-full rounded-lg bg-green-50 dark:bg-green-900/30 border border-green-100 dark:border-green-800 px-3 py-2.5 text-center">
+                        <p className="text-xs font-semibold text-green-700 dark:text-green-400">● Cont activ</p>
                     </div>
                 </div>
 
@@ -218,23 +218,23 @@ export default function ProfilePage() {
                 <div className="lg:col-span-2 space-y-6">
 
                     {/* Securitate cont */}
-                    <div className="bg-white rounded-xl shadow-card border border-mai-100/50 p-6">
-                        <h2 className="font-semibold text-mai-900 mb-1 flex items-center gap-2">
+                    <div className="bg-white dark:bg-mai-800 rounded-xl shadow-card dark:shadow-none border border-mai-100/50 dark:border-mai-700 p-6">
+                        <h2 className="font-semibold text-mai-900 dark:text-white mb-1 flex items-center gap-2">
                             <ShieldCheck size={16} className="text-mai-400" />
                             Securitate cont
                         </h2>
-                        <p className="text-xs text-mai-400 mb-4">
+                        <p className="text-xs text-mai-400 dark:text-mai-500 mb-4">
                             Parola este stocată ca hash Argon2id. Fișierele sunt criptate end-to-end:
                             serverul nu poate citi conținutul transferurilor.
                         </p>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             {[
                                 { label: 'Hash parolă',    value: 'Argon2id',            tone: 'text-green-600' },
                                 { label: 'Token acces',    value: 'JWT, 15 min',         tone: 'text-green-600' },
                                 { label: 'Criptare fișiere', value: 'AES-256-GCM + RSA', tone: 'text-green-600' },
                                 { label: 'Autentificare',  value: '2FA dezactivat',      tone: 'text-amber-600' },
                             ].map(({ label, value, tone }) => (
-                                <div key={label} className="rounded-xl bg-mai-50 px-4 py-3">
+                                <div key={label} className="rounded-xl bg-mai-50 dark:bg-mai-900 px-4 py-3">
                                     <p className="text-[11px] text-mai-400 uppercase tracking-wide">{label}</p>
                                     <p className={`text-sm font-semibold mt-0.5 ${tone}`}>{value}</p>
                                 </div>
@@ -243,15 +243,15 @@ export default function ProfilePage() {
                     </div>
 
                     {/* Schimbare parolă */}
-                    <div className="bg-white rounded-xl shadow-card border border-mai-100/50 p-6">
-                        <h2 className="font-semibold text-mai-900 mb-4 flex items-center gap-2">
+                    <div className="bg-white dark:bg-mai-800 rounded-xl shadow-card dark:shadow-none border border-mai-100/50 dark:border-mai-700 p-6">
+                        <h2 className="font-semibold text-mai-900 dark:text-white mb-4 flex items-center gap-2">
                             <KeyRound size={16} className="text-mai-400" />
                             Schimbare parolă
                         </h2>
 
                         {pendingRewrap && (
-                            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3">
-                                <p className="flex items-start gap-2 text-sm text-red-800">
+                            <div className="mb-4 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/30 px-4 py-3">
+                                <p className="flex items-start gap-2 text-sm text-red-800 dark:text-red-300">
                                     <AlertTriangle size={16} className="mt-0.5 shrink-0" />
                                     <span>
                                         Parola s-a schimbat, dar cheile private au rămas încuiate cu cea
@@ -281,8 +281,8 @@ export default function ProfilePage() {
                                    value={confirmPw} onChange={e => setConfirmPw(e.target.value)}
                                    placeholder="••••••••" />
 
-                            <div className="rounded-lg bg-mai-50 border border-mai-100 px-3.5 py-2.5">
-                                <p className="text-xs leading-relaxed text-mai-500">
+                            <div className="rounded-lg bg-mai-50 dark:bg-mai-900 border border-mai-100 dark:border-mai-700 px-3.5 py-2.5">
+                                <p className="text-xs leading-relaxed text-mai-500 dark:text-mai-400">
                                     Minim 12 caractere, cu literă mare, literă mică, cifră și simbol.
                                     La schimbare, cheile private se reîmpachetează automat cu parola
                                     nouă, iar sesiunile de pe alte dispozitive sunt deconectate.

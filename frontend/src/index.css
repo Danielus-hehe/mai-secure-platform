@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* ── Dark mode: clasa „dark" pe <html> activează variantele dark: ──────── */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* ── Toast & dropdown slide-in animation ─────────────────────────────────── */
 @keyframes slide-in {
     from { opacity: 0; transform: translateX(1rem); }

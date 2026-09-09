@@ -36,7 +36,7 @@ export default function KeysGate() {
     if (status === 'loading') {
         return (
             <div className="flex min-h-[60vh] items-center justify-center">
-                <div className="flex items-center gap-3 text-mai-500">
+                <div className="flex items-center gap-3 text-mai-500 dark:text-mai-400 dark:text-mai-300">
                     <Loader2 size={20} className="animate-spin" />
                     <span className="text-sm">Se verifică cheile criptografice…</span>
                 </div>
@@ -76,10 +76,10 @@ export default function KeysGate() {
     if (status === 'error') {
         return (
             <div className="flex min-h-[60vh] items-center justify-center px-4">
-                <div className="w-full max-w-md rounded-xl border border-red-100 bg-white p-8 text-center shadow-sm">
+                <div className="w-full max-w-md rounded-xl border border-red-100 dark:border-red-800 bg-white dark:bg-mai-800 p-8 text-center shadow-sm">
                     <ShieldAlert size={32} className="mx-auto mb-4 text-red-500" />
-                    <p className="font-semibold text-mai-900">Cheile nu au putut fi citite</p>
-                    <p className="mt-2 text-sm text-mai-400">
+                    <p className="font-semibold text-mai-900 dark:text-white">Cheile nu au putut fi citite</p>
+                    <p className="mt-2 text-sm text-mai-400 dark:text-mai-300">
                         {error ?? 'Serverul nu a răspuns.'}
                     </p>
                     <Button className="mt-6 w-full" onClick={() => void reload()}>
@@ -91,26 +91,26 @@ export default function KeysGate() {
     }
 
     const inputClass =
-        'w-full rounded-lg border border-mai-200 px-3 py-2.5 text-sm ' +
+        'w-full rounded-lg border border-mai-200 dark:border-mai-600 bg-white dark:bg-mai-800 dark:text-mai-100 px-3 py-2.5 text-sm ' +
         'focus:border-mai-500 focus:outline-none focus:ring-2 focus:ring-mai-500/20 ' +
-        'disabled:bg-mai-50 disabled:text-mai-400';
+        'disabled:bg-mai-50 dark:disabled:bg-mai-900 disabled:text-mai-400';
 
     return (
         <div className="flex min-h-[70vh] items-center justify-center px-4">
-            <div className="w-full max-w-md rounded-xl border border-mai-100 bg-white p-8 shadow-sm">
+            <div className="w-full max-w-md rounded-xl border border-mai-100 dark:border-mai-700 bg-white dark:bg-mai-800 p-8 shadow-sm">
 
                 <div className="mb-6 text-center">
-                    <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-mai-50">
+                    <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-mai-50 dark:bg-mai-700">
                         {isGenerating
-                            ? <KeyRound size={26} className="text-mai-600" />
-                            : <ShieldCheck size={26} className="text-mai-600" />}
+                            ? <KeyRound size={26} className="text-mai-600 dark:text-mai-400" />
+                            : <ShieldCheck size={26} className="text-mai-600 dark:text-mai-400" />}
                     </div>
 
-                    <h1 className="text-xl font-bold text-mai-900">
+                    <h1 className="text-xl font-bold text-mai-900 dark:text-white">
                         {isGenerating ? 'Generarea cheilor criptografice' : 'Deblocarea cheilor'}
                     </h1>
 
-                    <p className="mt-2 text-sm leading-relaxed text-mai-400">
+                    <p className="mt-2 text-sm leading-relaxed text-mai-400 dark:text-mai-300">
                         {isGenerating ? (
                             <>
                                 Contul dumneavoastră nu are încă chei. Se generează două perechi
@@ -129,8 +129,8 @@ export default function KeysGate() {
                 </div>
 
                 {isGenerating && (
-                    <div className="mb-5 rounded-lg border border-amber-100 bg-amber-50 px-4 py-3">
-                        <p className="text-xs leading-relaxed text-amber-800">
+                    <div className="mb-5 rounded-lg border border-amber-100 dark:border-amber-700/50 bg-amber-50 dark:bg-amber-900/20 px-4 py-3">
+                        <p className="text-xs leading-relaxed text-amber-800 dark:text-amber-300">
                             <strong>Important.</strong> Folosiți exact parola cu care v-ați
                             autentificat. Dacă vă pierdeți parola, fișierele primite până atunci
                             devin imposibil de deschis — nici administratorul nu le poate
@@ -141,7 +141,7 @@ export default function KeysGate() {
 
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
-                        <label htmlFor="keys-password" className="mb-1.5 block text-sm font-medium text-mai-700">
+                        <label htmlFor="keys-password" className="mb-1.5 block text-sm font-medium text-mai-700 dark:text-mai-200">
                             Parola contului {user?.username ? `(@${user.username})` : ''}
                         </label>
                         <input
@@ -159,7 +159,7 @@ export default function KeysGate() {
 
                     {isGenerating && (
                         <div>
-                            <label htmlFor="keys-password-confirm" className="mb-1.5 block text-sm font-medium text-mai-700">
+                            <label htmlFor="keys-password-confirm" className="mb-1.5 block text-sm font-medium text-mai-700 dark:text-mai-200">
                                 Confirmați parola
                             </label>
                             <input
@@ -176,7 +176,7 @@ export default function KeysGate() {
                     )}
 
                     {(localError || error) && (
-                        <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+                        <p className="rounded-lg bg-red-50 dark:bg-red-900/30 px-3 py-2 text-sm text-red-700 dark:text-red-400">
                             {localError || error}
                         </p>
                     )}
@@ -193,7 +193,7 @@ export default function KeysGate() {
                     </Button>
 
                     {busy && isGenerating && (
-                        <p className="text-center text-xs text-mai-400">
+                        <p className="text-center text-xs text-mai-400 dark:text-mai-300">
                             Generarea RSA-3072 durează câteva secunde. Nu închideți fila.
                         </p>
                     )}
@@ -203,7 +203,7 @@ export default function KeysGate() {
                     type="button"
                     onClick={() => void logout()}
                     className="mt-6 flex w-full items-center justify-center gap-2 text-xs
-                               text-mai-400 transition-colors hover:text-mai-700"
+                               text-mai-400 dark:text-mai-500 transition-colors hover:text-mai-700 dark:hover:text-mai-200"
                 >
                     <LogOut size={13} />
                     Deconectare

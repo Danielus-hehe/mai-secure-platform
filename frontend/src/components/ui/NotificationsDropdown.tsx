@@ -28,11 +28,6 @@ export default function NotificationsDropdown() {
     const fetchPending = useCallback(async () => {
         if (!isAuthenticated) return;
         try {
-            // Filtrarea se face pe server, nu in browser: cerem direct
-            // transferurile PRIMITE si in asteptare, primele 10. Varianta veche
-            // aducea toate transferurile si le filtra local, iar de la migrarea
-            // la raspuns paginat primea un obiect acolo unde astepta un array,
-            // deci `all.filter` arunca TypeError si dropdown-ul ramanea gol.
             const { data } = await api.get<PagedTransfers>('/Transfers', {
                 params: {
                     direction: 'received',
@@ -66,7 +61,7 @@ export default function NotificationsDropdown() {
             {/* Bell button */}
             <button
                 onClick={() => setOpen(v => !v)}
-                className="relative text-mai-700 hover:text-mai-900 transition-colors"
+                className="relative text-mai-700 dark:text-mai-200 hover:text-mai-900 dark:hover:text-white transition-colors"
                 aria-label="Notificări"
             >
                 <Bell size={20} />
@@ -81,15 +76,15 @@ export default function NotificationsDropdown() {
 
             {/* Dropdown */}
             {open && (
-                <div className="absolute right-0 top-9 w-80 bg-white rounded-xl shadow-xl
-                    border border-mai-100 z-50 overflow-hidden">
+                <div className="absolute right-0 top-9 w-[calc(100vw-2rem)] sm:w-80 max-w-80 bg-white dark:bg-mai-800 rounded-xl shadow-xl
+                    border border-mai-100 dark:border-mai-700 z-50 overflow-hidden">
 
                     {/* Header */}
                     <div className="flex items-center justify-between px-4 py-3
-                        border-b border-mai-100 bg-mai-50/50">
+                        border-b border-mai-100 dark:border-mai-700 bg-mai-50/50 dark:bg-mai-900/50">
                         <div className="flex items-center gap-2">
-                            <Bell size={14} className="text-mai-500" />
-                            <h3 className="font-semibold text-mai-900 text-sm">Notificări</h3>
+                            <Bell size={14} className="text-mai-500 dark:text-mai-400" />
+                            <h3 className="font-semibold text-mai-900 dark:text-white text-sm">Notificări</h3>
                             {unreadCount > 0 && (
                                 <span className="bg-gold-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
                                     {unreadCount}
@@ -98,17 +93,18 @@ export default function NotificationsDropdown() {
                         </div>
                         {unreadCount > 0 && (
                             <button onClick={markAllRead}
-                                    className="text-xs text-mai-400 hover:text-mai-700 flex items-center gap-1 transition-colors">
+                                    className="text-xs text-mai-400 hover:text-mai-700 dark:hover:text-mai-200
+                                        flex items-center gap-1 transition-colors">
                                 <Check size={11} /> Toate citite
                             </button>
                         )}
                     </div>
 
                     {/* Items */}
-                    <div className="max-h-72 overflow-y-auto divide-y divide-mai-50">
+                    <div className="max-h-72 overflow-y-auto divide-y divide-mai-50 dark:divide-mai-700">
                         {notifs.length === 0 ? (
                             <div className="py-10 text-center">
-                                <Bell size={28} className="mx-auto text-mai-200 mb-2" />
+                                <Bell size={28} className="mx-auto text-mai-200 dark:text-mai-600 mb-2" />
                                 <p className="text-sm text-mai-400">Niciun fișier în așteptare</p>
                             </div>
                         ) : notifs.map(t => {
@@ -116,21 +112,27 @@ export default function NotificationsDropdown() {
                             return (
                                 <div key={t.id}
                                      className={`px-4 py-3 flex items-start gap-3 transition-colors
-                                        ${isUnread ? 'bg-mai-50/60' : 'hover:bg-mai-50/30'}`}>
+                                        ${isUnread
+                                         ? 'bg-mai-50/60 dark:bg-mai-700/40'
+                                         : 'hover:bg-mai-50/30 dark:hover:bg-mai-700/20'}`}>
                                     <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0
-                                        ${isUnread ? 'bg-mai-700 text-white' : 'bg-mai-100 text-mai-500'}`}>
+                                        ${isUnread
+                                        ? 'bg-mai-700 text-white dark:bg-mai-500'
+                                        : 'bg-mai-100 text-mai-500 dark:bg-mai-700 dark:text-mai-300'}`}>
                                         <FileDown size={15} />
                                     </div>
                                     <div className="flex-1 min-w-0">
                                         <p className={`text-sm truncate
-                                            ${isUnread ? 'font-semibold text-mai-900' : 'text-mai-600'}`}>
+                                            ${isUnread
+                                            ? 'font-semibold text-mai-900 dark:text-white'
+                                            : 'text-mai-600 dark:text-mai-300'}`}>
                                             {t.fileName}
                                         </p>
                                         <p className="text-xs text-mai-400 mt-0.5">
-                                            De la <span className="font-medium text-mai-600">{t.senderName}</span>
+                                            De la <span className="font-medium text-mai-600 dark:text-mai-300">{t.senderName}</span>
                                             {' · '}{formatFileSize(t.fileSize)}
                                         </p>
-                                        <p className="text-[11px] text-mai-300 mt-0.5">
+                                        <p className="text-[11px] text-mai-300 dark:text-mai-500 mt-0.5">
                                             {formatDateTime(t.createdAt)}
                                         </p>
                                     </div>
@@ -143,7 +145,7 @@ export default function NotificationsDropdown() {
                     </div>
 
                     {/* Footer */}
-                    <div className="px-4 py-2.5 border-t border-mai-100 bg-mai-50/30 text-center">
+                    <div className="px-4 py-2.5 border-t border-mai-100 dark:border-mai-700 bg-mai-50/30 dark:bg-mai-900/30 text-center">
                         <p className="text-xs text-mai-400">
                             {unreadCount > 0
                                 ? `${unreadCount} ${unreadCount === 1 ? 'fișier în așteptare' : 'fișiere în așteptare'}`
