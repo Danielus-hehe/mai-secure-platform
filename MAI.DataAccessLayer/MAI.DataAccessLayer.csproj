@@ -7,16 +7,24 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.*" />
-      <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="10.0.11">
-        <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-        <PrivateAssets>all</PrivateAssets>
-      </PackageReference>
-      <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.11" />
+        <!--
+          Microsoft.EntityFrameworkCore.SqlServer a fost eliminat: proiectul
+          rulează pe PostgreSQL, pachetul nu era referențiat de niciun fișier și
+          adăuga ~5 MB inutili la build.
+
+          EntityFrameworkCore.Tools a fost coborât de la 10.0.11 la 8.0.11:
+          versiunea 10.x e pentru .NET 10 și genera avertismente de compatibilitate
+          pe un proiect net8.0.
+        -->
+        <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="8.0.11">
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+            <PrivateAssets>all</PrivateAssets>
+        </PackageReference>
+        <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.11" />
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\MAI.Domain\MAI.Domain.csproj" />
+        <ProjectReference Include="..\MAI.Domain\MAI.Domain.csproj" />
     </ItemGroup>
 
 </Project>
