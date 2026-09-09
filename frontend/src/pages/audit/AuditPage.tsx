@@ -28,6 +28,29 @@ const inputCls = `rounded-lg border border-mai-200 dark:border-mai-600 bg-white 
     focus:outline-none focus:ring-2 focus:ring-mai-500
     hover:border-mai-400 dark:hover:border-mai-500 transition-colors`;
 
+/**
+ * Rezultatul unei operatii, asa cum il trimite backend-ul.
+ *
+ * ATENTIE nu e nici succes, nici esec: operatia a reusit, dar merita privita —
+ * 2FA dezactivat, reset administrativ, semnatura invalida la descarcare. Inainte
+ * de migrarea pe coloana `Result`, aceste randuri erau afisate ca simplu SUCCES
+ * si se pierdeau in lista.
+ */
+type AuditResult = 'SUCCES' | 'ESEC' | 'ATENTIE';
+
+const RESULT_TONE: Record<AuditResult, 'green' | 'red' | 'gold'> = {
+    SUCCES:  'green',
+    ESEC:    'red',
+    ATENTIE: 'gold',
+};
+
+/** Fundalul randului. Succesul nu primeste niciunul: e cazul normal. */
+const RESULT_ROW_CLASS: Record<AuditResult, string> = {
+    SUCCES:  '',
+    ESEC:    'bg-red-50/60 dark:bg-red-900/20',
+    ATENTIE: 'bg-amber-50/60 dark:bg-amber-900/20',
+};
+
 interface AuditEntry {
     id: string;
     timestamp: string;
@@ -35,7 +58,7 @@ interface AuditEntry {
     action: string;
     target: string;
     ipAddress: string;
-    result: 'SUCCES' | 'ESEC';
+    result: AuditResult;
 }
 
 export default function AuditPage() {
@@ -259,6 +282,7 @@ export default function AuditPage() {
                         <option value="">Toate rezultatele</option>
                         <option value="SUCCES">Succes</option>
                         <option value="ESEC">Eșec</option>
+                        <option value="ATENTIE">Atenție</option>
                     </select>
                 </div>
 
@@ -332,7 +356,7 @@ export default function AuditPage() {
                                     <tr
                                         key={e.id}
                                         className={`transition-colors hover:bg-mai-100/60 dark:hover:bg-mai-700/40
-                                            ${e.result === 'ESEC' ? 'bg-red-50/60 dark:bg-red-900/20' : ''}`}
+                                            ${RESULT_ROW_CLASS[e.result] ?? ''}`}
                                     >
                                         <td className="whitespace-nowrap px-5 py-3 text-mai-500 dark:text-mai-400 dark:text-mai-400">
                                             {formatDateTime(e.timestamp)}
@@ -350,8 +374,8 @@ export default function AuditPage() {
                                             {e.ipAddress}
                                         </td>
                                         <td className="px-5 py-3">
-                                            <Badge tone={e.result === 'SUCCES' ? 'green' : 'red'}>
-                                                {e.result === 'ESEC' && (
+                                            <Badge tone={RESULT_TONE[e.result] ?? 'gray'}>
+                                                {e.result !== 'SUCCES' && (
                                                     <AlertCircle size={11} className="mr-1" />
                                                 )}
                                                 {e.result}
