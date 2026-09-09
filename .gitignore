@@ -38,8 +38,12 @@ coverage/
 *.suo
 *.ntvs*
 *.njsproj
-*.sln
 *.sw?
+
+# NOTA: *.sln era ignorat aici. Fisierul de solutie NU e un artefact de editor —
+# e ce leaga cele cinci proiecte intre ele. Ignorat, oricine cloneaza repo-ul
+# trebuie sa il reconstruiasca manual ca sa poata rula 'dotnet build' pe tot.
+# Ce ramane ignorat sunt fisierele de utilizator (*.suo, *.user), de mai jos.
 
 # ============ SISTEM DE OPERARE ============
 # Windows
@@ -71,3 +75,16 @@ obj/
 appsettings.Development.json
 appsettings.Production.json
 *.env
+# ============ SECRETE BACKEND ============
+# appsettings.Development.json / .Production.json sunt deja ignorate mai sus.
+# Fișierele .example rămân versionate ca șablon — ele NU conțin valori reale.
+!**/appsettings.*.json.example
+docker-compose.override.yml
+MAI.Api/Storage/
+migrations/*.local.sql
+
+# Certificate de dezvoltare
+*.pfx
+*.p12
+*.key
+!frontend/**/*.key.ts

@@ -1,0 +1,43 @@
+﻿{
+  "ConnectionStrings": {
+    "DefaultConnection": "Host=localhost;Port=5432;Database=sgdm;Username=sgdm;Password=SCHIMBA_MA"
+  },
+
+  "Jwt": {
+    "Key": "GENERATI_CU_openssl_rand_base64_48",
+    "Issuer": "SGDM",
+    "Audience": "sgdm-frontend"
+  },
+
+  "Argon2": {
+    "Pepper": "GENERATI_CU_openssl_rand_base64_32",
+
+    "//": "true acceptă parole în clar în baza de date. Doar în dezvoltare, doar",
+    "//_2": "cât timp mai există conturi nemigrate. Program.cs oprește pornirea",
+    "//_3": "dacă rămâne true în afara mediului Development.",
+    "AllowLegacyPlaintext": false
+  },
+
+  "TwoFactor": {
+    "//": "Lăsat gol în dezvoltare: se derivă din Jwt:Key. În producție e obligatoriu",
+    "//_2": "și trebuie să fie un secret SEPARAT — o cheie derivată dintr-un secret",
+    "//_3": "partajat înseamnă că scurgerea unuia le compromite pe amândouă.",
+    "EncryptionKey": ""
+  },
+
+  "Storage": {
+    "Provider": "S3",
+    "Endpoint": "http://localhost:9000",
+    "AccessKey": "sgdm-dev",
+    "SecretKey": "SCHIMBA_MA_MINIM_8_CARACTERE",
+    "Bucket": "sgdm-transfers"
+  },
+
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning",
+      "Microsoft.EntityFrameworkCore.Database.Command": "Warning"
+    }
+  }
+}
