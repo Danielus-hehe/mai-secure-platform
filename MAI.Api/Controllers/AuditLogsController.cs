@@ -96,7 +96,8 @@ namespace MAI.Api.Controllers
             {
                 Username  = HttpContext.User.Identity?.Name ?? "sistem",
                 Action    = AuditAction.FileDownload,
-                Details   = $"SUCCES: Export jurnal audit ({items.Count} inregistrari, {format})",
+                Details   = $"Export jurnal audit ({items.Count} inregistrari, {format})",
+                Result    = AuditResult.Success,
                 IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                 Timestamp = DateTime.UtcNow,
             });
@@ -148,10 +149,13 @@ namespace MAI.Api.Controllers
                     query = query.Where(a => enums.Contains(a.Action));
             }
 
-            if (result == "SUCCES")
-                query = query.Where(a => !a.Details.StartsWith("ESEC"));
-            else if (result == "ESEC")
-                query = query.Where(a => a.Details.StartsWith("ESEC"));
+            // Filtrarea se face pe coloana Result, indexata, nu cu StartsWith pe
+            // un camp de text liber. Randurile scrise inainte de migrare au fost
+            // convertite din prefixe de catre scriptul 004; nimic din codul nou
+            // nu mai scrie prefixe.
+            var resultFilter = ParseResult(result);
+            if (resultFilter.HasValue)
+                query = query.Where(a => a.Result == resultFilter.Value);
 
             if (!string.IsNullOrWhiteSpace(search))
             {
@@ -187,12 +191,46 @@ namespace MAI.Api.Controllers
             UserId    = a.UserId,
             UserName  = a.Username,
             Action    = MapBackendAction(a.Action),
-            Target    = a.Details.Contains(':')
-                            ? a.Details[(a.Details.IndexOf(':') + 1)..].Trim()
-                            : a.Details,
+            Target    = StripLegacyPrefix(a.Details),
             IpAddress = a.IpAddress,
-            Result    = a.Details.StartsWith("ESEC") ? "ESEC" : "SUCCES",
+            Result    = ResultLabel(a.Result),
         };
+
+        /// <summary>
+        /// Numele de rezultat asteptat de frontend. Ramane text in DTO ca sa nu
+        /// legam interfata de valorile numerice ale enum-ului.
+        /// </summary>
+        private static string ResultLabel(AuditResult r) => r switch
+        {
+            AuditResult.Failure => "ESEC",
+            AuditResult.Warning => "ATENTIE",
+            _                   => "SUCCES",
+        };
+
+        private static AuditResult? ParseResult(string? s) => s?.ToUpperInvariant() switch
+        {
+            "SUCCES"  => AuditResult.Success,
+            "ESEC"    => AuditResult.Failure,
+            "ATENTIE" => AuditResult.Warning,
+            _         => null,
+        };
+
+        /// <summary>
+        /// Curata prefixul de rezultat din randurile istorice. Scriptul de migrare
+        /// il elimina din baza de date, dar un jurnal restaurat dintr-un backup mai
+        /// vechi l-ar readuce; e mai ieftin sa tolerezi aici decat sa afisezi
+        /// "ESEC: ESEC" in raport.
+        /// </summary>
+        private static string StripLegacyPrefix(string details)
+        {
+            foreach (var prefix in LegacyPrefixes)
+                if (details.StartsWith(prefix, StringComparison.Ordinal))
+                    return details[prefix.Length..].Trim();
+
+            return details;
+        }
+
+        private static readonly string[] LegacyPrefixes = ["SUCCES:", "ESEC:", "ATENTIE:"];
 
         // ─────────────────────────────────────────────────────────────────────
         // Generare fișiere
@@ -295,6 +333,11 @@ namespace MAI.Api.Controllers
                 if (e.Result == "ESEC")
                 {
                     sheet.Range(row, 1, row, 6).Style.Fill.BackgroundColor = XLColor.FromHtml("#FEE2E2");
+                    sheet.Cell(row, 6).Style.Font.Bold = true;
+                }
+                else if (e.Result == "ATENTIE")
+                {
+                    sheet.Range(row, 1, row, 6).Style.Fill.BackgroundColor = XLColor.FromHtml("#FEF3C7");
                     sheet.Cell(row, 6).Style.Font.Bold = true;
                 }
                 row++;

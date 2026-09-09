@@ -144,7 +144,7 @@ namespace MAI.Api.Controllers
                 UserId    = user.Id,
                 Username  = CurrentUsername,
                 Action    = AuditAction.UserUpdated,
-                Details   = $"SUCCES: Chei E2E inregistrate ({dto.Suite}), amprenta {Fingerprint(dto.PublicKeyEncryption)}",
+                Details   = $"Chei E2E inregistrate ({dto.Suite}), amprenta {Fingerprint(dto.PublicKeyEncryption)}",
                 IpAddress = CallerIp,
                 Timestamp = DateTime.UtcNow,
             });
@@ -191,7 +191,7 @@ namespace MAI.Api.Controllers
                 UserId    = user.Id,
                 Username  = CurrentUsername,
                 Action    = AuditAction.UserUpdated,
-                Details   = "SUCCES: Chei private reimpachetate cu parola noua",
+                Details   = "Chei private reimpachetate cu parola noua",
                 IpAddress = CallerIp,
                 Timestamp = DateTime.UtcNow,
             });

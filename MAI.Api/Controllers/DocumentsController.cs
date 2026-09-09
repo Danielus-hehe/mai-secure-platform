@@ -136,7 +136,7 @@ namespace MAI.Api.Controllers
                 UserId    = CurrentUserId,
                 Username  = CurrentUsername,
                 Action    = AuditAction.DocumentCreate,
-                Details   = $"SUCCES: Document publicat '{title}'",
+                Details   = $"Document publicat '{title}'",
                 IpAddress = CallerIp,
             });
             await _context.SaveChangesAsync();
@@ -187,7 +187,7 @@ namespace MAI.Api.Controllers
                 UserId    = CurrentUserId,
                 Username  = CurrentUsername,
                 Action    = AuditAction.DocumentNewVersion,
-                Details   = $"SUCCES: Versiune nouă (v{doc.CurrentVersion}) la '{doc.Title}'",
+                Details   = $"Versiune nouă (v{doc.CurrentVersion}) la '{doc.Title}'",
                 IpAddress = CallerIp,
             });
             await _context.SaveChangesAsync();

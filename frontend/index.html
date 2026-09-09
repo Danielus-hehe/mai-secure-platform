@@ -1,13 +1,63 @@
 <!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>mai-secure-platform</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+<html lang="ro">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/Stema.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!--
+    Content-Security-Policy.
+
+    React escapează implicit conținutul randat, dar asta nu e o garanție
+    absolută: dangerouslySetInnerHTML, o dependență compromisă din lanțul de
+    aprovizionare npm sau o injecție într-un atribut trec pe lângă el. CSP e
+    al doilea zid: chiar dacă un script străin ajunge să ruleze, nu poate
+    încărca cod de pe alt domeniu și nu poate exfiltra nimic prin fetch.
+
+    Într-o aplicație care ține chei private RSA în memorie, diferența dintre
+    un XSS care doar strică pagina și unul care trimite cheile în altă parte
+    este exact linia connect-src de mai jos.
+
+    Notă pe 'unsafe-inline' la style-src: Tailwind și componentele injectează
+    stiluri inline. Eliminarea lui cere nonce-uri generate la fiecare cerere,
+    adică servirea index.html printr-un server care le poate insera — pas
+    rezonabil la trecerea în producție în spatele nginx, dar care nu poate fi
+    făcut dintr-un fișier static.
+
+    connect-src include localhost pentru dezvoltare. La deploy se restrânge la
+    originea reală a API-ului — vezi docs/DEPLOYMENT.md.
+  -->
+  <meta
+          http-equiv="Content-Security-Policy"
+          content="
+        default-src 'self';
+        script-src 'self';
+        style-src 'self' 'unsafe-inline';
+        img-src 'self' data: blob:;
+        font-src 'self' data:;
+        connect-src 'self' http://localhost:5000 https://localhost:7123 http://localhost:9000;
+        worker-src 'self' blob:;
+        object-src 'none';
+        base-uri 'self';
+        form-action 'self';
+        frame-ancestors 'none';
+        upgrade-insecure-requests
+      "
+  />
+
+  <meta name="referrer" content="no-referrer" />
+
+  <!-- Un jurnal de audit sau un nume de fișier nu au ce căuta într-un index public. -->
+  <meta name="robots" content="noindex, nofollow" />
+
+  <title>SGDM — Sistem de Gestiune Documente și Transferuri Securizate</title>
+</head>
+<body>
+<div id="root"></div>
+<noscript>
+  Această aplicație necesită JavaScript activat. Criptarea fișierelor se face
+  în browser, deci nu există o variantă fără JavaScript.
+</noscript>
+<script type="module" src="/src/main.tsx"></script>
+</body>
 </html>

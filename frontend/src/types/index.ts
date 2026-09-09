@@ -60,7 +60,7 @@ export interface AuditEntry {
     action: 'LOGIN' | 'LOGOUT' | 'UPLOAD' | 'DOWNLOAD' | 'TRANSFER' | 'MODIFICARE_DOC' | 'ADMIN';
     target: string;
     ipAddress: string;
-    result: 'SUCCES' | 'ESEC';
+    result: 'SUCCES' | 'ESEC' | 'ATENTIE';
 }
 
 export interface DashboardStats {

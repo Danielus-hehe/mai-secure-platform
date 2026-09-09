@@ -307,7 +307,7 @@ namespace MAI.Api.Controllers
                 UserId    = senderId,
                 Username  = CurrentUsername,
                 Action    = AuditAction.FileUpload,
-                Details   = $"SUCCES: Fisier criptat trimis '{safeName}' ({request.File.Length} octeti) " +
+                Details   = $"Fisier criptat trimis '{safeName}' ({request.File.Length} octeti) " +
                             $"catre {recipient.FullName ?? recipient.Username}, suita {request.Suite}",
                 IpAddress = CallerIp,
                 Timestamp = DateTime.UtcNow,
@@ -506,8 +506,12 @@ namespace MAI.Api.Controllers
                 Username  = CurrentUsername,
                 Action    = AuditAction.FileDownload,
                 Details   = signatureValid
-                    ? $"SUCCES: Fisier descarcat si decriptat '{transfer.FileName}', semnatura expeditorului VALIDA"
-                    : $"ATENTIE: Fisier descarcat '{transfer.FileName}', semnatura expeditorului INVALIDA",
+                    ? $"Fisier descarcat si decriptat '{transfer.FileName}', semnatura expeditorului VALIDA"
+                    : $"Fisier descarcat '{transfer.FileName}', semnatura expeditorului INVALIDA",
+                // O semnatura invalida nu e o eroare de sistem — descarcarea a
+                // reusit — dar e exact genul de rand pe care un supervizor
+                // trebuie sa il gaseasca filtrand, nu citind toate detaliile.
+                Result    = signatureValid ? AuditResult.Success : AuditResult.Warning,
                 IpAddress = CallerIp,
                 Timestamp = DateTime.UtcNow,
             });
@@ -557,7 +561,7 @@ namespace MAI.Api.Controllers
                 UserId    = userId,
                 Username  = CurrentUsername,
                 Action    = AuditAction.FileDeleted,
-                Details   = $"SUCCES: Transfer sters '{transfer.FileName}' (id {transfer.Id})",
+                Details   = $"Transfer sters '{transfer.FileName}' (id {transfer.Id})",
                 IpAddress = CallerIp,
                 Timestamp = DateTime.UtcNow,
             });

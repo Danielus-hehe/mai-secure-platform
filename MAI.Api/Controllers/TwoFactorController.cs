@@ -117,7 +117,7 @@ namespace MAI.Api.Controllers
 
             if (!await VerifyPasswordAsync(user, dto.Password, ct))
             {
-                await AuditAsync(user, "ESEC: Initiere 2FA cu parola incorecta", ct);
+                await AuditAsync(user, "Initiere 2FA cu parola incorecta", ct, AuditResult.Failure);
                 return BadRequest(new { message = "Parola este incorectă." });
             }
 
@@ -125,7 +125,7 @@ namespace MAI.Api.Controllers
 
             user.TwoFactorPendingSecret = _protector.Protect(secret);
 
-            AddAudit(user, "SUCCES: Secret 2FA generat, in asteptarea confirmarii");
+            AddAudit(user, "Secret 2FA generat, in asteptarea confirmarii");
             await _context.SaveChangesAsync(ct);
 
             return Ok(new
@@ -182,7 +182,7 @@ namespace MAI.Api.Controllers
 
             if (!_totp.VerifyCode(pendingSecret, dto.Code))
             {
-                await AuditAsync(user, "ESEC: Cod incorect la activarea 2FA", ct);
+                await AuditAsync(user, "Cod incorect la activarea 2FA", ct, AuditResult.Failure);
                 return BadRequest(new
                 {
                     message = "Codul nu este valid. Verificați că ora telefonului este sincronizată automat.",
@@ -204,7 +204,7 @@ namespace MAI.Api.Controllers
             user.RefreshTokenHash      = null;
             user.RefreshTokenExpiresAt = null;
 
-            AddAudit(user, $"SUCCES: 2FA activat, {recoveryCodes.Count} coduri de recuperare emise, sesiuni revocate");
+            AddAudit(user, $"2FA activat, {recoveryCodes.Count} coduri de recuperare emise, sesiuni revocate");
             await _context.SaveChangesAsync(ct);
 
             _logger.LogInformation("2FA activat pentru {Username}.", user.Username);
@@ -255,13 +255,13 @@ namespace MAI.Api.Controllers
 
             if (!await VerifyPasswordAsync(user, dto.Password, ct))
             {
-                await AuditAsync(user, "ESEC: Dezactivare 2FA cu parola incorecta", ct);
+                await AuditAsync(user, "Dezactivare 2FA cu parola incorecta", ct, AuditResult.Failure);
                 return BadRequest(new { message = "Parola este incorectă." });
             }
 
             if (!await VerifySecondFactorAsync(user, dto.Code))
             {
-                await AuditAsync(user, "ESEC: Dezactivare 2FA cu cod incorect", ct);
+                await AuditAsync(user, "Dezactivare 2FA cu cod incorect", ct, AuditResult.Failure);
                 return BadRequest(new { message = "Codul nu este valid." });
             }
 
@@ -274,7 +274,7 @@ namespace MAI.Api.Controllers
             user.TwoFactorChallengeExpiresAt = null;
             user.TwoFactorChallengeAttempts  = 0;
 
-            AddAudit(user, "ATENTIE: 2FA dezactivat de utilizator");
+            AddAudit(user, "2FA dezactivat de utilizator", AuditResult.Warning);
             await _context.SaveChangesAsync(ct);
 
             _logger.LogWarning("2FA dezactivat pentru {Username}, IP={Ip}.", user.Username, Ip);
@@ -311,7 +311,7 @@ namespace MAI.Api.Controllers
             user.TwoFactorRecoveryCodeHashes = string.Join(';',
                 recoveryCodes.Select(TotpService.HashRecoveryCode));
 
-            AddAudit(user, $"SUCCES: Coduri de recuperare 2FA regenerate ({recoveryCodes.Count})");
+            AddAudit(user, $"Coduri de recuperare 2FA regenerate ({recoveryCodes.Count})");
             await _context.SaveChangesAsync(ct);
 
             return Ok(new
@@ -367,7 +367,8 @@ namespace MAI.Api.Controllers
                 UserId    = CurrentUserId,
                 Username  = adminName,
                 Action    = AuditAction.UserUpdated,
-                Details   = $"ATENTIE: 2FA resetat administrativ pentru @{target.Username}, sesiuni revocate",
+                Details   = $"2FA resetat administrativ pentru @{target.Username}, sesiuni revocate",
+                Result    = AuditResult.Warning,
                 IpAddress = Ip,
                 Timestamp = DateTime.UtcNow,
             });
@@ -434,7 +435,12 @@ namespace MAI.Api.Controllers
             return Task.FromResult(true);
         }
 
-        private void AddAudit(User user, string details)
+        /// <summary>
+        /// Adaugă o intrare de audit în contextul curent, fără să salveze.
+        /// Rezultatul e parametru explicit, nu prefix de text: filtrarea din
+        /// AuditLogsController se face pe coloană, nu pe primele caractere.
+        /// </summary>
+        private void AddAudit(User user, string details, AuditResult result = AuditResult.Success)
         {
             _context.AuditLogs.Add(new AuditLog
             {
@@ -442,14 +448,16 @@ namespace MAI.Api.Controllers
                 Username  = user.Username,
                 Action    = AuditAction.UserUpdated,
                 Details   = details,
+                Result    = result,
                 IpAddress = Ip,
                 Timestamp = DateTime.UtcNow,
             });
         }
 
-        private async Task AuditAsync(User user, string details, CancellationToken ct)
+        private async Task AuditAsync(
+            User user, string details, CancellationToken ct, AuditResult result = AuditResult.Success)
         {
-            AddAudit(user, details);
+            AddAudit(user, details, result);
             await _context.SaveChangesAsync(ct);
         }
     }

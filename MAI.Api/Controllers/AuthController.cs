@@ -2,12 +2,11 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
-using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using MAI.Api.Security;
+using MAI.Api.Services;
 using MAI.BusinessLogic.Dtos;
 using MAI.BusinessLogic.Interfaces;
 using MAI.BusinessLogic.Security;
@@ -18,50 +17,53 @@ using LoginDto = MAI.DataAccessLayer.DTOs.LoginDto;
 
 namespace MAI.Api.Controllers
 {
+    /// <summary>
+    /// Autentificare: login, pasul doi, rotația sesiunii, delogare, schimbare de parolă.
+    ///
+    /// Controllerul orchestrează; nu implementează. Semnarea JWT-urilor, generarea
+    /// și hashingul tokenurilor opace stau în <see cref="ITokenService"/>, iar
+    /// politica de blocare a contului în <see cref="IAccountLockoutService"/>.
+    /// Ce rămâne aici sunt deciziile care depind de contextul HTTP: ce cod de stare
+    /// se întoarce, ce mesaj vede utilizatorul, ce se scrie în jurnal.
+    /// </summary>
     [ApiController]
     [Route("api/Auth")]
     public class AuthController : ControllerBase
     {
         private readonly AppDbContext _context;
-        private readonly IConfiguration _config;
         private readonly IPasswordHasher _hasher;
         private readonly PasswordPolicy _policy;
         private readonly Argon2Options _argon2;
-        private readonly LockoutOptions _lockout;
         private readonly TwoFactorOptions _twoFactor;
         private readonly TotpService _totp;
         private readonly SecretProtector _protector;
+        private readonly ITokenService _tokens;
+        private readonly IAccountLockoutService _lockout;
         private readonly ILogger<AuthController> _logger;
 
         public AuthController(
             AppDbContext context,
-            IConfiguration config,
             IPasswordHasher hasher,
             PasswordPolicy policy,
             Argon2Options argon2,
-            LockoutOptions lockout,
             TwoFactorOptions twoFactor,
             TotpService totp,
             SecretProtector protector,
+            ITokenService tokens,
+            IAccountLockoutService lockout,
             ILogger<AuthController> logger)
         {
             _context   = context;
-            _config    = config;
             _hasher    = hasher;
             _policy    = policy;
             _argon2    = argon2;
-            _lockout   = lockout;
             _twoFactor = twoFactor;
             _totp      = totp;
             _protector = protector;
+            _tokens    = tokens;
+            _lockout   = lockout;
             _logger    = logger;
         }
-
-        private int AccessTokenMinutes =>
-            int.TryParse(_config["Jwt:AccessTokenMinutes"], out var m) && m > 0 ? m : 15;
-
-        private int RefreshTokenDays =>
-            int.TryParse(_config["Jwt:RefreshTokenDays"], out var d) && d > 0 ? d : 7;
 
         private string Ip => HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
@@ -69,21 +71,24 @@ namespace MAI.Api.Controllers
         private string ProfileFor(UserRole role) =>
             role >= UserRole.SefDirectie ? _argon2.PrivilegedProfile : _argon2.DefaultProfile;
 
-        // ─────────────────────────────────────────────────────────────────────
+        // ═════════════════════════════════════════════════════════════════════
         // POST api/Auth/login
-        // ─────────────────────────────────────────────────────────────────────
+        // ═════════════════════════════════════════════════════════════════════
+        [AllowAnonymous]
         [EnableRateLimiting(RateLimitPolicies.Login)]
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginDto request, CancellationToken ct)
         {
             var username = request.Username?.Trim() ?? string.Empty;
 
-            // Mesaj identic pentru orice eșec — nu divulgăm dacă userul există sau e blocat.
+            // Mesaj identic pentru orice eșec — nu divulgăm dacă userul există,
+            // dacă e blocat sau dacă parola era aproape corectă.
             const string genericError = "Nume de utilizator sau parolă incorectă.";
 
             if (string.IsNullOrWhiteSpace(username) || string.IsNullOrEmpty(request.Password))
             {
-                await WriteAuditAsync(null, username, AuditAction.Login, "ESEC: Credentiale lipsa");
+                await WriteAuditAsync(null, username, AuditAction.Login,
+                    "Credentiale lipsa", AuditResult.Failure);
                 return BadRequest(new { message = genericError });
             }
 
@@ -93,10 +98,11 @@ namespace MAI.Api.Controllers
             {
                 if (user is null)
                 {
-                    // Consumăm același timp ca o verificare reală, ca să nu se poată enumera
-                    // conturile măsurând latența răspunsului.
+                    // Consumăm același timp ca o verificare reală, ca să nu se poată
+                    // enumera conturile măsurând latența răspunsului.
                     await _hasher.SimulateVerificationAsync(ct);
-                    await WriteAuditAsync(null, username, AuditAction.Login, "ESEC: Utilizator inexistent");
+                    await WriteAuditAsync(null, username, AuditAction.Login,
+                        "Utilizator inexistent", AuditResult.Failure);
                     return BadRequest(new { message = genericError });
                 }
 
@@ -104,9 +110,10 @@ namespace MAI.Api.Controllers
                 // un atacator nu trebuie să poată consuma 19 MiB pe încercare la nesfârșit.
                 if (user.IsLockedOut)
                 {
-                    var remaining = (int)Math.Ceiling((user.LockoutEndsAt!.Value - DateTime.UtcNow).TotalSeconds);
+                    var remaining = _lockout.RemainingLockoutSeconds(user);
+
                     await WriteAuditAsync(user.Id, username, AuditAction.Login,
-                        $"ESEC: Cont blocat, {remaining}s ramase");
+                        $"Cont blocat, {remaining}s ramase", AuditResult.Failure);
 
                     Response.Headers.RetryAfter = remaining.ToString();
                     return StatusCode(StatusCodes.Status429TooManyRequests, new
@@ -120,13 +127,25 @@ namespace MAI.Api.Controllers
 
                 if (verification == PasswordVerificationResult.Failed)
                 {
-                    await RegisterFailedAttemptAsync(user, ct);
+                    var outcome = _lockout.RegisterFailedAttempt(user);
+
+                    if (outcome.LockedOut)
+                    {
+                        _logger.LogWarning("Cont blocat: {Username}, IP={Ip}, {Minutes} minute",
+                            user.Username, Ip, outcome.LockoutMinutes);
+                    }
+
+                    AddAudit(user.Id, username, AuditAction.Login,
+                        outcome.AuditDetails, AuditResult.Failure);
+                    await _context.SaveChangesAsync(ct);
+
                     return BadRequest(new { message = genericError });
                 }
 
                 if (!user.IsActive)
                 {
-                    await WriteAuditAsync(user.Id, username, AuditAction.Login, "ESEC: Cont dezactivat");
+                    await WriteAuditAsync(user.Id, username, AuditAction.Login,
+                        "Cont dezactivat", AuditResult.Failure);
                     return BadRequest(new { message = "Contul este dezactivat. Contactați administratorul." });
                 }
 
@@ -135,15 +154,14 @@ namespace MAI.Api.Controllers
                 {
                     user.PasswordHash = await _hasher.HashPasswordAsync(request.Password, ProfileFor(user.Role), ct);
                     _logger.LogInformation("Hash parola migrat pentru {Username}.", username);
-                    AddAudit(user.Id, username, AuditAction.UserUpdated, "SUCCES: Hash parola migrat la Argon2id");
+                    AddAudit(user.Id, username, AuditAction.UserUpdated, "Hash parola migrat la Argon2id");
                 }
 
                 // Parola e corectă: contorul de eșecuri se resetează aici, indiferent
                 // dacă mai urmează sau nu pasul doi. Altfel, un utilizator cu 2FA
                 // activ ar rămâne cu eșecuri vechi neșterse și s-ar bloca aparent
                 // din senin la o greșeală ulterioară.
-                user.FailedLoginAttempts = 0;
-                user.LockoutEndsAt       = null;
+                _lockout.ResetCounters(user);
 
                 // ── Pasul doi, DOAR dacă utilizatorul l-a activat singur ──────
                 //
@@ -152,10 +170,10 @@ namespace MAI.Api.Controllers
                 // activarea se face din pagina de profil, de către utilizator.
                 if (user.TwoFactorEnabled && !string.IsNullOrEmpty(user.TwoFactorSecret))
                 {
-                    var challenge = IssueTwoFactorChallenge(user);
+                    var challenge = _tokens.IssueTwoFactorChallenge(user);
 
                     AddAudit(user.Id, username, AuditAction.Login,
-                        "SUCCES: Parola corecta, se asteapta codul 2FA");
+                        "Parola corecta, se asteapta codul 2FA");
 
                     await _context.SaveChangesAsync(ct);
 
@@ -166,7 +184,7 @@ namespace MAI.Api.Controllers
                         twoFactorRequired = true,
                         challengeToken    = challenge.Token,
                         expiresAt         = challenge.ExpiresAt,
-                        // Frontend-ul afișează câte coduri de recuperare mai există,
+                        // Frontend-ul afișează dacă mai există coduri de recuperare,
                         // ca utilizatorul să știe dacă are pe ce conta.
                         recoveryAvailable = user.RemainingRecoveryCodes > 0,
                     });
@@ -174,9 +192,9 @@ namespace MAI.Api.Controllers
 
                 user.LastLoginAt = DateTime.UtcNow;
 
-                var response = IssueTokens(user);
+                var response = _tokens.IssueTokens(user);
 
-                AddAudit(user.Id, username, AuditAction.Login, "SUCCES: Autentificare reusita");
+                AddAudit(user.Id, username, AuditAction.Login, "Autentificare reusita");
                 await _context.SaveChangesAsync(ct);
 
                 return Ok(response);
@@ -187,9 +205,9 @@ namespace MAI.Api.Controllers
             }
         }
 
-        // ─────────────────────────────────────────────────────────────────────
+        // ═════════════════════════════════════════════════════════════════════
         // POST api/Auth/2fa/verify — pasul doi
-        // ─────────────────────────────────────────────────────────────────────
+        // ═════════════════════════════════════════════════════════════════════
         /// <summary>
         /// Schimbă provocarea emisă de /login pe tokenurile reale, dacă vine
         /// însoțită de un cod TOTP valid sau de un cod de recuperare.
@@ -210,7 +228,7 @@ namespace MAI.Api.Controllers
             if (string.IsNullOrWhiteSpace(dto.ChallengeToken) || string.IsNullOrWhiteSpace(dto.Code))
                 return Unauthorized(new { message = genericError });
 
-            var hash = HashOpaqueToken(dto.ChallengeToken);
+            var hash = _tokens.HashOpaqueToken(dto.ChallengeToken);
 
             var user = await _context.Users
                 .FirstOrDefaultAsync(u => u.TwoFactorChallengeHash == hash, ct);
@@ -218,31 +236,33 @@ namespace MAI.Api.Controllers
             if (user is null)
             {
                 await WriteAuditAsync(null, "necunoscut", AuditAction.Login,
-                    "ESEC: Provocare 2FA invalida sau deja folosita");
+                    "Provocare 2FA invalida sau deja folosita", AuditResult.Failure);
                 return Unauthorized(new { message = genericError });
             }
 
             if (user.TwoFactorChallengeExpiresAt is null ||
                 user.TwoFactorChallengeExpiresAt <= DateTime.UtcNow)
             {
-                ClearChallenge(user);
-                await WriteAuditAsync(user.Id, user.Username, AuditAction.Login, "ESEC: Provocare 2FA expirata");
+                _tokens.ClearChallenge(user);
+                await WriteAuditAsync(user.Id, user.Username, AuditAction.Login,
+                    "Provocare 2FA expirata", AuditResult.Failure);
                 return Unauthorized(new { message = genericError });
             }
 
             if (!user.IsActive || user.IsLockedOut)
             {
-                ClearChallenge(user);
+                _tokens.ClearChallenge(user);
                 await WriteAuditAsync(user.Id, user.Username, AuditAction.Login,
-                    "ESEC: Verificare 2FA pe cont dezactivat sau blocat");
+                    "Verificare 2FA pe cont dezactivat sau blocat", AuditResult.Failure);
                 return Unauthorized(new { message = genericError });
             }
 
             if (user.TwoFactorChallengeAttempts >= _twoFactor.MaxChallengeAttempts)
             {
-                ClearChallenge(user);
+                _tokens.ClearChallenge(user);
                 await WriteAuditAsync(user.Id, user.Username, AuditAction.Login,
-                    $"ESEC: Provocare 2FA anulata dupa {_twoFactor.MaxChallengeAttempts} coduri gresite");
+                    $"Provocare 2FA anulata dupa {_twoFactor.MaxChallengeAttempts} coduri gresite",
+                    AuditResult.Failure);
                 return Unauthorized(new { message = genericError });
             }
 
@@ -269,7 +289,7 @@ namespace MAI.Api.Controllers
                         "Secretul 2FA al utilizatorului {Username} nu poate fi descifrat.", user.Username);
 
                     await WriteAuditAsync(user.Id, user.Username, AuditAction.Login,
-                        "ESEC: Secret 2FA indescifrabil");
+                        "Secret 2FA indescifrabil", AuditResult.Failure);
 
                     return StatusCode(500, new
                     {
@@ -292,7 +312,8 @@ namespace MAI.Api.Controllers
                 var remaining = _twoFactor.MaxChallengeAttempts - user.TwoFactorChallengeAttempts;
 
                 AddAudit(user.Id, user.Username, AuditAction.Login,
-                    $"ESEC: Cod 2FA incorect ({user.TwoFactorChallengeAttempts}/{_twoFactor.MaxChallengeAttempts})");
+                    $"Cod 2FA incorect ({user.TwoFactorChallengeAttempts}/{_twoFactor.MaxChallengeAttempts})",
+                    AuditResult.Failure);
 
                 await _context.SaveChangesAsync(ct);
 
@@ -307,16 +328,19 @@ namespace MAI.Api.Controllers
 
             // Provocarea se consumă indiferent de ce urmează: un token de unică
             // folosință care rămâne valid după utilizare nu mai e de unică folosință.
-            ClearChallenge(user);
+            _tokens.ClearChallenge(user);
 
             user.LastLoginAt = DateTime.UtcNow;
 
-            var response = IssueTokens(user);
+            var response = _tokens.IssueTokens(user);
 
             AddAudit(user.Id, user.Username, AuditAction.Login,
                 usedRecoveryCode
-                    ? $"SUCCES: Autentificare cu COD DE RECUPERARE 2FA ({user.RemainingRecoveryCodes} ramase)"
-                    : "SUCCES: Autentificare reusita cu 2FA");
+                    ? $"Autentificare cu COD DE RECUPERARE 2FA ({user.RemainingRecoveryCodes} ramase)"
+                    : "Autentificare reusita cu 2FA",
+                // Un login cu cod de recuperare nu e o eroare — dar e exact rândul
+                // pe care un supervizor vrea să-l găsească filtrând, nu citind.
+                usedRecoveryCode ? AuditResult.Warning : AuditResult.Success);
 
             await _context.SaveChangesAsync(ct);
 
@@ -345,9 +369,9 @@ namespace MAI.Api.Controllers
             });
         }
 
-        // ─────────────────────────────────────────────────────────────────────
+        // ═════════════════════════════════════════════════════════════════════
         // POST api/Auth/refresh
-        // ─────────────────────────────────────────────────────────────────────
+        // ═════════════════════════════════════════════════════════════════════
         [AllowAnonymous]
         [EnableRateLimiting(RateLimitPolicies.Refresh)]
         [HttpPost("refresh")]
@@ -358,49 +382,45 @@ namespace MAI.Api.Controllers
             if (string.IsNullOrWhiteSpace(dto.RefreshToken))
                 return Unauthorized(new { message = genericError });
 
-            // SHA-256, nu Argon2: tokenul are 512 biți de entropie generată criptografic,
-            // deci nu există atac prin dicționar, iar refresh-ul trebuie să fie ieftin.
-            // Dacă am folosi Argon2 aici, /refresh ar deveni un vector de DoS mai bun decât /login.
-            var hash = HashOpaqueToken(dto.RefreshToken);
+            var hash = _tokens.HashOpaqueToken(dto.RefreshToken);
 
             var user = await _context.Users.FirstOrDefaultAsync(u => u.RefreshTokenHash == hash, ct);
 
             if (user is null)
             {
                 await WriteAuditAsync(null, "necunoscut", AuditAction.Login,
-                    "ESEC: Refresh token invalid sau deja folosit");
+                    "Refresh token invalid sau deja folosit", AuditResult.Failure);
                 return Unauthorized(new { message = genericError });
             }
 
             if (user.RefreshTokenExpiresAt is null || user.RefreshTokenExpiresAt <= DateTime.UtcNow)
             {
-                user.RefreshTokenHash      = null;
-                user.RefreshTokenExpiresAt = null;
-                await WriteAuditAsync(user.Id, user.Username, AuditAction.Login, "ESEC: Refresh token expirat");
+                _tokens.RevokeSession(user);
+                await WriteAuditAsync(user.Id, user.Username, AuditAction.Login,
+                    "Refresh token expirat", AuditResult.Failure);
                 return Unauthorized(new { message = genericError });
             }
 
             if (!user.IsActive || user.IsLockedOut)
             {
-                user.RefreshTokenHash      = null;
-                user.RefreshTokenExpiresAt = null;
+                _tokens.RevokeSession(user);
                 await WriteAuditAsync(user.Id, user.Username, AuditAction.Login,
-                    "ESEC: Refresh pe cont dezactivat sau blocat");
+                    "Refresh pe cont dezactivat sau blocat", AuditResult.Failure);
                 return Unauthorized(new { message = genericError });
             }
 
             // Rotație: tokenul vechi devine invalid în momentul emiterii celui nou.
-            var response = IssueTokens(user);
+            var response = _tokens.IssueTokens(user);
 
-            AddAudit(user.Id, user.Username, AuditAction.Login, "SUCCES: Token reimprospatat");
+            AddAudit(user.Id, user.Username, AuditAction.Login, "Token reimprospatat");
             await _context.SaveChangesAsync(ct);
 
             return Ok(response);
         }
 
-        // ─────────────────────────────────────────────────────────────────────
+        // ═════════════════════════════════════════════════════════════════════
         // POST api/Auth/logout
-        // ─────────────────────────────────────────────────────────────────────
+        // ═════════════════════════════════════════════════════════════════════
         [AllowAnonymous]
         [HttpPost("logout")]
         public async Task<IActionResult> Logout([FromBody] RefreshTokenRequestDto? dto, CancellationToken ct)
@@ -413,28 +433,26 @@ namespace MAI.Api.Controllers
 
             if (user is null && !string.IsNullOrWhiteSpace(dto?.RefreshToken))
             {
-                var hash = HashOpaqueToken(dto.RefreshToken);
+                var hash = _tokens.HashOpaqueToken(dto.RefreshToken);
                 user = await _context.Users.FirstOrDefaultAsync(u => u.RefreshTokenHash == hash, ct);
             }
 
             if (user is not null)
             {
-                user.RefreshTokenHash      = null;
-                user.RefreshTokenExpiresAt = null;
+                // Revocă și refresh token-ul, și o eventuală provocare 2FA rămasă
+                // în aer — care n-are ce căuta după delogare.
+                _tokens.RevokeSession(user);
 
-                // O provocare 2FA rămasă în aer nu are ce căuta după delogare.
-                ClearChallenge(user);
-
-                AddAudit(user.Id, user.Username, AuditAction.Logout, "SUCCES: Delogare, refresh token revocat");
+                AddAudit(user.Id, user.Username, AuditAction.Logout, "Delogare, refresh token revocat");
                 await _context.SaveChangesAsync(ct);
             }
 
             return Ok(new { message = "Sesiune încheiată." });
         }
 
-        // ─────────────────────────────────────────────────────────────────────
+        // ═════════════════════════════════════════════════════════════════════
         // PATCH api/Auth/change-password
-        // ─────────────────────────────────────────────────────────────────────
+        // ═════════════════════════════════════════════════════════════════════
         [Authorize]
         [EnableRateLimiting(RateLimitPolicies.PasswordWrite)]
         [HttpPatch("change-password")]
@@ -453,7 +471,7 @@ namespace MAI.Api.Controllers
                 if (verification == PasswordVerificationResult.Failed)
                 {
                     await WriteAuditAsync(user.Id, user.Username, AuditAction.UserUpdated,
-                        "ESEC: Schimbare parola - parola curenta incorecta");
+                        "Schimbare parola - parola curenta incorecta", AuditResult.Failure);
                     return BadRequest(new { message = "Parola curentă este incorectă." });
                 }
 
@@ -469,16 +487,14 @@ namespace MAI.Api.Controllers
                 user.PasswordHash = await _hasher.HashPasswordAsync(dto.NewPassword, _argon2.PrivilegedProfile, ct);
 
                 // Schimbarea parolei invalidează sesiunile de pe alte dispozitive.
-                user.RefreshTokenHash      = null;
-                user.RefreshTokenExpiresAt = null;
-
+                //
                 // Atenție: secretul 2FA NU se atinge. Este independent de parolă —
                 // exact ăsta e rostul celui de-al doilea factor. Dacă l-am reseta
                 // aici, o schimbare de parolă ar dezactiva pe tăcute protecția.
-                ClearChallenge(user);
+                _tokens.RevokeSession(user);
 
                 AddAudit(user.Id, user.Username, AuditAction.UserUpdated,
-                    "SUCCES: Parola schimbata (Argon2id), sesiuni revocate");
+                    "Parola schimbata (Argon2id), sesiuni revocate");
 
                 await _context.SaveChangesAsync(ct);
                 return Ok(new { message = "Parola a fost actualizată cu succes." });
@@ -489,72 +505,9 @@ namespace MAI.Api.Controllers
             }
         }
 
-        // ─────────────────────────────────────────────────────────────────────
-        // Blocare progresivă pe cont
-        // ─────────────────────────────────────────────────────────────────────
-
-        /// <summary>
-        /// Incrementează contorul de eșecuri și blochează contul după MaxFailedAttempts.
-        /// Durata crește exponențial la blocări repetate, plafonată la MaxLockoutMinutes.
-        /// </summary>
-        private async Task RegisterFailedAttemptAsync(User user, CancellationToken ct)
-        {
-            // Fereastră glisantă: dacă ultima greșeală e veche, pornim contorul de la zero.
-            if (user.LastFailedLoginAt is { } last &&
-                (DateTime.UtcNow - last).TotalMinutes > _lockout.AttemptWindowMinutes)
-            {
-                user.FailedLoginAttempts = 0;
-            }
-
-            user.FailedLoginAttempts++;
-            user.LastFailedLoginAt = DateTime.UtcNow;
-
-            var details = $"ESEC: Parola incorecta ({user.FailedLoginAttempts}/{_lockout.MaxFailedAttempts})";
-
-            if (user.FailedLoginAttempts >= _lockout.MaxFailedAttempts)
-            {
-                var over     = user.FailedLoginAttempts - _lockout.MaxFailedAttempts;
-                var minutes  = _lockout.BaseLockoutMinutes * Math.Pow(2, Math.Min(over, 10));
-                var capped   = Math.Min(minutes, _lockout.MaxLockoutMinutes);
-
-                user.LockoutEndsAt = DateTime.UtcNow.AddMinutes(capped);
-                details = $"ESEC: Cont blocat {capped:0} minute dupa {user.FailedLoginAttempts} incercari";
-
-                _logger.LogWarning("Cont blocat: {Username}, IP={Ip}, {Minutes} minute",
-                    user.Username, Ip, capped);
-            }
-
-            AddAudit(user.Id, user.Username, AuditAction.Login, details);
-            await _context.SaveChangesAsync(ct);
-        }
-
-        // ─────────────────────────────────────────────────────────────────────
-        // Provocarea 2FA
-        // ─────────────────────────────────────────────────────────────────────
-
-        /// <summary>
-        /// Emite o provocare de unică folosință. În baza de date ajunge doar
-        /// hash-ul, ca și în cazul refresh token-ului: un dump al bazei nu trebuie
-        /// să conțină nimic care să poată fi rejucat.
-        /// </summary>
-        private (string Token, DateTime ExpiresAt) IssueTwoFactorChallenge(User user)
-        {
-            var token     = GenerateOpaqueToken(32);
-            var expiresAt = DateTime.UtcNow.AddSeconds(_twoFactor.ChallengeLifetimeSeconds);
-
-            user.TwoFactorChallengeHash        = HashOpaqueToken(token);
-            user.TwoFactorChallengeExpiresAt   = expiresAt;
-            user.TwoFactorChallengeAttempts    = 0;
-
-            return (token, expiresAt);
-        }
-
-        private static void ClearChallenge(User user)
-        {
-            user.TwoFactorChallengeHash      = null;
-            user.TwoFactorChallengeExpiresAt = null;
-            user.TwoFactorChallengeAttempts  = 0;
-        }
+        // ═════════════════════════════════════════════════════════════════════
+        // Coduri de recuperare
+        // ═════════════════════════════════════════════════════════════════════
 
         /// <summary>
         /// Verifică un cod de recuperare și, dacă e valid, îl șterge din listă.
@@ -572,7 +525,9 @@ namespace MAI.Api.Controllers
                 .Split(';', StringSplitOptions.RemoveEmptyEntries)
                 .ToList();
 
-            // Comparație în timp constant peste toată lista, fără ieșire devreme.
+            // Comparație în timp constant peste toată lista, fără ieșire devreme:
+            // o buclă care se oprește la prima potrivire spune, prin durată, câte
+            // coduri a parcurs până a găsit-o.
             var matchIndex = -1;
             for (var i = 0; i < hashes.Count; i++)
             {
@@ -591,88 +546,9 @@ namespace MAI.Api.Controllers
             return true;
         }
 
-        // ─────────────────────────────────────────────────────────────────────
-        // Emitere tokenuri
-        // ─────────────────────────────────────────────────────────────────────
-
-        private TokenResponseDto IssueTokens(User user)
-        {
-            var now            = DateTime.UtcNow;
-            var accessExpires  = now.AddMinutes(AccessTokenMinutes);
-            var refreshExpires = now.AddDays(RefreshTokenDays);
-
-            var accessToken  = GenerateJwtToken(user, accessExpires);
-            var refreshToken = GenerateOpaqueToken(64);
-
-            user.RefreshTokenHash      = HashOpaqueToken(refreshToken);
-            user.RefreshTokenIssuedAt  = now;
-            user.RefreshTokenExpiresAt = refreshExpires;
-
-            return new TokenResponseDto
-            {
-                Id                    = user.Id,
-                Username              = user.Username,
-                FullName              = user.FullName ?? user.Username,
-                Department            = user.Department ?? string.Empty,
-                Role                  = user.Role,
-                AccessToken           = accessToken,
-                Token                 = accessToken,   // compatibilitate cu frontend-ul existent
-                RefreshToken          = refreshToken,
-                ExpiresIn             = AccessTokenMinutes * 60,
-                AccessTokenExpiresAt  = accessExpires,
-                RefreshTokenExpiresAt = refreshExpires,
-            };
-        }
-
-        private string GenerateJwtToken(User user, DateTime expires)
-        {
-            var jwtKey = _config["Jwt:Key"]
-                ?? throw new InvalidOperationException("Jwt:Key lipsește din appsettings!");
-
-            var key   = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
-            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
-            var claims = new List<Claim>
-            {
-                new(ClaimTypes.NameIdentifier, user.Id.ToString()),
-                new(ClaimTypes.Name,           user.Username),
-                new(ClaimTypes.Role,           user.Role.ToString()),
-                new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
-
-                // "amr" (authentication methods references), RFC 8176. Consemnează
-                // cu ce a fost obținut tokenul. Nu schimbă nimic azi, dar face
-                // posibil mai târziu ca operațiile sensibile să ceară "mfa".
-                new("amr", user.TwoFactorEnabled ? "mfa" : "pwd"),
-            };
-
-            var token = new JwtSecurityToken(
-                claims:             claims,
-                expires:            expires,
-                signingCredentials: creds
-            );
-
-            return new JwtSecurityTokenHandler().WriteToken(token);
-        }
-
-        /// <summary>Token opac base64url, fără padding. Folosit pentru refresh și pentru provocarea 2FA.</summary>
-        private static string GenerateOpaqueToken(int byteLength)
-        {
-            var bytes = RandomNumberGenerator.GetBytes(byteLength);
-            return Convert.ToBase64String(bytes)
-                .Replace('+', '-')
-                .Replace('/', '_')
-                .TrimEnd('=');
-        }
-
-        private static string HashOpaqueToken(string token)
-        {
-            var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(token));
-            return Convert.ToHexString(bytes).ToLowerInvariant();
-        }
-
-        // ─────────────────────────────────────────────────────────────────────
+        // ═════════════════════════════════════════════════════════════════════
         // Helpers
-        // ─────────────────────────────────────────────────────────────────────
+        // ═════════════════════════════════════════════════════════════════════
 
         private IActionResult CapacityResponse(HashingCapacityExceededException ex)
         {
@@ -685,7 +561,9 @@ namespace MAI.Api.Controllers
             });
         }
 
-        private void AddAudit(Guid? userId, string username, AuditAction action, string details)
+        private void AddAudit(
+            Guid? userId, string username, AuditAction action, string details,
+            AuditResult result = AuditResult.Success)
         {
             _context.AuditLogs.Add(new AuditLog
             {
@@ -693,25 +571,18 @@ namespace MAI.Api.Controllers
                 Username  = username,
                 Action    = action,
                 Details   = details,
+                Result    = result,
                 IpAddress = Ip,
                 Timestamp = DateTime.UtcNow,
             });
         }
 
-        private async Task WriteAuditAsync(Guid? userId, string username, AuditAction action, string details)
+        private async Task WriteAuditAsync(
+            Guid? userId, string username, AuditAction action, string details,
+            AuditResult result = AuditResult.Success)
         {
-            AddAudit(userId, username, action, details);
+            AddAudit(userId, username, action, details, result);
             await _context.SaveChangesAsync();
         }
-    }
-
-    /// <summary>Corpul cererii POST /api/Auth/2fa/verify.</summary>
-    public class TwoFactorVerifyDto
-    {
-        /// <summary>Provocarea primită de la /login.</summary>
-        public string ChallengeToken { get; set; } = string.Empty;
-
-        /// <summary>Codul din aplicația de autentificare SAU un cod de recuperare.</summary>
-        public string Code { get; set; } = string.Empty;
     }
 }

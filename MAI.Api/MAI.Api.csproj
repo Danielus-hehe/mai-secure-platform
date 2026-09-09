@@ -4,8 +4,8 @@
         <TargetFramework>net8.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
-      <UserSecretsId>52fe0d3c-a1c0-49bb-9f08-d8866f81c5e9</UserSecretsId>
-  </PropertyGroup>
+        <UserSecretsId>52fe0d3c-a1c0-49bb-9f08-d8866f81c5e9</UserSecretsId>
+    </PropertyGroup>
 
     <ItemGroup>
         <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.*" />
@@ -23,6 +23,10 @@
         <ProjectReference Include="..\MAI.Domain\MAI.Domain.csproj" />
         <ProjectReference Include="..\MAI.DataAccessLayer\MAI.DataAccessLayer.csproj" />
         <ProjectReference Include="..\MAI.BusinessLogic\MAI.BusinessLogic.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <Folder Include="MAI.Api\" />
     </ItemGroup>
 
 </Project>

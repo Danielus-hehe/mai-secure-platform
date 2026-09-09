@@ -88,8 +88,75 @@ services:
       mc ls local;
       "
 
+  # ───────────────────────────────────────────────────────────────────────────
+  # API-ul .NET
+  #
+  # Toate secretele vin din .env, niciunul din appsettings.json. Fisierul de
+  # configurare versionat contine doar valori-sablon, iar Program.cs opreste
+  # pornirea daca vreuna a ramas neinlocuita — un server care ruleaza cu cheia
+  # "YOUR_JWT_SECRET_KEY_HERE" e mai rau decat unul care nu porneste, pentru ca
+  # primul pare ca functioneaza.
+  # ───────────────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sgdm-api:latest
+    container_name: sgdm-api
+    restart: unless-stopped
+
+    depends_on:
+      minio:
+        condition: service_healthy
+
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+
+      # Conexiunea la baza de date. Daca folosesti Postgres-ul din acest compose,
+      # hostul este "postgres", nu "localhost": in reteaua Docker, localhost e
+      # containerul insusi.
+      ConnectionStrings__DefaultConnection: ${DB_CONNECTION_STRING}
+
+      # Secrete — generate cu:  openssl rand -base64 48
+      MAI_JWT_KEY: ${MAI_JWT_KEY}
+      MAI_ARGON2_PEPPER: ${MAI_ARGON2_PEPPER}
+      MAI_TWOFACTOR_KEY: ${MAI_TWOFACTOR_KEY}
+
+      # Endpointul MinIO vazut DIN container. Browserul, in schimb, primeste
+      # URL-uri presemnate care trebuie sa fie rezolvabile de pe masina lui —
+      # de aceea in productie ambele trebuie sa arate spre acelasi nume DNS.
+      Storage__Endpoint: http://minio:9000
+      Storage__Bucket: ${STORAGE_BUCKET:-sgdm-transfers}
+      MAI_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MAI_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+
+      # Originile frontend-ului. Fara ele, browserul refuza fiecare raspuns.
+      Cors__AllowedOrigins__0: ${FRONTEND_ORIGIN:-http://localhost:5173}
+
+      # In spatele unui reverse proxy: fara asta, toti utilizatorii ajung in
+      # aceeasi galeata de rate limit, fiindca RemoteIpAddress e IP-ul proxy-ului.
+      RateLimit__BehindReverseProxy: "false"
+
+    ports:
+      - "5000:8080"
+
+    # Doar pentru Storage:Provider=Local. Cu MinIO ramane nefolosit, dar exista
+    # ca sa nu se piarda fisiere daca cineva comuta providerul si reporneste.
+    volumes:
+      - api-storage:/app/Storage
+
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/api/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
 volumes:
   minio-data:
+    driver: local
+  api-storage:
     driver: local
 
 # ─────────────────────────────────────────────────────────────────────────────

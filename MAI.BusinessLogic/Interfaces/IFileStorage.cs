@@ -66,5 +66,17 @@ namespace MAI.BusinessLogic.Interfaces
             string key,
             TimeSpan lifetime,
             CancellationToken ct = default);
+
+        /// <summary>
+        /// Verifică dacă depozitul răspunde. Folosit de /api/health.
+        ///
+        /// Nu aruncă: returnează false. Un health check care propagă excepții
+        /// obligă fiecare apelant să le prindă și, mai rău, riscă să scurgă
+        /// endpointul și credențialele în mesajul erorii.
+        ///
+        /// Operația trebuie să fie ieftină și să nu scrie nimic — sonda rulează
+        /// la fiecare câteva secunde, la infinit.
+        /// </summary>
+        Task<bool> HealthCheckAsync(CancellationToken ct = default);
     }
 }
