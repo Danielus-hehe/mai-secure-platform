@@ -15,7 +15,13 @@ import { tokenStorage } from '../api/tokenStorage';
 import { isTwoFactorChallenge, type TwoFactorChallenge } from '../api/twoFactor';
 
 export interface User {
-    id: string | number;
+    /**
+     * Guid din backend, mereu string. Era `string | number`, ceea ce obliga
+     * fiecare comparatie de identitate la o conversie defensiva — si lasa loc
+     * ca `user.id === transfer.senderId` sa fie fals doar pentru ca unul era
+     * numar si celalalt sir.
+     */
+    id: string;
     username: string;
     fullName: string;
     role: Role;
@@ -80,7 +86,7 @@ const ROLE_NUM_TO_STRING: Record<number, Role> = {
 
 function normalizeUser(raw: LoginResponse): User {
     return {
-        id: raw.id,
+        id: String(raw.id),
         username: raw.username,
         fullName: raw.fullName || raw.username,
         role: ROLE_NUM_TO_STRING[Number(raw.role)] ?? 'UTILIZATOR',
