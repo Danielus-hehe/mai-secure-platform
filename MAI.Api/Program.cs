@@ -1,6 +1,7 @@
 ﻿using MAI.Api.BackgroundJobs;
 using MAI.Api.Middleware;
 using MAI.Api.Security;
+using MAI.Api.Services;
 using MAI.BusinessLogic.Interfaces;
 using MAI.BusinessLogic.Security;
 using MAI.BusinessLogic.Services;
@@ -196,17 +197,26 @@ if (rateLimitOptions.BehindReverseProxy)
 }
 
 // ─── JWT Authentication ────────────────────────────────────────────────────
-var jwtKey = builder.Configuration["Jwt:Key"]
-    ?? throw new InvalidOperationException("Jwt:Key lipsește din appsettings!");
+// Parametrii se citesc o singură dată, într-un obiect tipizat, folosit ȘI la
+// validare (aici) ȘI la emitere (TokenService). Înainte erau citiți din
+// IConfiguration în două locuri — două locuri care trebuie să rămână identice
+// sunt un loc unde diverg, iar aici divergența înseamnă tokenuri emise pe care
+// serverul propriu le respinge.
 
-// HS256 cu o cheie de 20 de caractere se poate sparge offline. Verificarea
-// oprește pornirea în loc să lase serverul să ruleze cu tokenuri falsificabile.
-if (Encoding.UTF8.GetByteCount(jwtKey) < 32 || jwtKey == "YOUR_JWT_SECRET_KEY_HERE")
-{
-    throw new InvalidOperationException(
-        "Jwt:Key trebuie să aibă cel puțin 32 de octeți de entropie reală și să nu fie valoarea-șablon. " +
-        "Generați: openssl rand -base64 48");
-}
+var jwtOptions = new JwtOptions();
+builder.Configuration.GetSection("Jwt").Bind(jwtOptions);
+
+// Cheia preferabil din variabilă de mediu, nu din fișierul care ajunge în Git.
+var jwtKeyFromEnv = Environment.GetEnvironmentVariable("MAI_JWT_KEY");
+if (!string.IsNullOrWhiteSpace(jwtKeyFromEnv))
+    jwtOptions.Key = jwtKeyFromEnv;
+
+// Oprește pornirea dacă tokenurile ar fi falsificabile sau dacă issuer/audience
+// lipsesc — un server care rulează cu o cheie slabă e mai rău decât unul care
+// nu pornește, fiindcă primul pare că funcționează.
+jwtOptions.Validate();
+
+builder.Services.AddSingleton(jwtOptions);
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -214,12 +224,33 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuerSigningKey = true,
-            IssuerSigningKey         = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
-            ValidateIssuer           = false,
-            ValidateAudience         = false,
-            ClockSkew                = TimeSpan.Zero,
+            IssuerSigningKey         = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.Key)),
+
+            // Înainte erau amândouă false. Consecința: un token emis de ORICE alt
+            // serviciu semnat cu aceeași cheie — inclusiv unul dintr-un proiect
+            // unde cheia s-a scurs sau a fost refolosită din comoditate — era
+            // acceptat aici ca sesiune validă. În intranet riscul e mic, dar
+            // validarea costă o comparație de șiruri.
+            ValidateIssuer   = true,
+            ValidIssuer      = jwtOptions.Issuer,
+            ValidateAudience = true,
+            ValidAudience    = jwtOptions.Audience,
+
+            ValidateLifetime = true,
+
+            // Fără toleranță de ceas: expirarea din token e expirarea reală.
+            // Implicit .NET acordă 5 minute, ceea ce prelungește tăcut orice
+            // token de acces cu o treime din durata lui.
+            ClockSkew        = TimeSpan.Zero,
         };
     });
+
+// ─── Servicii de autentificare ─────────────────────────────────────────────
+// Extrase din AuthController, care ajunsese să facă simultan verificarea parolei,
+// pasul doi, blocarea contului, semnarea JWT-urilor și hashingul tokenurilor.
+// Singleton: niciunul nu ține stare per cerere.
+builder.Services.AddSingleton<ITokenService, TokenService>();
+builder.Services.AddSingleton<IAccountLockoutService, AccountLockoutService>();
 
 // ─── CORS ──────────────────────────────────────────────────────────────────
 var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
@@ -232,8 +263,21 @@ builder.Services.AddCors(options =>
         policy.WithOrigins(allowedOrigins)
               .AllowAnyHeader()
               .AllowAnyMethod()
-              .WithExposedHeaders("Retry-After")   // frontend-ul îl citește la 429/503
-              .AllowCredentials();
+              .WithExposedHeaders("Retry-After");   // frontend-ul îl citește la 429/503
+
+        // AllowCredentials() a fost eliminat intenționat.
+        //
+        // Tokenul de acces circulă prin antetul Authorization, pus explicit de
+        // client.ts — niciodată printr-un cookie. Fără cookie nu există CSRF
+        // clasic: browserul nu atașează nimic automat la o cerere cross-origin.
+        //
+        // AllowCredentials nu era folosit de nimic, dar lăsa ușa deschisă: în ziua
+        // în care cineva ar muta tokenul într-un cookie „ca să supraviețuiască
+        // refresh-ului”, întreg API-ul ar deveni vulnerabil la CSRF fără ca vreo
+        // linie din politica de CORS să se schimbe.
+        //
+        // Dacă vreodată chiar e nevoie de cookie-uri, se repune AllowCredentials
+        // ÎMPREUNĂ cu SameSite=Strict și un token anti-CSRF — nu separat.
     });
 });
 
@@ -292,6 +336,10 @@ app.Logger.LogInformation(
     expirationOptions.PurgeObjects ? "activata" : "dezactivata");
 
 app.Logger.LogInformation(
+    "JWT: issuer={Issuer}, audience={Audience}, acces {Minutes} min, refresh {Days} zile, validare issuer/audience ACTIVA",
+    jwtOptions.Issuer, jwtOptions.Audience, jwtOptions.AccessTokenMinutes, jwtOptions.RefreshTokenDays);
+
+app.Logger.LogInformation(
     "Restrictie intranet: {State}{Mode}. 2FA optional: disponibil, cerut pentru roluri privilegiate = {Required}",
     intranetOptions.Enabled ? "activata" : "dezactivata",
     intranetOptions.Enabled && intranetOptions.AuditOnly ? " (doar audit)" : string.Empty,
@@ -310,6 +358,11 @@ if (rateLimitOptions.BehindReverseProxy)
 // nu merită nici un ciclu de Argon2, nici un slot de rate limit.
 // Trebuie să vină DUPĂ UseForwardedHeaders, altfel filtrează după IP-ul proxy-ului.
 app.UseIntranetOnly();
+
+// Antetele de securitate se pun înaintea rutării, ca să ajungă și pe răspunsurile
+// generate de middleware (429 de la rate limiter, 403 de la filtrul de intranet),
+// nu doar pe cele produse de controllere.
+app.UseSecurityHeaders();
 
 app.UseHttpsRedirection();
 app.UseCors("AllowFrontend");
