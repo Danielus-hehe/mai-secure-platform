@@ -82,6 +82,30 @@ namespace MAI.BusinessLogic.Storage
             Task.FromResult<string?>(null);
 
         /// <summary>
+        /// Sondă de disponibilitate: rădăcina există și se poate scrie în ea.
+        /// Scrierea se testează efectiv, nu se deduce din atributele directorului —
+        /// un mount read-only arată identic cu unul scriibil până încerci.
+        /// </summary>
+        public Task<bool> HealthCheckAsync(CancellationToken ct = default)
+        {
+            try
+            {
+                Directory.CreateDirectory(_root);
+
+                var probe = Path.Combine(_root, $".health-{Guid.NewGuid():N}");
+                File.WriteAllBytes(probe, []);
+                File.Delete(probe);
+
+                return Task.FromResult(true);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Health check depozit local: {Root} nu este scriibil.", _root);
+                return Task.FromResult(false);
+            }
+        }
+
+        /// <summary>
         /// Transformă cheia de obiect în cale pe disc și verifică explicit că
         /// rezultatul rămâne sub rădăcină.
         ///

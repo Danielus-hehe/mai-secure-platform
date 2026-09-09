@@ -160,6 +160,31 @@ namespace MAI.BusinessLogic.Storage
             return Task.FromResult<string?>(_client.GetPreSignedURL(request));
         }
 
+        /// <summary>
+        /// Sondă de disponibilitate: cere metadatele bucketului.
+        ///
+        /// Deliberat NU apelează EnsureBucketAsync — acela creează bucketul dacă
+        /// lipsește, iar o sondă de sănătate care modifică infrastructura pe care
+        /// o măsoară nu mai măsoară nimic.
+        /// </summary>
+        public async Task<bool> HealthCheckAsync(CancellationToken ct = default)
+        {
+            try
+            {
+                await _client.GetBucketLocationAsync(_options.Bucket, ct);
+                return true;
+            }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Health check depozit: {Endpoint} nu raspunde.", _options.Endpoint);
+                return false;
+            }
+        }
+
         // ─────────────────────────────────────────────────────────────────────
 
         private async Task EnsureBucketAsync(CancellationToken ct)
