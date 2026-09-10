@@ -161,8 +161,18 @@ namespace MAI.Api.Controllers
         /// se schimbă, browserul le descuie cu cea veche, le reîncuie cu cea nouă și
         /// trimite noul blob aici. Cheile publice rămân aceleași, deci fișierele
         /// primite anterior rămân accesibile.
+        ///
+        /// Cere parola CURENTĂ a contului (după schimbare, adică cea nouă) și o
+        /// verifică cu Argon2id. Fără această dovadă, un token de acces furat —
+        /// valabil cincisprezece minute — ajungea ca să suprascrie blobul cu
+        /// gunoi. Serverul nu poate distinge un blob valid de unul corupt (nu îl
+        /// poate decripta), iar fără key escrow nu există copie: rezultatul era
+        /// pierderea definitivă a accesului la TOATE fișierele primite, printr-o
+        /// singură cerere. Operațiile ireversibile asupra cheilor cer parola, ca
+        /// schimbarea parolei și dezactivarea 2FA.
         /// </summary>
         [HttpPatch("rewrap")]
+        [EnableRateLimiting(RateLimitPolicies.PasswordWrite)]
         public async Task<IActionResult> Rewrap([FromBody] RewrapKeysDto dto, CancellationToken ct)
         {
             var user = await _context.Users.FindAsync(new object?[] { CurrentUserId }, ct);
@@ -170,6 +180,38 @@ namespace MAI.Api.Controllers
 
             if (string.IsNullOrEmpty(user.PublicKeyEncryption))
                 return BadRequest(new { message = "Nu există chei înregistrate pentru acest cont." });
+
+            if (string.IsNullOrEmpty(dto.CurrentPassword))
+                return BadRequest(new { message = "Parola contului este obligatorie pentru reîmpachetare." });
+
+            try
+            {
+                var verification = await _passwordHasher.VerifyPasswordAsync(
+                    dto.CurrentPassword, user.PasswordHash, ct);
+
+                if (verification == PasswordVerificationResult.Failed)
+                {
+                    _context.AuditLogs.Add(new AuditLog
+                    {
+                        UserId    = user.Id,
+                        Username  = CurrentUsername,
+                        Action    = AuditAction.UserUpdated,
+                        Details   = "Reimpachetare chei refuzata: parola incorecta",
+                        Result    = AuditResult.Failure,
+                        IpAddress = CallerIp,
+                        Timestamp = DateTime.UtcNow,
+                    });
+                    await _context.SaveChangesAsync(ct);
+
+                    return BadRequest(new { message = "Parola nu este corectă. Cheile nu au fost modificate." });
+                }
+            }
+            catch (HashingCapacityExceededException ex)
+            {
+                Response.Headers.RetryAfter = "5";
+                return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                    new { message = ex.Message, retryAfter = 5 });
+            }
 
             if (string.IsNullOrWhiteSpace(dto.EncryptedPrivateBundle) ||
                 string.IsNullOrWhiteSpace(dto.KeyDerivationSalt) ||
@@ -357,6 +399,13 @@ namespace MAI.Api.Controllers
 
     public class RewrapKeysDto
     {
+        /// <summary>
+        /// Parola pe care contul o are ÎN ACEST MOMENT. În fluxul de schimbare a
+        /// parolei, reîmpachetarea vine după /Auth/change-password, deci aceasta
+        /// este parola nouă. Nu se stochează și nu se jurnalizează.
+        /// </summary>
+        public string CurrentPassword { get; set; } = string.Empty;
+
         public string EncryptedPrivateBundle { get; set; } = string.Empty;
         public string KeyDerivationSalt { get; set; } = string.Empty;
         public int KeyDerivationIterations { get; set; }

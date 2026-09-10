@@ -11,7 +11,16 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MAI.Api.Controllers
 {
-    [Authorize]
+    /// <summary>
+    /// Jurnalul de audit: cine a trimis ce, cui, de pe ce IP, cu ce rezultat.
+    ///
+    /// Rolul se cere pe CLASĂ, spre deosebire de UsersController: aici nu există
+    /// niciun endpoint pe care un utilizator obișnuit să aibă motiv să îl apeleze.
+    /// Până în 2026-09-10 clasa avea doar [Authorize], iar lista și dropdown-ul
+    /// de utilizatori erau citibile de orice cont autentificat — pagina /audit
+    /// era ascunsă doar în meniul frontend-ului, nu și în API.
+    /// </summary>
+    [Authorize(Roles = "Administrator,SefDirectie")]
     [ApiController]
     [Route("api/[controller]")]
     public class AuditLogsController : ControllerBase

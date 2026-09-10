@@ -33,11 +33,15 @@
     "Bucket": "sgdm-transfers"
   },
 
-  "Logging": {
-    "LogLevel": {
+  "Serilog": {
+    "//": "Nivelurile se citesc de aici; sink-ul (consola, JSON) e fixat in Program.cs.",
+    "//_2": "Pentru a vedea SQL-ul generat de EF, pune Database.Command pe Information.",
+    "MinimumLevel": {
       "Default": "Information",
-      "Microsoft.AspNetCore": "Warning",
-      "Microsoft.EntityFrameworkCore.Database.Command": "Warning"
+      "Override": {
+        "Microsoft.AspNetCore": "Warning",
+        "Microsoft.EntityFrameworkCore.Database.Command": "Warning"
+      }
     }
   }
 }

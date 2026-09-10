@@ -371,7 +371,7 @@ namespace MAI.Api.Controllers
                 UserId    = CurrentUserId,
                 Username  = adminName,
                 Action    = AuditAction.UserUpdated,
-                Details   = $"2FA resetat administrativ pentru @{target.Username}, sesiuni revocate",
+                Details   = $"2FA resetat administrativ pentru @{target.Username}, {closed} sesiuni inchise",
                 Result    = AuditResult.Warning,
                 IpAddress = Ip,
                 Timestamp = DateTime.UtcNow,

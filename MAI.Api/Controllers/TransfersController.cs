@@ -386,6 +386,19 @@ namespace MAI.Api.Controllers
             if (!isRecipient && !isSender)
                 return Forbid();
 
+            // Verificat explicit, înaintea expirării și a cheilor. Fără el, un
+            // transfer retras ajungea la ramura „nu există cheie împachetată
+            // pentru contul dumneavoastră” (retragerea golește cheile) — un 409
+            // care îl trimite pe destinatar să caute o problemă de chei, nu să
+            // afle că expeditorul a retras documentul.
+            if (transfer.Status == TransferStatus.Revoked)
+                return StatusCode(StatusCodes.Status410Gone, new
+                {
+                    message   = "Transferul a fost retras de expeditor și nu mai poate fi descărcat.",
+                    revokedAt = transfer.RevokedAt,
+                    reason    = transfer.RevokedReason,
+                });
+
             if (transfer.ExpiresAt.HasValue && transfer.ExpiresAt.Value < DateTime.UtcNow)
                 return StatusCode(410, new { message = "Transferul a expirat și nu mai poate fi descărcat." });
 
@@ -461,6 +474,10 @@ namespace MAI.Api.Controllers
 
             if (transfer.SenderId != userId && transfer.RecipientId != userId)
                 return Forbid();
+
+            if (transfer.Status == TransferStatus.Revoked)
+                return StatusCode(StatusCodes.Status410Gone,
+                    new { message = "Transferul a fost retras de expeditor." });
 
             if (transfer.ExpiresAt.HasValue && transfer.ExpiresAt.Value < DateTime.UtcNow)
                 return StatusCode(410, new { message = "Transferul a expirat." });
