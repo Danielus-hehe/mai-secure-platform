@@ -96,6 +96,211 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
+        // GET api/Stats/alerts — semnale de securitate (SefDirectie + Administrator)
+        // ═════════════════════════════════════════════════════════════════════
+        /// <summary>
+        /// Transformă jurnalul de audit din arhivă pasivă în instrument de
+        /// supraveghere: în loc să ceară cuiva să citească mii de rânduri, scoate
+        /// în față tiparele care merită atenție acum.
+        ///
+        /// Toate interogările de aici se sprijină pe indexul compus
+        /// Action + Result + Timestamp, adăugat odată cu migrarea rezultatului pe
+        /// coloană. Fără el, pagina ar face scan complet la fiecare încărcare.
+        /// </summary>
+        [Authorize(Roles = "Administrator,SefDirectie")]
+        [HttpGet("alerts")]
+        public async Task<IActionResult> GetAlerts(CancellationToken ct)
+        {
+            var now       = DateTime.UtcNow;
+            var last24h   = now.AddHours(-24);
+            var last7d    = now.AddDays(-7);
+
+            var alerts = new List<SecurityAlert>();
+
+            // ── 1. Conturi cu multe esecuri de autentificare ─────────────────
+            // Gruparea se face in baza de date, nu prin aducerea randurilor in
+            // memorie: pe un jurnal mare, diferenta e intre milisecunde si secunde.
+            var bruteForce = await _context.AuditLogs
+                .Where(a => a.Action == AuditAction.Login
+                         && a.Result == AuditResult.Failure
+                         && a.Timestamp >= last24h)
+                .GroupBy(a => a.Username)
+                .Select(g => new { Username = g.Key, Count = g.Count() })
+                .Where(x => x.Count >= FailedLoginAlertThreshold)
+                .OrderByDescending(x => x.Count)
+                .Take(MaxAlertsPerCategory)
+                .ToListAsync(ct);
+
+            foreach (var item in bruteForce)
+            {
+                alerts.Add(new SecurityAlert(
+                    Severity: "high",
+                    Category: "Autentificare",
+                    Title:    $"{item.Count} încercări eșuate pentru @{item.Username}",
+                    Detail:   "În ultimele 24 de ore. Verificați dacă este o parolă uitată " +
+                               "sau o încercare de forțare a contului.",
+                    Username: item.Username));
+            }
+
+            // ── 2. Autentificari cu cod de recuperare ────────────────────────
+            // Un cod de recuperare inseamna ca utilizatorul nu mai are acces la
+            // aplicatia de autentificare. Legitim de cele mai multe ori, dar e si
+            // exact calea pe care ar veni cineva care a obtinut parola si codurile
+            // scrise pe hartie.
+            var recoveryLogins = await _context.AuditLogs
+                .Where(a => a.Action == AuditAction.Login
+                         && a.Result == AuditResult.Warning
+                         && a.Timestamp >= last7d
+                         && a.Details.Contains("COD DE RECUPERARE"))
+                .OrderByDescending(a => a.Timestamp)
+                .Take(MaxAlertsPerCategory)
+                .Select(a => new { a.Username, a.Timestamp, a.IpAddress })
+                .ToListAsync(ct);
+
+            foreach (var item in recoveryLogins)
+            {
+                alerts.Add(new SecurityAlert(
+                    Severity: "medium",
+                    Category: "2FA",
+                    Title:    $"@{item.Username} s-a autentificat cu un cod de recuperare",
+                    Detail:   $"{item.Timestamp:dd.MM.yyyy HH:mm} UTC, de la {item.IpAddress}. " +
+                               "Confirmați că utilizatorul și-a reînrolat aplicația de autentificare.",
+                    Username: item.Username));
+            }
+
+            // ── 3. Semnaturi invalide la descarcare ──────────────────────────
+            // Cel mai grav semnal din lista: inseamna ca un fisier a ajuns la
+            // destinatar fara sa se poata dovedi cine l-a trimis.
+            var badSignatures = await _context.AuditLogs
+                .Where(a => a.Action == AuditAction.FileDownload
+                         && a.Result == AuditResult.Warning
+                         && a.Timestamp >= last7d
+                         && a.Details.Contains("INVALIDA"))
+                .OrderByDescending(a => a.Timestamp)
+                .Take(MaxAlertsPerCategory)
+                .Select(a => new { a.Username, a.Timestamp, a.Details })
+                .ToListAsync(ct);
+
+            foreach (var item in badSignatures)
+            {
+                alerts.Add(new SecurityAlert(
+                    Severity: "high",
+                    Category: "Integritate",
+                    Title:    $"Semnătură invalidă la o descărcare a lui @{item.Username}",
+                    Detail:   $"{item.Timestamp:dd.MM.yyyy HH:mm} UTC. Fișierul a ajuns la destinatar, " +
+                               "dar autenticitatea expeditorului NU a putut fi dovedită.",
+                    Username: item.Username));
+            }
+
+            // ── 4. Conturi privilegiate fara 2FA ─────────────────────────────
+            // Nu vine din jurnal, ci din starea curenta. Un administrator fara al
+            // doilea factor face din parola lui singurul lucru care sta intre un
+            // atacator si intregul sistem.
+            var privilegedWithout2Fa = await _context.Users
+                .Where(u => u.IsActive
+                         && u.Role >= UserRole.SefDirectie
+                         && !u.TwoFactorEnabled)
+                .OrderBy(u => u.Username)
+                .Take(MaxAlertsPerCategory)
+                .Select(u => new { u.Username, u.Role })
+                .ToListAsync(ct);
+
+            foreach (var item in privilegedWithout2Fa)
+            {
+                alerts.Add(new SecurityAlert(
+                    Severity: "high",
+                    Category: "Configurare",
+                    Title:    $"@{item.Username} ({item.Role}) nu are 2FA activat",
+                    Detail:   "Un cont privilegiat fără al doilea factor reduce securitatea " +
+                               "întregului sistem la puterea unei singure parole.",
+                    Username: item.Username));
+            }
+
+            // ── 5. Conturi blocate chiar acum ────────────────────────────────
+            var lockedOut = await _context.Users
+                .Where(u => u.LockoutEndsAt != null && u.LockoutEndsAt > now)
+                .OrderByDescending(u => u.LockoutEndsAt)
+                .Take(MaxAlertsPerCategory)
+                .Select(u => new { u.Username, u.LockoutEndsAt })
+                .ToListAsync(ct);
+
+            foreach (var item in lockedOut)
+            {
+                alerts.Add(new SecurityAlert(
+                    Severity: "low",
+                    Category: "Autentificare",
+                    Title:    $"Contul @{item.Username} este blocat",
+                    Detail:   $"Deblocare automată la {item.LockoutEndsAt:dd.MM.yyyy HH:mm} UTC. " +
+                               "Poate fi deblocat manual din pagina de utilizatori.",
+                    Username: item.Username));
+            }
+
+            // ── 6. Utilizatori activi fara chei criptografice ────────────────
+            // Nu pot primi fisiere: expeditorul nu are cu ce sa impacheteze cheia.
+            // E o problema de functionare, nu de securitate, dar se manifesta ca
+            // "nu pot trimite lui X" si e greu de diagnosticat din interfata.
+            var withoutKeys = await _context.Users
+                .CountAsync(u => u.IsActive && u.PublicKeyEncryption == null, ct);
+
+            if (withoutKeys > 0)
+            {
+                alerts.Add(new SecurityAlert(
+                    Severity: "low",
+                    Category: "Configurare",
+                    Title:    $"{withoutKeys} utilizatori activi nu și-au generat cheile",
+                    Detail:   "Nu pot primi fișiere. Cheile se generează automat la prima " +
+                               "autentificare, deci probabil nu s-au conectat încă.",
+                    Username: (string?)null));
+            }
+
+            // Severitatea decide ordinea. Un singur "high" ingropat sub zece "low"
+            // e la fel de invizibil ca in jurnalul brut.
+            var sorted = alerts.OrderBy(a => a.SeverityRank).ToList();
+
+            return Ok(new
+            {
+                generatedAt = now,
+                total       = sorted.Count,
+                highCount   = sorted.Count(a => a.Severity == "high"),
+                alerts      = sorted,
+            });
+        }
+
+        /// <summary>
+        /// O alertă afișată pe panoul de administrare.
+        ///
+        /// Tip propriu, nu obiect anonim: sortarea după severitate pe o listă de
+        /// anonime ar cere reflecție, iar reflecția într-o buclă peste rezultate
+        /// de bază de date e o soluție care funcționează exact până la prima
+        /// redenumire de câmp, când eșuează la runtime în loc de compilare.
+        /// </summary>
+        private sealed record SecurityAlert(
+            string Severity,
+            string Category,
+            string Title,
+            string Detail,
+            string? Username)
+        {
+            /// <summary>Ordinea de afișare. Nu se serializează spre client.</summary>
+            [System.Text.Json.Serialization.JsonIgnore]
+            public int SeverityRank => Severity switch
+            {
+                "high"   => 0,
+                "medium" => 1,
+                _        => 2,
+            };
+        }
+
+        /// <summary>De la câte eșecuri în 24h un cont devine semnal, nu zgomot.</summary>
+        private const int FailedLoginAlertThreshold = 5;
+
+        /// <summary>
+        /// Plafon per categorie. O pagină cu trei sute de alerte e o pagină pe
+        /// care nimeni nu o citește; dacă limita e atinsă des, pragul e greșit.
+        /// </summary>
+        private const int MaxAlertsPerCategory = 10;
+
+        // ═════════════════════════════════════════════════════════════════════
         // GET api/Stats/admin — panoul de administrare
         // ═════════════════════════════════════════════════════════════════════
         /// <summary>

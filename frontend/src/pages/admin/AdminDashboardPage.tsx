@@ -23,6 +23,7 @@ import type { Role } from '../../types';
 import api from '../../api/client';
 import { apiErrorMessage } from '../../api/errors';
 import { fetchAdminStats, runExpirationJob, type AdminStats } from '../../api/stats';
+import SecurityAlertsPanel from '../../components/security/SecurityAlertsPanel';
 import axios from 'axios';
 
 // UserRole enum backend: Utilizator=1, SefDirectie=2, Administrator=3
@@ -238,6 +239,15 @@ export default function AdminDashboardPage() {
                     )}
                 </p>
             </div>
+
+            {/*
+              Alertele stau imediat sub antet, înaintea cifrelor.
+              Motivul e de atenție, nu de estetică: un administrator care deschide
+              panoul trebuie să vadă întâi ce nu e în regulă, nu câți utilizatori
+              are. Cifrele rămân disponibile mai jos, dar nu concurează pentru
+              primele secunde de privire.
+            */}
+            <SecurityAlertsPanel />
 
             {/* Eroare de încărcare */}
             {statsError && (
