@@ -56,6 +56,22 @@ services:
   # ───────────────────────────────────────────────────────────────────────────
   # Container efemer: creeaza bucketul si politica de retentie, apoi iese.
   # Ruleaza la fiecare 'up', dar operatiile sunt idempotente.
+  #
+  # Versionare + stergere: pe un bucket versionat, DeleteObject fara VersionId
+  # NU sterge octetii — pune un „delete marker”, iar obiectul devine versiune
+  # noncurenta. Fara --noncurrent-expire-days, retragerea, stergerea si jobul
+  # de expirare lasau cifrotextul in bucket pentru totdeauna, desi interfata
+  # spunea „sters”. Acum versiunile vechi dispar fizic dupa o zi: fereastra de
+  # recuperare pentru o stergere din greseala, nu arhiva.
+  #
+  # Expirarea la 30 de zile se aplica DOAR prefixului transfers/. Registrul de
+  # documente scrie in acelasi bucket, sub documents/, iar o regula fara
+  # prefix ar fi sters automat actele normative dupa o luna.
+  #
+  # Regulile ILM se sterg si se recreeaza la fiecare pornire. 'mc ilm rule add'
+  # nu e idempotent — fiecare 'up' adauga inca o regula cu ID nou. Fara '|| true'
+  # la adaugare: daca regula nu se poate crea, containerul trebuie sa esueze
+  # vizibil, nu sa raporteze „MinIO pregatit” fara retentie.
   # ───────────────────────────────────────────────────────────────────────────
   minio-init:
     image: minio/mc:latest
@@ -77,11 +93,13 @@ services:
       echo '→ bucket privat (fara acces anonim)';
       mc anonymous set none local/$$SGDM_BUCKET;
 
-      echo '→ versionare activata: o suprascriere accidentala nu distruge obiectul';
+      echo '→ versionare activata: o stergere gresita se poate anula 24 de ore';
       mc version enable local/$$SGDM_BUCKET;
 
-      echo '→ retentie: obiectele se sterg automat dupa 30 de zile';
-      mc ilm rule add --expire-days 30 local/$$SGDM_BUCKET || true;
+      echo '→ retentie: transferuri 30 de zile; versiuni sterse 1 zi; documentele NU expira';
+      mc ilm rule rm --all --force local/$$SGDM_BUCKET >/dev/null 2>&1 || true;
+      mc ilm rule add --prefix 'transfers/' --expire-days 30 local/$$SGDM_BUCKET;
+      mc ilm rule add --noncurrent-expire-days 1 local/$$SGDM_BUCKET;
 
       echo '';
       echo '=== MinIO pregatit ===';
@@ -145,6 +163,11 @@ services:
     # ca sa nu se piarda fisiere daca cineva comuta providerul si reporneste.
     volumes:
       - api-storage:/app/Storage
+      # Documentele NOI merg in MinIO, sub documents/. Volumul ramane pentru
+      # versiunile scrise inainte de aceasta schimbare, care au in baza o cale
+      # absoluta sub /app/uploads/documents si se citesc in continuare de acolo.
+      # Fara volum, un 'docker compose up --build' le-ar sterge.
+      - api-uploads:/app/uploads
 
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/api/health/live"]
@@ -157,6 +180,8 @@ volumes:
   minio-data:
     driver: local
   api-storage:
+    driver: local
+  api-uploads:
     driver: local
 
 # ─────────────────────────────────────────────────────────────────────────────

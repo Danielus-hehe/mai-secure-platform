@@ -290,20 +290,49 @@ namespace MAI.Api.Controllers
             var closed = await _sessions.RevokeAllAsync(
                 user.Id, "resetare administrativa a parolei", exceptSessionId: null, ct);
 
+            // Cheile private E2EE sunt încuiate cu o cheie derivată din parola
+            // VECHE, pe care nu o mai știe nimeni. Lăsate pe loc, contul intra
+            // într-un impas: descuierea eșua la fiecare autentificare, iar
+            // POST /api/Keys refuza chei noi fiindcă „există deja” — utilizatorul
+            // nu mai putea nici trimite, nici primi fișiere.
+            //
+            // Fără key escrow, ștergerea materialului de chei e singura ieșire.
+            // Costul se spune explicit: fișierele primite anterior nu mai pot fi
+            // deschise de acest cont. Expeditorii le pot redeschide din „Trimise”
+            // (au propria copie a cheii de fișier) și le pot retrimite.
+            var hadKeys = user.HasKeys;
+            if (hadKeys)
+            {
+                user.PublicKeyEncryption     = null;
+                user.PublicKeySigning        = null;
+                user.EncryptedPrivateBundle  = null;
+                user.KeyDerivationSalt       = null;
+                user.KeyDerivationIterations = null;
+                user.KeyWrapIv               = null;
+                user.CryptoSuite             = null;
+                user.KeysCreatedAt           = null;
+            }
+
             AddAudit(user.Id, AuditAction.UserUpdated,
-                $"Parola resetata administrativ pentru @{user.Username}, {closed} sesiuni inchise",
+                $"Parola resetata administrativ pentru @{user.Username}, {closed} sesiuni inchise" +
+                (hadKeys ? ", chei E2EE invalidate (fisierele primite anterior devin inaccesibile)" : string.Empty),
                 AuditResult.Warning);
 
             await _context.SaveChangesAsync(ct);
 
             _logger.LogWarning(
-                "Parola resetata administrativ: {Admin} → {Target}, {Closed} sesiuni inchise",
-                CallerUsername, user.Username, closed);
+                "Parola resetata administrativ: {Admin} → {Target}, {Closed} sesiuni inchise, chei invalidate={KeysInvalidated}",
+                CallerUsername, user.Username, closed, hadKeys);
 
             return Ok(new
             {
-                message = $"Parola contului @{user.Username} a fost resetata.",
-                sessionsClosed = closed,
+                message = hadKeys
+                    ? $"Parola contului @{user.Username} a fost resetata. Cheile de criptare au fost " +
+                      "invalidate: la urmatoarea autentificare utilizatorul va genera chei noi, iar " +
+                      "fisierele primite anterior trebuie retrimise de expeditori."
+                    : $"Parola contului @{user.Username} a fost resetata.",
+                sessionsClosed  = closed,
+                keysInvalidated = hadKeys,
             });
         }
 

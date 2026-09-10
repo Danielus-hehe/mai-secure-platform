@@ -36,8 +36,13 @@ export default function ProfilePage() {
      * căzută exact atunci), pachetul deja calculat rămâne aici ca utilizatorul
      * să poată reîncerca fără să reintroducă parolele. Fără el, cheile ar rămâne
      * încuiate cu parola veche și fișierele primite ar deveni inaccesibile.
+     *
+     * Parola nouă stă alături, doar în memoria componentei: serverul cere dovada
+     * parolei la /Keys/rewrap (altfel un token furat ar putea distruge blobul).
+     * Dispare la reîncercarea reușită sau la părăsirea paginii.
      */
-    const [pendingRewrap, setPendingRewrap] = useState<RewrapPayload | null>(null);
+    const [pendingRewrap, setPendingRewrap] =
+        useState<{ payload: RewrapPayload; password: string } | null>(null);
 
     useEffect(() => {
         void (async () => {
@@ -59,8 +64,8 @@ export default function ProfilePage() {
         .toUpperCase()
         .slice(0, 2) || user.username.slice(0, 2).toUpperCase();
 
-    const syncKeys = async (payload: RewrapPayload) => {
-        await api.patch('/Keys/rewrap', payload);
+    const syncKeys = async (payload: RewrapPayload, password: string) => {
+        await api.patch('/Keys/rewrap', { ...payload, currentPassword: password });
         setPendingRewrap(null);
     };
 
@@ -68,7 +73,7 @@ export default function ProfilePage() {
         if (!pendingRewrap) return;
         setSaving(true);
         try {
-            await syncKeys(pendingRewrap);
+            await syncKeys(pendingRewrap.payload, pendingRewrap.password);
             toast.success('Cheile au fost sincronizate cu parola nouă.');
         } catch (e: unknown) {
             toast.error(apiErrorMessage(e, 'Sincronizarea cheilor a eșuat din nou.'));
@@ -119,9 +124,10 @@ export default function ProfilePage() {
             // ── Pasul 3: sincronizarea cheilor ───────────────────────────
             if (payload) {
                 try {
-                    await syncKeys(payload);
+                    // Parola nouă: după pasul 2 este parola curentă a contului.
+                    await syncKeys(payload, newPw);
                 } catch (syncError) {
-                    setPendingRewrap(payload);
+                    setPendingRewrap({ payload, password: newPw });
                     toast.error(
                         'Parola a fost schimbată, dar cheile NU s-au sincronizat. ' +
                         'Nu închideți pagina și apăsați „Reîncearcă sincronizarea".'
