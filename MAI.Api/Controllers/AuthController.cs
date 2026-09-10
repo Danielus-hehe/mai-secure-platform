@@ -38,6 +38,7 @@ namespace MAI.Api.Controllers
         private readonly TotpService _totp;
         private readonly SecretProtector _protector;
         private readonly ITokenService _tokens;
+        private readonly ISessionService _sessions;
         private readonly IAccountLockoutService _lockout;
         private readonly ILogger<AuthController> _logger;
 
@@ -50,6 +51,7 @@ namespace MAI.Api.Controllers
             TotpService totp,
             SecretProtector protector,
             ITokenService tokens,
+            ISessionService sessions,
             IAccountLockoutService lockout,
             ILogger<AuthController> logger)
         {
@@ -61,11 +63,21 @@ namespace MAI.Api.Controllers
             _totp      = totp;
             _protector = protector;
             _tokens    = tokens;
+            _sessions  = sessions;
             _lockout   = lockout;
             _logger    = logger;
         }
 
         private string Ip => HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+        /// <summary>
+        /// User-Agent-ul cererii, pentru eticheta sesiunii. Vine de la client,
+        /// deci e o indicație, nu o dovadă — se afișează, nu se folosește la
+        /// nicio decizie de autorizare.
+        /// </summary>
+        private string? UserAgent => Request.Headers.UserAgent.ToString() is { Length: > 0 } ua
+            ? ua
+            : null;
 
         /// <summary>Profilul Argon2 potrivit rolului: conturile privilegiate primesc cost mai mare.</summary>
         private string ProfileFor(UserRole role) =>
@@ -192,12 +204,17 @@ namespace MAI.Api.Controllers
 
                 user.LastLoginAt = DateTime.UtcNow;
 
-                var response = _tokens.IssueTokens(user);
+                var issued = _tokens.IssueTokens(user);
+
+                // Sesiune nouă pentru acest dispozitiv. Autentificarea pe telefon
+                // nu mai deconectează laptopul: fiecare are rândul lui.
+                _sessions.Create(
+                    user, issued.RefreshTokenHash, issued.RefreshTokenExpiresAt, UserAgent, Ip);
 
                 AddAudit(user.Id, username, AuditAction.Login, "Autentificare reusita");
                 await _context.SaveChangesAsync(ct);
 
-                return Ok(response);
+                return Ok(issued.Response);
             }
             catch (HashingCapacityExceededException ex)
             {
@@ -332,7 +349,11 @@ namespace MAI.Api.Controllers
 
             user.LastLoginAt = DateTime.UtcNow;
 
-            var response = _tokens.IssueTokens(user);
+            var issued   = _tokens.IssueTokens(user);
+            var response = issued.Response;
+
+            _sessions.Create(
+                user, issued.RefreshTokenHash, issued.RefreshTokenExpiresAt, UserAgent, Ip);
 
             AddAudit(user.Id, user.Username, AuditAction.Login,
                 usedRecoveryCode
@@ -384,38 +405,41 @@ namespace MAI.Api.Controllers
 
             var hash = _tokens.HashOpaqueToken(dto.RefreshToken);
 
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.RefreshTokenHash == hash, ct);
+            // Un token revocat sau expirat nu este găsit deloc: filtrarea se face
+            // în interogare, nu după. Diferența contează — un token furat dintr-o
+            // sesiune încheiată nu trebuie nici măcar să identifice utilizatorul.
+            var session = await _sessions.FindActiveAsync(hash, ct);
 
-            if (user is null)
+            if (session?.User is null)
             {
                 await WriteAuditAsync(null, "necunoscut", AuditAction.Login,
-                    "Refresh token invalid sau deja folosit", AuditResult.Failure);
+                    "Refresh token invalid, revocat sau expirat", AuditResult.Failure);
                 return Unauthorized(new { message = genericError });
             }
 
-            if (user.RefreshTokenExpiresAt is null || user.RefreshTokenExpiresAt <= DateTime.UtcNow)
-            {
-                _tokens.RevokeSession(user);
-                await WriteAuditAsync(user.Id, user.Username, AuditAction.Login,
-                    "Refresh token expirat", AuditResult.Failure);
-                return Unauthorized(new { message = genericError });
-            }
+            var user = session.User;
 
             if (!user.IsActive || user.IsLockedOut)
             {
-                _tokens.RevokeSession(user);
+                _sessions.Revoke(session, "cont dezactivat sau blocat");
                 await WriteAuditAsync(user.Id, user.Username, AuditAction.Login,
                     "Refresh pe cont dezactivat sau blocat", AuditResult.Failure);
                 return Unauthorized(new { message = genericError });
             }
 
-            // Rotație: tokenul vechi devine invalid în momentul emiterii celui nou.
-            var response = _tokens.IssueTokens(user);
+            // Rotație în cadrul aceleiași sesiuni: tokenul vechi devine invalid,
+            // dar rândul rămâne. Altfel utilizatorul ar vedea o „sesiune nouă” la
+            // fiecare cincisprezece minute, iar lista ar deveni inutilizabilă.
+            var issued = _tokens.IssueTokens(user);
+            _sessions.Rotate(session, issued.RefreshTokenHash, issued.RefreshTokenExpiresAt);
 
-            AddAudit(user.Id, user.Username, AuditAction.Login, "Token reimprospatat");
             await _context.SaveChangesAsync(ct);
 
-            return Ok(response);
+            // Reîmprospătarea NU se scrie în audit: se întâmplă la fiecare
+            // cincisprezece minute, pentru fiecare sesiune activă, și ar îneca
+            // jurnalul în zgomot. Activitatea rămâne vizibilă prin LastSeenAt.
+
+            return Ok(issued.Response);
         }
 
         // ═════════════════════════════════════════════════════════════════════
@@ -425,28 +449,29 @@ namespace MAI.Api.Controllers
         [HttpPost("logout")]
         public async Task<IActionResult> Logout([FromBody] RefreshTokenRequestDto? dto, CancellationToken ct)
         {
-            User? user = null;
-
-            var userIdStr = HttpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            if (userIdStr is not null && Guid.TryParse(userIdStr, out var userId))
-                user = await _context.Users.FindAsync(new object?[] { userId }, ct);
-
-            if (user is null && !string.IsNullOrWhiteSpace(dto?.RefreshToken))
+            // Delogarea închide DOAR sesiunea de pe acest dispozitiv. Închiderea
+            // tuturor e o acțiune separată, explicită, din pagina de sesiuni —
+            // un utilizator care apasă „ieși” pe telefon nu se așteaptă să fie
+            // deconectat și de pe calculatorul de la birou.
+            if (!string.IsNullOrWhiteSpace(dto?.RefreshToken))
             {
-                var hash = _tokens.HashOpaqueToken(dto.RefreshToken);
-                user = await _context.Users.FirstOrDefaultAsync(u => u.RefreshTokenHash == hash, ct);
+                var hash    = _tokens.HashOpaqueToken(dto.RefreshToken);
+                var session = await _sessions.FindActiveAsync(hash, ct);
+
+                if (session?.User is not null)
+                {
+                    _sessions.Revoke(session, "logout");
+
+                    AddAudit(session.UserId, session.User.Username, AuditAction.Logout,
+                        "Delogare, sesiune inchisa");
+
+                    await _context.SaveChangesAsync(ct);
+                }
             }
 
-            if (user is not null)
-            {
-                // Revocă și refresh token-ul, și o eventuală provocare 2FA rămasă
-                // în aer — care n-are ce căuta după delogare.
-                _tokens.RevokeSession(user);
-
-                AddAudit(user.Id, user.Username, AuditAction.Logout, "Delogare, refresh token revocat");
-                await _context.SaveChangesAsync(ct);
-            }
-
+            // Răspuns identic indiferent dacă tokenul a fost recunoscut: un
+            // endpoint de logout care spune „nu cunosc acest token” devine un
+            // oracol pentru verificarea tokenurilor furate.
             return Ok(new { message = "Sesiune încheiată." });
         }
 
@@ -486,15 +511,19 @@ namespace MAI.Api.Controllers
                 // Profilul scump: schimbarea de parolă e o operație rară, își permite costul.
                 user.PasswordHash = await _hasher.HashPasswordAsync(dto.NewPassword, _argon2.PrivilegedProfile, ct);
 
-                // Schimbarea parolei invalidează sesiunile de pe alte dispozitive.
+                // Schimbarea parolei închide TOATE sesiunile, fără excepție —
+                // inclusiv cea curentă. Motivul obișnuit pentru care cineva își
+                // schimbă parola este suspiciunea că altcineva o știe; a lăsa
+                // deschisă chiar și o sesiune ar rata exact scenariul.
                 //
                 // Atenție: secretul 2FA NU se atinge. Este independent de parolă —
                 // exact ăsta e rostul celui de-al doilea factor. Dacă l-am reseta
                 // aici, o schimbare de parolă ar dezactiva pe tăcute protecția.
-                _tokens.RevokeSession(user);
+                var closed = await _sessions.RevokeAllAsync(
+                    user.Id, "schimbare parola", exceptSessionId: null, ct);
 
                 AddAudit(user.Id, user.Username, AuditAction.UserUpdated,
-                    "Parola schimbata (Argon2id), sesiuni revocate");
+                    $"Parola schimbata (Argon2id), {closed} sesiuni inchise");
 
                 await _context.SaveChangesAsync(ct);
                 return Ok(new { message = "Parola a fost actualizată cu succes." });
