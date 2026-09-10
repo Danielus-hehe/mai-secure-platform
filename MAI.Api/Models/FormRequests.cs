@@ -20,11 +20,4 @@ namespace MAI.Api.Models
         public string?    ChangeNotes { get; set; }
     }
 
-    public class UploadTransferRequest
-    {
-        public IFormFile? File        { get; set; }
-        // string, nu Guid — parsăm manual pentru a returna 400 cu mesaj clar
-        public string     RecipientId { get; set; } = string.Empty;
-        public string?    Sha256      { get; set; }
-    }
 }
