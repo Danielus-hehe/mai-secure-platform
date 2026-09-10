@@ -31,6 +31,7 @@ namespace MAI.Api.Controllers
         // ─────────────────────────────────────────────────────────────────────
         // GET api/AuditLogs?username=&action=&result=&search=&from=&to=&page=&pageSize=
         // ─────────────────────────────────────────────────────────────────────
+        [Authorize(Roles = "Administrator,SefDirectie")]
         [HttpGet]
         public async Task<IActionResult> GetAll(
             [FromQuery] string? username,
@@ -119,6 +120,7 @@ namespace MAI.Api.Controllers
         }
 
         // GET api/AuditLogs/usernames — pentru dropdown-ul de filtrare
+        [Authorize(Roles = "Administrator,SefDirectie")]
         [HttpGet("usernames")]
         public async Task<IActionResult> GetUsernames(CancellationToken ct)
         {
@@ -324,11 +326,12 @@ namespace MAI.Api.Controllers
             {
                 sheet.Cell(row, 1).Value = e.Timestamp;
                 sheet.Cell(row, 1).Style.DateFormat.Format = "yyyy-mm-dd hh:mm:ss";
-                sheet.Cell(row, 2).Value = e.UserName;
-                sheet.Cell(row, 3).Value = ActionLabel(e.Action);
-                sheet.Cell(row, 4).Value = e.Target;
-                sheet.Cell(row, 5).Value = e.IpAddress;
-                sheet.Cell(row, 6).Value = e.Result;
+                sheet.Cell(row, 2).SetValue(e.UserName ?? string.Empty);
+                sheet.Cell(row, 3).SetValue(ActionLabel(e.Action) ?? string.Empty);
+                sheet.Cell(row, 4).SetValue(e.Target ?? string.Empty);
+                sheet.Cell(row, 5).SetValue(e.IpAddress ?? string.Empty);
+                sheet.Cell(row, 6).SetValue(e.Result ?? string.Empty);
+                sheet.Cell(row, 4).Style.NumberFormat.Format = "@";
 
                 if (e.Result == "ESEC")
                 {

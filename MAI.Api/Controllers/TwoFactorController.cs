@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using MAI.Api.Security;
+using MAI.Api.Services;
 
 namespace MAI.Api.Controllers
 {
@@ -44,6 +45,7 @@ namespace MAI.Api.Controllers
         private readonly TotpService _totp;
         private readonly SecretProtector _protector;
         private readonly TwoFactorOptions _options;
+        private readonly ISessionService _sessions;
         private readonly ILogger<TwoFactorController> _logger;
 
         public TwoFactorController(
@@ -52,6 +54,7 @@ namespace MAI.Api.Controllers
             TotpService totp,
             SecretProtector protector,
             TwoFactorOptions options,
+            ISessionService sessions,
             ILogger<TwoFactorController> logger)
         {
             _context   = context;
@@ -59,6 +62,7 @@ namespace MAI.Api.Controllers
             _totp      = totp;
             _protector = protector;
             _options   = options;
+            _sessions  = sessions;
             _logger    = logger;
         }
 
@@ -201,10 +205,10 @@ namespace MAI.Api.Controllers
             // Activarea 2FA invalidează sesiunile deschise. Dacă cineva era deja
             // logat pe contul ăsta de pe alt dispozitiv, tocmai a devenit motivul
             // pentru care utilizatorul a activat 2FA.
-            user.RefreshTokenHash      = null;
-            user.RefreshTokenExpiresAt = null;
+            var closed = await _sessions.RevokeAllAsync(
+                user.Id, "activare 2FA", exceptSessionId: null, ct);
 
-            AddAudit(user, $"2FA activat, {recoveryCodes.Count} coduri de recuperare emise, sesiuni revocate");
+            AddAudit(user, $"2FA activat, {recoveryCodes.Count} coduri de recuperare emise, {closed} sesiuni inchise");
             await _context.SaveChangesAsync(ct);
 
             _logger.LogInformation("2FA activat pentru {Username}.", user.Username);
@@ -359,8 +363,8 @@ namespace MAI.Api.Controllers
 
             // Sesiunile țintei se revocă: dacă resetul a fost cerut fiindcă
             // telefonul e pierdut, o sesiune activă pe acel telefon e o problemă.
-            target.RefreshTokenHash      = null;
-            target.RefreshTokenExpiresAt = null;
+            var closed = await _sessions.RevokeAllAsync(
+                target.Id, "resetare administrativa 2FA", exceptSessionId: null, ct);
 
             _context.AuditLogs.Add(new AuditLog
             {

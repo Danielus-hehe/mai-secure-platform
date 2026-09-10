@@ -61,7 +61,6 @@ namespace MAI.Api.Controllers
             {
                 status = healthy ? "healthy" : "unhealthy",
                 timestamp = DateTime.UtcNow,
-                provider = _storage.ProviderName,
                 checks = new[] { database, storage },
             };
 
