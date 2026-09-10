@@ -50,7 +50,33 @@ namespace MAI.Domain.Entities
 
         public TransferStatus Status { get; set; } = TransferStatus.Pending;
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        /// <summary>
+        /// Momentul în care destinatarul a descărcat și decriptat fișierul.
+        /// Este dovada de primire pe care o vede expeditorul.
+        /// </summary>
         public DateTime? DownloadedAt { get; set; }
+
+        /// <summary>
+        /// Rezultatul verificării semnăturii, raportat de browserul destinatarului
+        /// la confirmare.
+        ///
+        /// Null pentru transferurile necriptate sau neconfirmate încă. Contează
+        /// pentru dovada de primire: „a fost descărcat” și „a fost descărcat, iar
+        /// semnătura expeditorului s-a verificat” sunt afirmații diferite, iar
+        /// expeditorul are dreptul să o vadă pe a doua.
+        ///
+        /// Server-side rămâne o afirmație a clientului, nu o verificare proprie —
+        /// serverul nu poate verifica singur semnătura fără textul în clar, pe
+        /// care prin construcție nu îl are.
+        /// </summary>
+        public bool? RecipientSignatureValid { get; set; }
+
+        /// <summary>Momentul retragerii de către expeditor. Null dacă nu a fost retras.</summary>
+        public DateTime? RevokedAt { get; set; }
+
+        /// <summary>Motivul consemnat de expeditor la retragere, opțional.</summary>
+        public string? RevokedReason { get; set; }
 
         /// <summary>
         /// După acest moment transferul nu mai poate fi descărcat, iar obiectul

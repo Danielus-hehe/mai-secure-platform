@@ -60,6 +60,9 @@ namespace MAI.Api.Controllers
         // Lungimile maxime acceptate pentru câmpurile base64 ale plicului.
         // RSA-3072 produce blocuri de 384 de octeți → 512 caractere base64.
         private const int MaxWrappedKeyChars = 600;
+
+        /// <summary>Motivul retragerii e text liber de la utilizator; se trunchiază.</summary>
+        private const int MaxRevokeReasonChars = 256;
         private const int MaxIvChars         = 32;
 
         // ═════════════════════════════════════════════════════════════════════
@@ -141,8 +144,17 @@ namespace MAI.Api.Controllers
                                       : t.Status.ToString(),
                 CreatedAt           = t.CreatedAt,
                 DownloadedAt        = t.DownloadedAt,
+                SignatureValid      = t.RecipientSignatureValid,
+                RevokedAt           = t.RevokedAt,
+                RevokedReason       = t.RevokedReason,
                 ExpiresAt           = t.ExpiresAt,
                 IsMine              = t.SenderId == userId,
+                // Retragerea e posibila doar pentru expeditor si doar cat timp
+                // fisierul nu a fost descarcat. Calculul se face aici, nu in
+                // frontend, ca butonul si endpointul sa nu poata diverge.
+                CanRevoke           = t.SenderId == userId
+                                      && t.Status == TransferStatus.Pending
+                                      && (!t.ExpiresAt.HasValue || t.ExpiresAt.Value > now),
                 IsEncrypted         = t.IsEncrypted,
                 CryptoSuite         = t.CryptoSuite,
             }).ToList();
@@ -500,6 +512,13 @@ namespace MAI.Api.Controllers
                 transfer.DownloadedAt = DateTime.UtcNow;
             }
 
+            // Rezultatul verificarii se persista, ca expeditorul sa poata vedea
+            // nu doar CA fisierul a fost primit, ci si daca semnatura lui s-a
+            // verificat pe calculatorul destinatarului. Ramane o afirmatie a
+            // clientului: serverul nu poate verifica singur semnatura, pentru ca
+            // prin constructie nu are textul in clar.
+            transfer.RecipientSignatureValid = signatureValid;
+
             _context.AuditLogs.Add(new AuditLog
             {
                 UserId    = userId,
@@ -519,6 +538,123 @@ namespace MAI.Api.Controllers
             await _context.SaveChangesAsync(ct);
 
             return Ok(new { message = "Transfer confirmat." });
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
+        // POST api/Transfers/{id}/revoke
+        // ═════════════════════════════════════════════════════════════════════
+        /// <summary>
+        /// Retrage un transfer înainte ca destinatarul să îl descarce.
+        ///
+        /// Diferența față de DELETE: rândul rămâne. Destinatarul trebuie să vadă
+        /// că i s-a trimis ceva și că a fost retras — altfel transferul dispare
+        /// din interfața lui fără explicație, iar el rămâne să aștepte un fișier
+        /// despre care i s-a spus verbal că a fost trimis.
+        ///
+        /// Ordinea e ștergere obiect → commit status, ca la jobul de expirare.
+        /// Inversul ar produce un rând care afirmă „retras” cu cifrotextul încă
+        /// în bucket.
+        /// </summary>
+        [HttpPost("{id:guid}/revoke")]
+        public async Task<IActionResult> Revoke(
+            Guid id, [FromBody] RevokeTransferDto? dto, CancellationToken ct)
+        {
+            var userId   = CurrentUserId;
+            var transfer = await _context.FileTransfers.FirstOrDefaultAsync(t => t.Id == id, ct);
+
+            if (transfer is null)
+                return NotFound(new { message = "Transferul nu a fost găsit." });
+
+            // Doar expeditorul. Nici administratorul nu retrage în locul altcuiva:
+            // retragerea e o declarație de intenție a expeditorului, consemnată ca
+            // atare în jurnal. Un administrator care trebuie să facă un fișier să
+            // dispară folosește DELETE, care e o acțiune diferită și se vede ca
+            // acțiune diferită.
+            if (transfer.SenderId != userId)
+                return Forbid();
+
+            if (transfer.Status == TransferStatus.Downloaded)
+            {
+                // Onest, nu optimist. Fișierul e deja pe calculatorul
+                // destinatarului; nimic din ce face serverul nu îl mai poate lua
+                // de acolo, iar un mesaj care ar sugera altceva ar fi o minciună
+                // exact în momentul în care utilizatorul are nevoie de adevăr.
+                return Conflict(new
+                {
+                    message = "Transferul a fost deja descărcat și nu mai poate fi retras. " +
+                              "Fișierul se află pe dispozitivul destinatarului.",
+                    downloadedAt = transfer.DownloadedAt,
+                });
+            }
+
+            if (transfer.Status != TransferStatus.Pending)
+                return Conflict(new { message = "Transferul nu mai este în așteptare." });
+
+            if (!string.IsNullOrEmpty(transfer.StorageKey))
+            {
+                try
+                {
+                    await _storage.DeleteAsync(transfer.StorageKey, ct);
+                }
+                catch (Exception ex)
+                {
+                    // Aici NU continuăm, spre deosebire de DELETE. Retragerea
+                    // promite utilizatorului că fișierul nu mai poate fi descărcat;
+                    // dacă obiectul a rămas în depozit, promisiunea e falsă, iar
+                    // un rând marcat „retras” peste un cifrotext încă prezent e
+                    // mai rău decât o eroare vizibilă.
+                    _logger.LogError(ex,
+                        "Retragere esuata: obiectul {Key} nu a putut fi sters.", transfer.StorageKey);
+
+                    _context.AuditLogs.Add(new AuditLog
+                    {
+                        UserId    = userId,
+                        Username  = CurrentUsername,
+                        Action    = AuditAction.TransferRevoked,
+                        Details   = $"Retragere esuata pentru '{transfer.FileName}': obiectul nu a putut fi sters",
+                        Result    = AuditResult.Failure,
+                        IpAddress = CallerIp,
+                        Timestamp = DateTime.UtcNow,
+                    });
+                    await _context.SaveChangesAsync(ct);
+
+                    return StatusCode(StatusCodes.Status502BadGateway, new
+                    {
+                        message = "Fișierul nu a putut fi șters din depozit. " +
+                                  "Transferul NU a fost retras. Încercați din nou.",
+                    });
+                }
+            }
+
+            transfer.Status        = TransferStatus.Revoked;
+            transfer.RevokedAt     = DateTime.UtcNow;
+            transfer.RevokedReason = Truncate(dto?.Reason, MaxRevokeReasonChars);
+
+            // Cheile împachetate se șterg odată cu obiectul. Fără cifrotext nu mai
+            // au ce descuia, iar păstrarea lor ar lăsa în bază material
+            // criptografic legat de un fișier care nu mai există.
+            transfer.EncryptedKeyForRecipient = null;
+            transfer.EncryptedKeyForSender    = null;
+            transfer.StorageKey               = string.Empty;
+
+            _context.AuditLogs.Add(new AuditLog
+            {
+                UserId    = userId,
+                Username  = CurrentUsername,
+                Action    = AuditAction.TransferRevoked,
+                Details   = string.IsNullOrWhiteSpace(transfer.RevokedReason)
+                    ? $"Transfer retras '{transfer.FileName}' inainte de descarcare"
+                    : $"Transfer retras '{transfer.FileName}' inainte de descarcare: {transfer.RevokedReason}",
+                // Nu e un eșec — dar e o acțiune umană asupra unui document deja
+                // trimis, exact genul de rând care contează într-o verificare.
+                Result    = AuditResult.Warning,
+                IpAddress = CallerIp,
+                Timestamp = DateTime.UtcNow,
+            });
+
+            await _context.SaveChangesAsync(ct);
+
+            return Ok(new { message = "Transferul a fost retras. Fișierul nu mai poate fi descărcat." });
         }
 
         // ═════════════════════════════════════════════════════════════════════
@@ -580,6 +716,11 @@ namespace MAI.Api.Controllers
         /// utilizatorului: numele fișierului în cheie ar scurge informație către
         /// oricine vede listarea bucketului.
         /// </summary>
+        private static string? Truncate(string? value, int max) =>
+            string.IsNullOrWhiteSpace(value)
+                ? null
+                : value.Trim() is var v && v.Length <= max ? v : value.Trim()[..max];
+
         private string BuildStorageKey(Guid transferId)
         {
             var now = DateTime.UtcNow;
@@ -707,6 +848,17 @@ namespace MAI.Api.Controllers
         public bool SignatureValid { get; set; } = true;
     }
 
+    /// <summary>Corpul cererii POST /api/Transfers/{id}/revoke.</summary>
+    public class RevokeTransferDto
+    {
+        /// <summary>
+        /// Motivul retragerii, opțional. Ajunge în jurnalul de audit și e vizibil
+        /// destinatarului: dacă un document a fost retras pentru că era versiunea
+        /// greșită, e mai util să scrie asta decât să dispară fără explicație.
+        /// </summary>
+        public string? Reason { get; set; }
+    }
+
     public class TransferDto
     {
         public Guid Id { get; set; }
@@ -722,7 +874,30 @@ namespace MAI.Api.Controllers
         public string RecipientDepartment { get; set; } = string.Empty;
         public string Status { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; }
+
+        // ── Dovada de primire ────────────────────────────────────────────────
+
+        /// <summary>Când a descărcat destinatarul. Null = încă nu.</summary>
         public DateTime? DownloadedAt { get; set; }
+
+        /// <summary>
+        /// Ce a raportat browserul destinatarului la verificarea semnăturii.
+        /// Null pentru transferurile necriptate sau nedescărcate încă.
+        /// </summary>
+        public bool? SignatureValid { get; set; }
+
+        // ── Retragere ────────────────────────────────────────────────────────
+
+        public DateTime? RevokedAt { get; set; }
+        public string? RevokedReason { get; set; }
+
+        /// <summary>
+        /// Dacă utilizatorul curent poate retrage acest transfer chiar acum.
+        /// Calculat server-side, ca butonul din interfață și verificarea din
+        /// endpoint să nu poată diverge.
+        /// </summary>
+        public bool CanRevoke { get; set; }
+
         public DateTime? ExpiresAt { get; set; }
         public bool IsMine { get; set; }
         public bool IsEncrypted { get; set; }

@@ -23,7 +23,7 @@ export interface PagedResult<T> {
 }
 
 /** Statusurile returnate de backend (TransferStatus.ToString()). */
-export type TransferStatus = 'Pending' | 'Downloaded' | 'Expired';
+export type TransferStatus = 'Pending' | 'Downloaded' | 'Expired' | 'Revoked';
 
 export interface TransferListItem {
     id: string;
@@ -39,7 +39,31 @@ export interface TransferListItem {
     recipientDepartment: string;
     status: TransferStatus;
     createdAt: string;
+
+    // ── Dovada de primire ────────────────────────────────────────────────────
+
+    /** Cand a descarcat destinatarul. null = inca nu. */
     downloadedAt: string | null;
+
+    /**
+     * Ce a raportat browserul destinatarului la verificarea semnaturii.
+     * null pentru transferurile necriptate sau nedescarcate inca — stare
+     * diferita de false, care inseamna „descarcat, dar semnatura nu s-a verificat”.
+     */
+    signatureValid: boolean | null;
+
+    // ── Retragere ────────────────────────────────────────────────────────────
+
+    revokedAt: string | null;
+    revokedReason: string | null;
+
+    /**
+     * Daca utilizatorul curent poate retrage acest transfer chiar acum.
+     * Calculat server-side: butonul din interfata si verificarea din endpoint nu
+     * trebuie sa poata diverge.
+     */
+    canRevoke: boolean;
+
     expiresAt: string | null;
     isMine: boolean;
     isEncrypted: boolean;
@@ -190,6 +214,22 @@ export async function fetchCiphertext(
 /** Se apelează DUPĂ decriptare reușită, cu rezultatul verificării semnăturii. */
 export async function confirmTransfer(id: string, signatureValid: boolean): Promise<void> {
     await api.patch(`/Transfers/${id}/confirm`, { signatureValid });
+}
+
+/**
+ * Retrage un transfer inainte ca destinatarul sa il descarce.
+ *
+ * Diferit de deleteTransfer: randul ramane, iar destinatarul vede ca i s-a
+ * trimis ceva si ca a fost retras. Serverul raspunde 409 daca fisierul a fost
+ * deja descarcat — caz in care nu mai poate fi luat de pe dispozitivul
+ * destinatarului si interfata trebuie sa spuna asta, nu sa pretinda altceva.
+ */
+export async function revokeTransfer(id: string, reason?: string): Promise<{ message: string }> {
+    const { data } = await api.post<{ message: string }>(
+        `/Transfers/${id}/revoke`,
+        { reason: reason ?? null },
+    );
+    return data;
 }
 
 export async function deleteTransfer(id: string): Promise<void> {
