@@ -14,11 +14,10 @@ namespace MAI.Api.Services
     ///
     /// Stă în MAI.Api, nu în MAI.BusinessLogic, pentru că depinde de stiva JWT a
     /// ASP.NET Core. Mutarea ei mai jos ar trage pachetul de tokenuri într-un
-    /// strat care azi nu are nicio referință la ASP.NET — un compromis mai scump
-    /// decât câștigul.
+    /// strat care azi nu are nicio referință la ASP.NET.
     ///
-    /// Singleton: nu ține stare per cerere. Cheia de semnare se materializează o
-    /// singură dată, la construire, nu la fiecare token emis.
+    /// Singleton: nu ține stare per cerere și nu atinge baza de date. Cheia de
+    /// semnare se materializează o singură dată, la construire.
     /// </summary>
     public sealed class TokenService : ITokenService
     {
@@ -35,7 +34,7 @@ namespace MAI.Api.Services
             _credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
         }
 
-        public TokenResponseDto IssueTokens(User user)
+        public TokenIssueResult IssueTokens(User user)
         {
             var now            = DateTime.UtcNow;
             var accessExpires  = now.AddMinutes(_jwt.AccessTokenMinutes);
@@ -44,13 +43,7 @@ namespace MAI.Api.Services
             var accessToken  = GenerateJwtToken(user, accessExpires);
             var refreshToken = GenerateOpaqueToken(64);
 
-            // Rotația se face aici, nu în controller: un refresh token vechi care
-            // rămâne valid după emiterea celui nou anulează tot rostul rotației.
-            user.RefreshTokenHash      = HashOpaqueToken(refreshToken);
-            user.RefreshTokenIssuedAt  = now;
-            user.RefreshTokenExpiresAt = refreshExpires;
-
-            return new TokenResponseDto
+            var response = new TokenResponseDto
             {
                 Id                    = user.Id,
                 Username              = user.Username,
@@ -64,6 +57,8 @@ namespace MAI.Api.Services
                 AccessTokenExpiresAt  = accessExpires,
                 RefreshTokenExpiresAt = refreshExpires,
             };
+
+            return new TokenIssueResult(response, HashOpaqueToken(refreshToken), refreshExpires);
         }
 
         public (string Token, DateTime ExpiresAt) IssueTwoFactorChallenge(User user)
@@ -85,13 +80,6 @@ namespace MAI.Api.Services
             user.TwoFactorChallengeHash      = null;
             user.TwoFactorChallengeExpiresAt = null;
             user.TwoFactorChallengeAttempts  = 0;
-        }
-
-        public void RevokeSession(User user)
-        {
-            user.RefreshTokenHash      = null;
-            user.RefreshTokenExpiresAt = null;
-            ClearChallenge(user);
         }
 
         public string HashOpaqueToken(string token)

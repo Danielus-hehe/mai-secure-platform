@@ -11,6 +11,7 @@ import { formatDateTime } from '../../utils/format';
 import api from '../../api/client';
 import { apiErrorMessage } from '../../api/errors';
 import { rewrapKeysForNewPassword, type RewrapPayload } from '../../crypto/passwordChange';
+import SessionsPanel from '../../components/security/SessionsPanel';
 import type { PublishedKeyBundle } from '../../crypto/E2ee';
 
 interface ServerBundle extends PublishedKeyBundle {
@@ -299,6 +300,15 @@ export default function ProfilePage() {
                             </Button>
                         </div>
                     </div>
+
+                    {/*
+                      Sesiunile active stau lângă schimbarea parolei pentru că
+                      răspund aceleiași întrebări — cine mai are acces la contul
+                      meu — iar cele două acțiuni se folosesc de obicei împreună:
+                      cine închide o sesiune necunoscută vrea imediat după și să-și
+                      schimbe parola.
+                    */}
+                    <SessionsPanel />
                 </div>
             </div>
         </div>

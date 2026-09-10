@@ -252,6 +252,12 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddSingleton<ITokenService, TokenService>();
 builder.Services.AddSingleton<IAccountLockoutService, AccountLockoutService>();
 
+// Scoped, spre deosebire de celelalte două: are nevoie de AppDbContext, care e
+// per cerere. Tocmai de aceea emiterea tokenurilor a rămas separată de sesiuni —
+// un serviciu care nu face decât HMAC și numere aleatorii nu trebuie să devină
+// dependent de EF Core și nici să-și piardă durata de viață de singleton.
+builder.Services.AddScoped<ISessionService, SessionService>();
+
 // ─── CORS ──────────────────────────────────────────────────────────────────
 var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
     ?? ["http://localhost:5173", "http://localhost:3000"];

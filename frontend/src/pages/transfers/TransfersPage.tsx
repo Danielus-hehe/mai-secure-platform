@@ -26,10 +26,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-    ArrowLeftRight, Upload, Download, Search, Trash2, Loader2,
+    ArrowLeftRight, Upload, Download, Search, Trash2, Loader2, Undo2, CheckCheck,
     ShieldCheck, ShieldAlert, Lock, Inbox, Send, FileWarning, AlertTriangle,
 } from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader';
+import { apiErrorMessage } from '../../api/errors';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import Modal from '../../components/ui/Modal';
@@ -41,7 +42,7 @@ import { useKeys } from '../../context/KeysContext';
 import { formatDateTime, formatFileSize, truncateSha } from '../../utils/format';
 import {
     listTransfers, listRecipients, uploadTransfer, getEnvelope,
-    fetchCiphertext, confirmTransfer, deleteTransfer,
+    fetchCiphertext, confirmTransfer, deleteTransfer, revokeTransfer,
     type TransferListItem, type Recipient, type PagedResult,
 } from '../../api/transfers';
 import {
@@ -60,7 +61,40 @@ const EMPTY_PAGE: PagedResult<TransferListItem> = {
 const statusBadge = (status: string) => {
     if (status === 'Downloaded') return <Badge tone="green">Confirmat</Badge>;
     if (status === 'Expired') return <Badge tone="red">Expirat</Badge>;
+    if (status === 'Revoked') return <Badge tone="gray">Retras</Badge>;
     return <Badge tone="gold">În așteptare</Badge>;
+};
+
+/**
+ * Dovada de primire, afisata expeditorului sub statusul transferului.
+ *
+ * Distinge trei situatii pe care un singur badge „Confirmat” le amesteca:
+ * nedescarcat, descarcat cu semnatura verificata, si descarcat cu semnatura
+ * INVALIDA. Ultima nu e o eroare de sistem — fisierul a ajuns — dar inseamna ca
+ * nu se poate dovedi cine l-a trimis, iar expeditorul are dreptul sa stie.
+ */
+const receiptLine = (t: TransferListItem) => {
+    if (!t.isMine || !t.downloadedAt) return null;
+
+    const when = formatDateTime(t.downloadedAt);
+
+    if (t.signatureValid === false) {
+        return (
+            <p className="mt-1 flex items-center gap-1 text-[11px] font-medium text-red-600
+                dark:text-red-400">
+                <ShieldAlert size={11} className="shrink-0" />
+                Primit {when} · semnătură INVALIDĂ
+            </p>
+        );
+    }
+
+    return (
+        <p className="mt-1 flex items-center gap-1 text-[11px] text-green-600 dark:text-green-400">
+            <CheckCheck size={11} className="shrink-0" />
+            Primit {when}
+            {t.signatureValid === true && ' · semnătură validă'}
+        </p>
+    );
 };
 
 export default function TransfersPage() {
@@ -266,6 +300,36 @@ export default function TransfersPage() {
         }
     };
 
+    // ── Retragerea ───────────────────────────────────────────────────────────
+
+    const handleRevoke = async (transfer: TransferListItem) => {
+        const ok = window.confirm(
+            `Retrageți transferul „${transfer.fileName}"?\n\n` +
+            'Fișierul va fi șters din depozit și destinatarul nu îl va mai putea ' +
+            'descărca. Va vedea în schimb că transferul a fost retras.',
+        );
+        if (!ok) return;
+
+        // Motivul e optional: prompt-ul anulat sau lasat gol trimite null, iar
+        // destinatarul vede doar ca transferul a fost retras.
+        const reason = window.prompt('Motivul retragerii (opțional):') ?? undefined;
+
+        setDeletingId(transfer.id);
+        try {
+            const result = await revokeTransfer(transfer.id, reason || undefined);
+            toast.success(result.message);
+            await load();
+        } catch (e) {
+            // 409 inseamna ca destinatarul a apucat sa descarce intre incarcarea
+            // listei si apasarea butonului. Mesajul serverului spune exact asta si
+            // e mai util decat un generic „a esuat”.
+            toast.error(apiErrorMessage(e, 'Retragerea a eșuat.'));
+            await load();
+        } finally {
+            setDeletingId(null);
+        }
+    };
+
     // ── Ștergerea ────────────────────────────────────────────────────────────
 
     const handleDelete = async (transfer: TransferListItem) => {
@@ -454,14 +518,24 @@ export default function TransfersPage() {
                                             {formatDateTime(t.createdAt)}
                                         </td>
 
-                                        <td className="px-5 py-3">{statusBadge(t.status)}</td>
+                                        <td className="px-5 py-3">
+                                            {statusBadge(t.status)}
+                                            {receiptLine(t)}
+                                            {t.revokedAt && t.revokedReason && (
+                                                <p className="mt-1 text-[11px] text-mai-400">
+                                                    {t.revokedReason}
+                                                </p>
+                                            )}
+                                        </td>
 
                                         <td className="px-5 py-3">
                                             <div className="flex items-center justify-end gap-1.5">
                                                 <Button
                                                     variant="secondary"
                                                     className="!px-2.5 !py-1.5"
-                                                    disabled={busyId === t.id || t.status === 'Expired'}
+                                                    disabled={busyId === t.id
+                                                        || t.status === 'Expired'
+                                                        || t.status === 'Revoked'}
                                                     onClick={() => void handleDownload(t)}
                                                     title="Descarcă și decriptează"
                                                 >
@@ -469,6 +543,29 @@ export default function TransfersPage() {
                                                         ? <Loader2 size={15} className="animate-spin" />
                                                         : <Download size={15} />}
                                                 </Button>
+
+                                                {/*
+                                                  Retragerea apare doar cat timp
+                                                  serverul spune ca e posibila.
+                                                  Conditia e calculata acolo
+                                                  (canRevoke), nu aici: butonul si
+                                                  verificarea din endpoint nu
+                                                  trebuie sa poata diverge.
+                                                */}
+                                                {t.canRevoke && (
+                                                    <Button
+                                                        variant="ghost"
+                                                        className="!px-2.5 !py-1.5 text-amber-600 hover:bg-amber-50
+                                                            dark:text-amber-400 dark:hover:bg-amber-900/30"
+                                                        disabled={deletingId === t.id}
+                                                        onClick={() => void handleRevoke(t)}
+                                                        title="Retrage transferul înainte de descărcare"
+                                                    >
+                                                        {deletingId === t.id
+                                                            ? <Loader2 size={15} className="animate-spin" />
+                                                            : <Undo2 size={15} />}
+                                                    </Button>
+                                                )}
 
                                                 {t.isMine && (
                                                     <Button
