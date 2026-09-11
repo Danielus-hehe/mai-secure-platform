@@ -65,14 +65,46 @@ namespace MAI.BusinessLogic.Security
         /// diferenta de timp, in ce interval a nimerit codul — informatie mica,
         /// dar gratuita de eliminat.
         /// </summary>
-        public bool VerifyCode(string secretBase32, string? code)
+        public bool VerifyCode(string secretBase32, string? code) =>
+            MatchStep(secretBase32, code) is not null;
+
+        /// <summary>
+        /// Verifică un cod și refuză reutilizarea lui (RFC 6238, secțiunea 5.2:
+        /// verificatorul NU trebuie să accepte a doua oară același cod după o
+        /// validare reușită).
+        ///
+        /// <paramref name="lastUsedStep"/> este intervalul ultimului cod acceptat
+        /// pentru acest cont. Un cod dintr-un interval egal sau mai vechi e respins
+        /// ca reluare, chiar dacă e încă în fereastra de toleranță. Consecință
+        /// practică: după o autentificare reușită, următoarea cere codul nou din
+        /// aplicație (cel mult 30 de secunde de așteptare).
+        /// </summary>
+        public TotpVerification Verify(string secretBase32, string? code, long? lastUsedStep)
         {
-            if (string.IsNullOrWhiteSpace(code)) return false;
+            var step = MatchStep(secretBase32, code);
+
+            if (step is null)
+                return new TotpVerification(TotpVerificationStatus.Invalid, null);
+
+            if (lastUsedStep is long last && step.Value <= last)
+                return new TotpVerification(TotpVerificationStatus.Replayed, step);
+
+            return new TotpVerification(TotpVerificationStatus.Accepted, step);
+        }
+
+        /// <summary>
+        /// Intervalul în care se potrivește codul, sau null. Parcurge toată
+        /// fereastra și compară în timp constant; dacă mai multe intervale se
+        /// potrivesc (coincidență de 1 la un milion), îl reține pe cel mai recent.
+        /// </summary>
+        private long? MatchStep(string secretBase32, string? code)
+        {
+            if (string.IsNullOrWhiteSpace(code)) return null;
 
             // Utilizatorii copiaza codul cu spatii ("123 456") din aplicatie.
             var normalized = new string(code.Where(char.IsDigit).ToArray());
 
-            if (normalized.Length != _options.Digits) return false;
+            if (normalized.Length != _options.Digits) return null;
 
             byte[] secret;
             try
@@ -81,24 +113,28 @@ namespace MAI.BusinessLogic.Security
             }
             catch (FormatException)
             {
-                return false;
+                return null;
             }
 
             var currentStep = DateTimeOffset.UtcNow.ToUnixTimeSeconds() / _options.PeriodSeconds;
 
-            var match = false;
+            long? matched = null;
 
             for (var offset = -_options.WindowSteps; offset <= _options.WindowSteps; offset++)
             {
-                var expected = ComputeCode(secret, currentStep + offset);
+                var step     = currentStep + offset;
+                var expected = ComputeCode(secret, step);
 
-                // |= in loc de return: parcurgem intotdeauna toata fereastra.
-                match |= CryptographicOperations.FixedTimeEquals(
+                // Fără return la prima potrivire: parcurgem întotdeauna toată
+                // fereastra, ca timpul să nu depindă de intervalul nimerit.
+                var equal = CryptographicOperations.FixedTimeEquals(
                     Encoding.ASCII.GetBytes(expected),
                     Encoding.ASCII.GetBytes(normalized));
+
+                matched = equal ? step : matched;
             }
 
-            return match;
+            return matched;
         }
 
         /// <summary>Codul pentru un interval dat. Public pentru teste.</summary>
@@ -230,5 +266,25 @@ namespace MAI.BusinessLogic.Security
             string.Join(' ', Enumerable
                 .Range(0, (secretBase32.Length + 3) / 4)
                 .Select(i => secretBase32.Substring(i * 4, Math.Min(4, secretBase32.Length - i * 4))));
+    }
+
+    /// <summary>Rezultatul verificării unui cod TOTP.</summary>
+    public enum TotpVerificationStatus
+    {
+        /// <summary>Codul nu corespunde niciunui interval din fereastră.</summary>
+        Invalid,
+
+        /// <summary>Codul e corect, dar intervalul lui a fost deja folosit.</summary>
+        Replayed,
+
+        /// <summary>Codul e corect și nefolosit.</summary>
+        Accepted,
+    }
+
+    /// <param name="Status">Ce s-a constatat.</param>
+    /// <param name="Step">Intervalul potrivit; null dacă codul e invalid.</param>
+    public readonly record struct TotpVerification(TotpVerificationStatus Status, long? Step)
+    {
+        public bool IsAccepted => Status == TotpVerificationStatus.Accepted;
     }
 }

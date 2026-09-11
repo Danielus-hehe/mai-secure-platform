@@ -42,13 +42,31 @@ namespace MAI.BusinessLogic.Security
         /// Un server care rulează cu o cheie de 20 de caractere e mai rău decât
         /// unul care nu pornește: primul pare că funcționează.
         /// </summary>
-        public void Validate()
+        public void Validate() => Validate(allowTemplateKey: false);
+
+        /// <param name="allowTemplateKey">
+        /// True doar în Development: o cheie-șablon din fișierele versionate este
+        /// tolerată local, cu avertisment în log, ca un mediu de lucru existent să
+        /// nu se oprească brusc. În orice alt mediu, Program.cs trece false.
+        /// </param>
+        public void Validate(bool allowTemplateKey)
         {
             if (string.IsNullOrWhiteSpace(Key) || Key == PlaceholderKey)
             {
                 throw new InvalidOperationException(
                     "Jwt:Key lipsește sau are valoarea-șablon. " +
                     "Setați variabila de mediu MAI_JWT_KEY. Generați: openssl rand -base64 48");
+            }
+
+            // Orice altă valoare-șablon, de exemplu cea din .env.example. Are peste
+            // 32 de octeți, deci verificarea de lungime de mai jos o accepta: cine
+            // copia șablonul fără să-l completeze rula cu o cheie publicată pe
+            // GitHub, iar oricine putea semna un token de Administrator.
+            if (!allowTemplateKey && PlaceholderSecrets.IsPlaceholder(Key))
+            {
+                throw new InvalidOperationException(
+                    "Jwt:Key are valoarea-șablon din repository, deci este publică. " +
+                    "Setați MAI_JWT_KEY la o valoare generată cu: openssl rand -base64 48");
             }
 
             // HS256 cu o cheie scurtă se poate sparge offline pornind de la un

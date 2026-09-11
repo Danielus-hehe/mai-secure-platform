@@ -1,8 +1,10 @@
 ﻿using System.Diagnostics;
+using System.Security.Claims;
 using MAI.Api.BackgroundJobs;
 using MAI.BusinessLogic.Interfaces;
 using MAI.BusinessLogic.Storage;
 using MAI.DataAccessLayer;
+using MAI.Domain.Entities;
 using MAI.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -40,60 +42,100 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // GET api/Stats — pagina principala (orice utilizator autentificat)
+        // GET api/Stats — pagina principală (orice utilizator autentificat)
         // ═════════════════════════════════════════════════════════════════════
+        /// <summary>
+        /// Cifrele paginii principale, din perspectiva utilizatorului curent.
+        ///
+        /// Transferurile sunt STRICT ale lui: trimise sau primite de el. Numele
+        /// fișierelor și perechile expeditor–destinatar sunt metadate sensibile.
+        /// O listă comună, vizibilă oricărui cont, ar arăta pe prima pagină cine
+        /// ce trimite cui în toată instituția. Cifrele globale despre transferuri
+        /// stau pe /admin, doar pentru Administrator.
+        ///
+        /// Documentele normative și numărul de utilizatori activi rămân globale:
+        /// registrul e public în instituție, iar un număr de colegi nu identifică
+        /// pe nimeni.
+        /// </summary>
         [HttpGet]
         public async Task<IActionResult> GetStats(CancellationToken ct)
         {
-            var yesterday = DateTime.UtcNow.AddHours(-24);
+            var userId    = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+            var now       = DateTime.UtcNow;
+            var yesterday = now.AddHours(-24);
 
-            var activeUsers      = await _context.Users.CountAsync(u => u.IsActive, ct);
-            var totalTransfers   = await _context.FileTransfers.CountAsync(ct);
-            var pendingTransfers = await _context.FileTransfers
-                .CountAsync(t => t.Status == TransferStatus.Pending, ct);
-            var totalDocuments   = await _context.Documents.CountAsync(ct);
+            var mine = _context.FileTransfers
+                .AsNoTracking()
+                .Where(t => t.SenderId == userId || t.RecipientId == userId);
 
-            // Cifra ramane in raspuns pentru compatibilitate cu DashboardPage,
-            // dar se completeaza doar pentru rolurile care au dreptul sa o vada.
+            var myTransfersTotal = await mine.CountAsync(ct);
+
+            // Fișierele care îl așteaptă pe utilizator: primite, nedescărcate și
+            // încă în termen. Unul trecut de termen, dar nemarcat încă de job, nu
+            // mai poate fi descărcat, deci nu se numără.
+            var awaitingMyDownload = await _context.FileTransfers.CountAsync(t =>
+                t.RecipientId == userId &&
+                t.Status == TransferStatus.Pending &&
+                (t.ExpiresAt == null || t.ExpiresAt > now), ct);
+
+            var activeUsers    = await _context.Users.CountAsync(u => u.IsActive, ct);
+            var totalDocuments = await _context.Documents.CountAsync(ct);
+
+            // Doar pentru rolurile care au dreptul să o vadă. Pentru ceilalți câmpul
+            // e null, nu 0: un zero ar afirma „nicio autentificare eșuată”, adică o
+            // informație falsă, afișată ca atare.
             var canSeeSecurityMetrics =
                 User.IsInRole(nameof(UserRole.Administrator)) ||
                 User.IsInRole(nameof(UserRole.SefDirectie));
 
-            var failedLoginsLast24h = canSeeSecurityMetrics
+            int? failedLoginsLast24h = canSeeSecurityMetrics
                 ? await _context.AuditLogs.CountAsync(a =>
                     a.Action == AuditAction.Login &&
                     a.Result == AuditResult.Failure &&
                     a.Timestamp >= yesterday, ct)
-                : 0;
+                : null;
 
-            var recentTransfers = await _context.FileTransfers
-                .AsNoTracking()
+            var recent = await mine
                 .Include(t => t.Sender)
                 .Include(t => t.Recipient)
                 .OrderByDescending(t => t.CreatedAt)
                 .Take(5)
-                .Select(t => new
-                {
-                    id            = t.Id,
-                    fileName      = t.FileName,
-                    fileSize      = t.FileSize,
-                    senderName    = t.Sender != null ? (t.Sender.FullName ?? t.Sender.Username) : "—",
-                    recipientName = t.Recipient != null ? (t.Recipient.FullName ?? t.Recipient.Username) : "—",
-                    status        = t.Status.ToString(),
-                    createdAt     = t.CreatedAt,
-                })
                 .ToListAsync(ct);
+
+            var recentTransfers = recent.Select(t => new
+            {
+                id            = t.Id,
+                fileName      = t.FileName,
+                fileSize      = t.FileSize,
+                direction     = t.SenderId == userId ? "sent" : "received",
+                senderName    = DisplayName(t.Sender),
+                recipientName = DisplayName(t.Recipient),
+                // Aceeași regulă ca lista de transferuri: un transfer în așteptare
+                // trecut de termen apare ca expirat, chiar dacă jobul nu l-a
+                // marcat încă.
+                status        = t.Status == TransferStatus.Pending
+                                && t.ExpiresAt.HasValue && t.ExpiresAt.Value < now
+                                    ? nameof(TransferStatus.Expired)
+                                    : t.Status.ToString(),
+                createdAt     = t.CreatedAt,
+            }).ToList();
 
             return Ok(new
             {
                 activeUsers,
-                totalTransfers,
-                pendingTransfers,
                 totalDocuments,
+                myTransfersTotal,
+                awaitingMyDownload,
                 failedLoginsLast24h,
                 recentTransfers,
             });
         }
+
+        /// <summary>Numele afișat al unui cont: numele complet, altfel username-ul.</summary>
+        private static string DisplayName(User? user) =>
+            user is null
+                ? "—"
+                : string.IsNullOrWhiteSpace(user.FullName) ? user.Username : user.FullName;
 
         // ═════════════════════════════════════════════════════════════════════
         // GET api/Stats/alerts — semnale de securitate (SefDirectie + Administrator)
@@ -322,6 +364,11 @@ namespace MAI.Api.Controllers
             var last24h  = now.AddHours(-24);
             var next24h  = now.AddHours(24);
 
+            // Sonda depozitului pornește prima și rulează în paralel cu interogările.
+            // Nu folosește DbContext, deci nu concurează cu ele. Rezultatul se
+            // așteaptă abia la final, iar sonda are oricum o limită de 3 secunde.
+            var storageProbe = ProbeStorageAsync(ct);
+
             // ── Utilizatori ──────────────────────────────────────────────────
             var totalUsers   = await _context.Users.CountAsync(ct);
             var activeUsers  = await _context.Users.CountAsync(u => u.IsActive, ct);
@@ -470,7 +517,7 @@ namespace MAI.Api.Controllers
 
             // ── Starea modulelor ─────────────────────────────────────────────
             var (dbOnline, dbLatencyMs)           = await ProbeDatabaseAsync(ct);
-            var (storageOnline, storageLatencyMs) = await ProbeStorageAsync(ct);
+            var (storageOnline, storageLatencyMs) = await storageProbe;
 
             return Ok(new
             {
@@ -607,37 +654,62 @@ namespace MAI.Api.Controllers
         /// Latenta reala a bazei de date, masurata pe o interogare triviala.
         /// Inlocuieste "24ms" scris in JSX.
         /// </summary>
+        /// <summary>
+        /// Durata maximă a unei sonde; aceeași valoare ca în HealthController.
+        ///
+        /// Fără limită, o sondă către un depozit oprit sau inaccesibil aștepta cât
+        /// îi permiteau reîncercările clientului S3 — pe Windows, zeci de secunde.
+        /// Tot răspunsul /api/Stats/admin aștepta după ea, iar browserul renunța
+        /// după 30 de secunde cu „Serverul nu răspunde”, deși API-ul funcționa.
+        /// Acum pagina se încarcă, iar modulul afectat apare ca indisponibil.
+        /// </summary>
+        private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(3);
+
         private async Task<(bool Online, int LatencyMs)> ProbeDatabaseAsync(CancellationToken ct)
         {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(ProbeTimeout);
+
             var sw = Stopwatch.StartNew();
             try
             {
-                var canConnect = await _context.Database.CanConnectAsync(ct);
+                var canConnect = await _context.Database.CanConnectAsync(cts.Token);
                 sw.Stop();
                 return (canConnect, (int)sw.ElapsedMilliseconds);
             }
             catch (Exception ex)
             {
                 sw.Stop();
-                _logger.LogWarning(ex, "Sonda catre baza de date a esuat.");
+                if (!ct.IsCancellationRequested)
+                    _logger.LogWarning(ex, "Sonda catre baza de date a esuat sau a depasit {Seconds} s.",
+                        ProbeTimeout.TotalSeconds);
                 return (false, (int)sw.ElapsedMilliseconds);
             }
         }
         
+        /// <summary>
+        /// Nu aruncă niciodată: rulează în paralel cu interogările, iar o excepție
+        /// neobservată nu trebuie să transforme o sondă eșuată într-un răspuns 500.
+        /// </summary>
         private async Task<(bool Online, int LatencyMs)> ProbeStorageAsync(CancellationToken ct)
         {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(ProbeTimeout);
+
             var sw = Stopwatch.StartNew();
             try
             {
                 await _storage.ExistsAsync(
-                    $"{_storageOptions.TransfersPrefix}/.healthcheck-{Guid.NewGuid():N}", ct);
+                    $"{_storageOptions.TransfersPrefix}/.healthcheck-{Guid.NewGuid():N}", cts.Token);
                 sw.Stop();
                 return (true, (int)sw.ElapsedMilliseconds);
             }
             catch (Exception ex)
             {
                 sw.Stop();
-                _logger.LogWarning(ex, "Sonda catre depozitul de fisiere a esuat.");
+                if (!ct.IsCancellationRequested)
+                    _logger.LogWarning(ex, "Sonda catre depozitul de fisiere a esuat sau a depasit {Seconds} s.",
+                        ProbeTimeout.TotalSeconds);
                 return (false, (int)sw.ElapsedMilliseconds);
             }
         }

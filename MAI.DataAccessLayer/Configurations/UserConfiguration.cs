@@ -16,9 +16,6 @@ namespace MAI.DataAccessLayer.Configurations
     {
         public void Configure(EntityTypeBuilder<User> builder)
         {
-            // Login-ul caută WHERE "Username" = ... la fiecare autentificare.
-            // Fără index, scan complet pe tabelă.
-            //
             // Unicitatea contează mai mult decât viteza: fără ea, două conturi
             // pot ajunge cu același nume, iar FirstOrDefaultAsync îl alege pe
             // unul nedeterminist. Rezultatul e un utilizator care se
@@ -27,9 +24,18 @@ namespace MAI.DataAccessLayer.Configurations
                 .IsUnique()
                 .HasDatabaseName("UX_Users_Username");
 
-            builder.HasIndex(u => u.Email)
-                .IsUnique()
-                .HasDatabaseName("UX_Users_Email");
+            // Indexurile care contează efectiv pentru unicitate NU apar aici, ci
+            // în migrarea CaseInsensitiveUserIndexes, ca SQL:
+            //
+            //   UX_Users_Username_Lower  UNIQUE (lower("Username"))
+            //   UX_Users_Email_Lower     UNIQUE (lower("Email")) WHERE "Email" <> ''
+            //
+            // EF Core nu poate descrie indexuri pe expresii. Primul face ca
+            // „Ion.Popescu” și „ion.popescu” să nu poată fi două conturi diferite
+            // și e folosit de login (lower("Username") = ...). Al doilea permite
+            // mai multe conturi fără email: vechiul UX_Users_Email, unic pe
+            // valoarea exactă, trata "" ca pe o adresă, deci al doilea cont fără
+            // email pica la salvare cu eroare 500.
         }
     }
 }

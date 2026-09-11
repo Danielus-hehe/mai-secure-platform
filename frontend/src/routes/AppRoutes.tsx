@@ -4,6 +4,7 @@ import { ProtectedRoute } from '../components/ProtectedRoute';
 import { AppLayout } from '../components/layout/AppLayout';
 import { RouteBoundary } from '../components/RouteBoundary';
 import KeysGate from '../components/keys/KeysGate';
+import PasswordChangeGate from '../components/security/PasswordChangeGate';
 
 /*
  * Încărcare leneșă pe rute.
@@ -41,38 +42,47 @@ export function AppRoutes() {
                 <Route element={<AppLayout />}>
 
                     {/*
-                      Poarta criptografică: nicio pagină nu se randează până când
-                      cheile private nu sunt descuiate în fila curentă. Este pusă
-                      INTERIOR față de AppLayout ca utilizatorul să vadă în
-                      continuare meniul și butonul de deconectare.
+                      Parola stabilită de administrator se schimbă ÎNAINTEA
+                      generării cheilor: altfel cheile private s-ar încuia cu o
+                      parolă pe care administratorul o cunoaște.
                     */}
-                    <Route element={<KeysGate />}>
+                    <Route element={<PasswordChangeGate />}>
 
                         {/*
-                          RouteBoundary dă fiecărei pagini propria barieră de erori
-                          și propriul fallback de încărcare. Un crash într-o pagină
-                          nu mai înlocuiește tot ecranul: sidebar-ul rămâne, deci
-                          utilizatorul poate naviga în altă parte fără F5.
+                          Poarta criptografică: nicio pagină nu se randează până
+                          când cheile private nu sunt descuiate în fila curentă.
+                          Este pusă INTERIOR față de AppLayout ca utilizatorul să
+                          vadă în continuare meniul și butonul de deconectare.
                         */}
-                        <Route element={<RouteBoundary />}>
+                        <Route element={<KeysGate />}>
 
-                            {/* Rute accesibile oricărui utilizator autentificat */}
-                            <Route path="/dashboard" element={<DashboardPage />} />
-                            <Route path="/transfers" element={<TransfersPage />} />
-                            <Route path="/documents" element={<DocumentsPage />} />
-                            <Route path="/profile"   element={<ProfilePage />} />
+                            {/*
+                              RouteBoundary dă fiecărei pagini propria barieră de
+                              erori și propriul fallback de încărcare. Un crash
+                              într-o pagină nu mai înlocuiește tot ecranul:
+                              sidebar-ul rămâne, deci utilizatorul poate naviga în
+                              altă parte fără F5.
+                            */}
+                            <Route element={<RouteBoundary />}>
 
-                            {/* Supervizare: SefDirectie(2) + Administrator(3) */}
-                            <Route element={<ProtectedRoute allowedRoles={[2, 3]} />}>
-                                <Route path="/audit" element={<AuditPage />} />
+                                {/* Rute accesibile oricărui utilizator autentificat */}
+                                <Route path="/dashboard" element={<DashboardPage />} />
+                                <Route path="/transfers" element={<TransfersPage />} />
+                                <Route path="/documents" element={<DocumentsPage />} />
+                                <Route path="/profile"   element={<ProfilePage />} />
+
+                                {/* Supervizare: SefDirectie(2) + Administrator(3) */}
+                                <Route element={<ProtectedRoute allowedRoles={[2, 3]} />}>
+                                    <Route path="/audit" element={<AuditPage />} />
+                                </Route>
+
+                                {/* Administrare: exclusiv Administrator(3) */}
+                                <Route element={<ProtectedRoute allowedRoles={[3]} />}>
+                                    <Route path="/users" element={<UsersPage />} />
+                                    <Route path="/admin" element={<AdminDashboardPage />} />
+                                </Route>
+
                             </Route>
-
-                            {/* Administrare: exclusiv Administrator(3) */}
-                            <Route element={<ProtectedRoute allowedRoles={[3]} />}>
-                                <Route path="/users" element={<UsersPage />} />
-                                <Route path="/admin" element={<AdminDashboardPage />} />
-                            </Route>
-
                         </Route>
                     </Route>
                 </Route>

@@ -48,6 +48,26 @@ namespace MAI.Domain.Entities
         /// <summary>Ultimul login reușit (UTC).</summary>
         public DateTime? LastLoginAt { get; set; }
 
+        /// <summary>
+        /// Parola a fost aleasă de un administrator (la crearea contului sau la o
+        /// resetare), deci nu e un secret al utilizatorului.
+        ///
+        /// Contează pentru criptarea end-to-end: cheile private se încuie cu o
+        /// cheie derivată din parolă. Cu o parolă cunoscută de administrator,
+        /// acesta ar putea descuia din baza de date cheile generate ulterior și
+        /// ar putea citi, fără urmă, tot ce primește contul. Cât timp flag-ul e
+        /// true, serverul refuză înregistrarea cheilor, iar frontend-ul cere
+        /// schimbarea parolei înaintea oricărei alte acțiuni.
+        /// </summary>
+        public bool MustChangePassword { get; set; }
+
+        /// <summary>
+        /// Intervalul TOTP (Unix time / 30 s) al ultimului cod acceptat. Un cod
+        /// dintr-un interval egal sau mai vechi e respins: același cod nu poate
+        /// fi folosit de două ori (RFC 6238, 5.2). Null până la primul cod.
+        /// </summary>
+        public long? TwoFactorLastUsedStep { get; set; }
+
         // ── Chei criptografice pentru transferuri E2E ────────────────────────
         // Cheile publice sunt publice prin definiție. Cheile private ajung aici
         // DOAR criptate cu o cheie derivată din parola utilizatorului, în browser.

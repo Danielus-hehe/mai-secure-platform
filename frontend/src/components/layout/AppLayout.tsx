@@ -4,6 +4,7 @@ import Sidebar       from './Sidebar';
 import TopBar        from './TopBar';
 import Footer        from './Footer';
 import ErrorBoundary from '../ErrorBoundary';
+import MfaRequiredBanner from '../security/MfaRequiredBanner';
 
 export function AppLayout() {
     const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -16,6 +17,7 @@ export function AppLayout() {
                 <TopBar onMenuClick={() => setSidebarOpen(true)} />
                 {/* p-4 pe mobil, p-6 pe desktop — câștig de ~32px pe ecran mic */}
                 <main className="flex-1 p-4 sm:p-6">
+                    <MfaRequiredBanner />
                     <ErrorBoundary>
                         <Outlet />
                     </ErrorBoundary>

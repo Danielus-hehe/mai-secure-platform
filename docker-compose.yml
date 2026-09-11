@@ -1,12 +1,21 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# SGDM — infrastructura locala de stocare
+# SGDM — infrastructura locala
 #
 # Ridica un MinIO auto-gazduit (S3-compatible) in care API-ul .NET pune
 # cifrotextul transferurilor. Serverul nu poate citi continutul: fisierele
 # ajung aici deja criptate AES-256-GCM in browser, iar cheia de fisier e
 # impachetata RSA-OAEP pentru destinatar. MinIO vede doar octeti opaci.
 #
-# Pornire:   docker compose up -d
+# Doua moduri de lucru (detalii in docs/DEPLOYMENT.md):
+#
+#   Dezvoltare — doar stocarea in Docker, API-ul cu 'dotnet run':
+#     docker compose up -d minio minio-init
+#
+#   Tot in Docker — MinIO + API construit din Dockerfile:
+#     docker compose up -d --build
+#     (.env trebuie completat cu secrete reale: in afara mediului Development,
+#      API-ul refuza sa porneasca daca vreunul a ramas pe valoarea-sablon)
+#
 # Oprire:    docker compose down          (datele raman in volum)
 # Stergere:  docker compose down -v       (STERGE si datele!)
 # Consola:   http://localhost:9001
@@ -123,9 +132,14 @@ services:
     container_name: sgdm-api
     restart: unless-stopped
 
+    # Porneste doar dupa ce bucketul, versionarea si regulile de retentie exista.
+    # Fara conditia pe minio-init, primul upload putea ajunge intr-un bucket
+    # creat de API, fara versionare si fara expirare.
     depends_on:
       minio:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
 
     environment:
       ASPNETCORE_ENVIRONMENT: Production
@@ -146,6 +160,14 @@ services:
       # de aceea in productie ambele trebuie sa arate spre acelasi nume DNS.
       Storage__Endpoint: http://minio:9000
       Storage__Bucket: ${STORAGE_BUCKET:-sgdm-transfers}
+
+      # URL-urile presemnate se semneaza pentru hostul din Storage__Endpoint,
+      # adica "minio" — un nume care exista doar in reteaua Docker. Browserul
+      # nu il poate rezolva, deci descarcarea directa ar esua. In acest mod,
+      # cifrotextul trece prin API (/api/Transfers/{id}/content). Pentru URL-uri
+      # presemnate in productie, MinIO trebuie expus sub un nume DNS comun,
+      # vazut la fel si de API, si de browser.
+      Storage__UsePresignedDownload: "false"
       MAI_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER}
       MAI_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
 

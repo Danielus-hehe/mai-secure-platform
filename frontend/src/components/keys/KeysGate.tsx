@@ -21,6 +21,7 @@ import { KeyRound, Loader2, ShieldCheck, ShieldAlert, LogOut } from 'lucide-reac
 import Button from '../ui/Button';
 import { useKeys } from '../../context/KeysContext';
 import { useAuth } from '../../context/AuthContext';
+import { apiErrorMessage } from '../../api/errors';
 
 export default function KeysGate() {
     const { status, generate, unlock, reload, error } = useKeys();
@@ -65,9 +66,10 @@ export default function KeysGate() {
             setPassword('');
             setConfirmPassword('');
         } catch (err) {
-            setLocalError(
-                err instanceof Error ? err.message : 'Operația criptografică a eșuat.'
-            );
+            // apiErrorMessage citește mesajul trimis de server (ex. 403 cu parolă
+            // temporară, 429 la prea multe încercări). Pentru erorile locale
+            // (parolă greșită, WebCrypto indisponibil) întoarce mesajul Error.
+            setLocalError(apiErrorMessage(err, 'Operația criptografică a eșuat.'));
         } finally {
             setBusy(false);
         }

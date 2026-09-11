@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using System.Data.Common;
 using System.Security.Claims;
 using System.Text.RegularExpressions;
 
@@ -68,6 +69,21 @@ namespace MAI.Api.Controllers
 
         private static readonly Regex EmailRegex =
             new(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.Compiled);
+
+        /// <summary>
+        /// Litere și cifre latine, punct, liniuță, underscore; 3–50 de caractere.
+        ///
+        /// Fără restricția de alfabet, două conturi puteau arăta identic în lista
+        /// de destinatari folosind litere asemănătoare din alte alfabete (de ex.
+        /// „а” chirilic în loc de „a” latin): cineva putea primi fișiere destinate
+        /// altcuiva. Majusculele sunt permise, dar unicitatea se verifică fără
+        /// diferență între ele (vezi migrarea CaseInsensitiveUserIndexes).
+        /// </summary>
+        private static readonly Regex UsernameRegex =
+            new(@"^[A-Za-z0-9._-]{3,50}$", RegexOptions.Compiled);
+
+        /// <summary>Codul PostgreSQL pentru încălcarea unui index unic.</summary>
+        private const string UniqueViolation = "23505";
 
         /// <summary>Conturile privilegiate primesc profilul Argon2 cu cost mai mare.</summary>
         private string ProfileFor(UserRole role) =>
@@ -170,10 +186,13 @@ namespace MAI.Api.Controllers
         // POST api/Users — creare cont, exclusiv Administrator
         // ═════════════════════════════════════════════════════════════════════
         /// <summary>
-        /// Atributul de mai jos era comentat, cu nota „pentru producție
-        /// decomentează”. Consecința: orice cont autentificat, inclusiv unul de
-        /// rol Utilizator, putea crea un al doilea cont cu Role=Administrator și
-        /// să se autentifice imediat cu el. Nu mai este opțional.
+        /// Creează un cont cu o parolă inițială aleasă de administrator.
+        ///
+        /// Contul pornește cu MustChangePassword = true. Parola inițială e
+        /// cunoscută de administrator și, adesea, trimisă pe un canal nesigur
+        /// (chat, hârtie). Dacă utilizatorul și-ar genera cheile E2EE cu ea,
+        /// administratorul le-ar putea descuia oricând din baza de date. Serverul
+        /// refuză deci înregistrarea cheilor până la prima schimbare de parolă.
         /// </summary>
         [Authorize(Roles = nameof(UserRole.Administrator))]
         [EnableRateLimiting(RateLimitPolicies.PasswordWrite)]
@@ -186,8 +205,12 @@ namespace MAI.Api.Controllers
             if (string.IsNullOrWhiteSpace(username))
                 return BadRequest(new { message = "Username-ul este obligatoriu." });
 
-            if (username.Length < 3 || username.Length > 50)
-                return BadRequest(new { message = "Username-ul trebuie să aibă între 3 și 50 de caractere." });
+            if (!UsernameRegex.IsMatch(username))
+                return BadRequest(new
+                {
+                    message = "Username-ul trebuie să aibă 3–50 de caractere: litere fără diacritice, " +
+                              "cifre, punct, liniuță sau underscore.",
+                });
 
             // Un rol nedefinit (Role=99) ar trece prin binding, ar fi comparat cu
             // >= SefDirectie și ar produce un cont cu un rol pe care niciun
@@ -203,31 +226,43 @@ namespace MAI.Api.Controllers
             if (!validation.IsValid)
                 return BadRequest(new { message = validation.Message, errors = validation.Errors });
 
-            if (await _context.Users.AnyAsync(u => u.Username == username, ct))
-                return Conflict(new { message = $"Username-ul '{username}' exista deja." });
+            // Aceeași regulă ca indexurile unice din baza de date: fără diferență
+            // între majuscule și minuscule. Verificarea de aici dă un mesaj clar;
+            // indexul rămâne garanția, pentru două cereri simultane.
+            var usernameKey = username.ToLowerInvariant();
+            if (await _context.Users.AnyAsync(u => u.Username.ToLower() == usernameKey, ct))
+                return Conflict(new { message = $"Username-ul '{username}' există deja." });
 
-            if (!string.IsNullOrEmpty(email) && await _context.Users.AnyAsync(u => u.Email == email, ct))
-                return Conflict(new { message = $"Adresa de email '{email}' este deja folosita." });
+            // Emailul e opțional. Mai multe conturi fără email sunt permise: indexul
+            // unic pe email ignoră valorile goale.
+            if (!string.IsNullOrEmpty(email))
+            {
+                var emailKey = email.ToLowerInvariant();
+                if (await _context.Users.AnyAsync(u => u.Email.ToLower() == emailKey, ct))
+                    return Conflict(new { message = $"Adresa de email '{email}' este deja folosită." });
+            }
 
             try
             {
                 var user = new User
                 {
-                    Id           = Guid.NewGuid(),
-                    Username     = username,
-                    Email        = email,
-                    PasswordHash = await _hasher.HashPasswordAsync(dto.Password, ProfileFor(dto.Role), ct),
-                    FullName     = dto.FullName?.Trim()   ?? string.Empty,
-                    Department   = dto.Department?.Trim() ?? string.Empty,
-                    Role         = dto.Role,
-                    IsActive     = true,
-                    CreatedAt    = DateTime.UtcNow,
+                    Id                 = Guid.NewGuid(),
+                    Username           = username,
+                    Email              = email,
+                    PasswordHash       = await _hasher.HashPasswordAsync(dto.Password, ProfileFor(dto.Role), ct),
+                    FullName           = dto.FullName?.Trim()   ?? string.Empty,
+                    Department         = dto.Department?.Trim() ?? string.Empty,
+                    Role               = dto.Role,
+                    IsActive           = true,
+                    CreatedAt          = DateTime.UtcNow,
+                    MustChangePassword = true,
                 };
 
                 _context.Users.Add(user);
 
                 AddAudit(user.Id, AuditAction.UserCreated,
-                    $"Cont creat @{user.Username} ({user.Role}) - Argon2id/{ProfileFor(dto.Role)}",
+                    $"Cont creat @{user.Username} ({user.Role}) - Argon2id/{ProfileFor(dto.Role)}, " +
+                    "parola initiala temporara",
                     // Crearea unui cont privilegiat e exact rândul pe care un
                     // ofițer de securitate trebuie să-l găsească filtrând.
                     dto.Role >= UserRole.SefDirectie ? AuditResult.Warning : AuditResult.Success);
@@ -241,7 +276,20 @@ namespace MAI.Api.Controllers
                         user.Username, user.Role, CallerUsername, CallerIp);
                 }
 
-                return Ok(new { message = $"Contul @{user.Username} a fost creat cu succes.", id = user.Id });
+                return Ok(new
+                {
+                    message = $"Contul @{user.Username} a fost creat. La prima autentificare, " +
+                              "utilizatorul va fi obligat să-și aleagă o parolă proprie.",
+                    id = user.Id,
+                    mustChangePassword = true,
+                });
+            }
+            catch (DbUpdateException ex) when (ex.InnerException is DbException { SqlState: UniqueViolation })
+            {
+                // Două cereri simultane cu același nume trec amândouă de verificarea
+                // de mai sus; indexul unic o oprește pe a doua. Răspunsul corect e
+                // 409, nu 500.
+                return Conflict(new { message = "Username-ul sau adresa de email există deja." });
             }
             catch (HashingCapacityExceededException ex)
             {
@@ -281,12 +329,15 @@ namespace MAI.Api.Controllers
             user.FailedLoginAttempts = 0;
             user.LockoutEndsAt       = null;
 
-            // Revocarea REALĂ a sesiunilor. Versiunea anterioară punea pe null
-            // User.RefreshTokenHash — o coloană rămasă din implementarea de
-            // dinaintea tabelei UserSessions, pe care nimic nu o mai citește.
-            // Efectul practic: o resetare de parolă cerută tocmai fiindcă se
-            // bănuia că altcineva are acces lăsa sesiunea aceluia activă încă
-            // șapte zile, adică rata exact scenariul pentru care există.
+            // Parola nouă e cunoscută de administrator. Până când utilizatorul nu
+            // o înlocuiește cu una proprie, serverul nu acceptă chei E2EE noi:
+            // altfel cheile generate după resetare ar fi încuiate cu o parolă pe
+            // care administratorul o știe, iar el le-ar putea descuia din bază
+            // fără ca amprenta sau jurnalul să arate ceva.
+            user.MustChangePassword = true;
+
+            // Resetarea se cere de obicei tocmai fiindcă altcineva ar putea avea
+            // acces: toate sesiunile se închid, în tabela UserSessions.
             var closed = await _sessions.RevokeAllAsync(
                 user.Id, "resetare administrativa a parolei", exceptSessionId: null, ct);
 
@@ -315,7 +366,8 @@ namespace MAI.Api.Controllers
 
             AddAudit(user.Id, AuditAction.UserUpdated,
                 $"Parola resetata administrativ pentru @{user.Username}, {closed} sesiuni inchise" +
-                (hadKeys ? ", chei E2EE invalidate (fisierele primite anterior devin inaccesibile)" : string.Empty),
+                (hadKeys ? ", chei E2EE invalidate (fisierele primite anterior devin inaccesibile)" : string.Empty) +
+                ", schimbarea parolei este obligatorie la urmatoarea autentificare",
                 AuditResult.Warning);
 
             await _context.SaveChangesAsync(ct);
@@ -327,12 +379,14 @@ namespace MAI.Api.Controllers
             return Ok(new
             {
                 message = hadKeys
-                    ? $"Parola contului @{user.Username} a fost resetata. Cheile de criptare au fost " +
-                      "invalidate: la urmatoarea autentificare utilizatorul va genera chei noi, iar " +
-                      "fisierele primite anterior trebuie retrimise de expeditori."
-                    : $"Parola contului @{user.Username} a fost resetata.",
-                sessionsClosed  = closed,
-                keysInvalidated = hadKeys,
+                    ? $"Parola contului @{user.Username} a fost resetată. La următoarea autentificare, " +
+                      "utilizatorul își alege o parolă proprie și abia apoi generează chei noi. " +
+                      "Fișierele primite anterior trebuie retrimise de expeditori."
+                    : $"Parola contului @{user.Username} a fost resetată. La următoarea autentificare, " +
+                      "utilizatorul va fi obligat să-și aleagă o parolă proprie.",
+                sessionsClosed     = closed,
+                keysInvalidated    = hadKeys,
+                mustChangePassword = true,
             });
         }
 

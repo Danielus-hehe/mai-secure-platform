@@ -38,5 +38,19 @@ namespace MAI.BusinessLogic.Dtos
 
         /// <summary>Momentul expirării refresh token-ului (UTC, ISO 8601).</summary>
         public DateTime RefreshTokenExpiresAt { get; set; }
+
+        /// <summary>
+        /// Parola contului a fost stabilită de un administrator (cont nou sau
+        /// resetare). Frontend-ul cere schimbarea ei înaintea oricărei alte
+        /// acțiuni, iar serverul refuză înregistrarea cheilor E2EE până atunci.
+        /// </summary>
+        public bool MustChangePassword { get; set; }
+
+        /// <summary>
+        /// Rolul contului cere 2FA (TwoFactor:RequiredForPrivilegedRoles), dar
+        /// sesiunea nu a fost deschisă cu al doilea factor. Endpointurile
+        /// privilegiate răspund 403 până la activarea 2FA și o nouă autentificare.
+        /// </summary>
+        public bool MfaEnrollmentRequired { get; set; }
     }
 }

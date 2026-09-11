@@ -71,6 +71,26 @@ namespace MAI.Api.Controllers
         private string Ip => HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
         /// <summary>
+        /// Lungimile maxime acceptate la login. Conturile se creează cu cel mult 50
+        /// de caractere în nume (UsersController), deci 64 lasă o marjă fără să
+        /// identifice vreun cont real. Parola e plafonată ca un corp mare să nu
+        /// ajungă în Argon2.
+        /// </summary>
+        private const int MaxLoginUsernameLength = 64;
+        private const int MaxLoginPasswordLength = 1024;
+
+        /// <summary>Lungimea coloanei AuditLogs.Username (vezi AuditLogConfiguration).</summary>
+        private const int AuditUsernameMaxLength = 128;
+
+        /// <summary>
+        /// Numele tastat, trunchiat la lungimea coloanei de audit. Fără trunchiere,
+        /// un nume de 129+ caractere făcea inserarea rândului de audit să eșueze:
+        /// răspunsul era 500, iar încercarea nu mai apărea în jurnal deloc.
+        /// </summary>
+        private static string AuditName(string username) =>
+            username.Length <= AuditUsernameMaxLength ? username : username[..AuditUsernameMaxLength];
+
+        /// <summary>
         /// User-Agent-ul cererii, pentru eticheta sesiunii. Vine de la client,
         /// deci e o indicație, nu o dovadă — se afișează, nu se folosește la
         /// nicio decizie de autorizare.
@@ -92,19 +112,35 @@ namespace MAI.Api.Controllers
         public async Task<IActionResult> Login([FromBody] LoginDto request, CancellationToken ct)
         {
             var username = request.Username?.Trim() ?? string.Empty;
+            var password = request.Password ?? string.Empty;
 
             // Mesaj identic pentru orice eșec — nu divulgăm dacă userul există,
             // dacă e blocat sau dacă parola era aproape corectă.
             const string genericError = "Nume de utilizator sau parolă incorectă.";
 
-            if (string.IsNullOrWhiteSpace(username) || string.IsNullOrEmpty(request.Password))
+            if (string.IsNullOrWhiteSpace(username) || string.IsNullOrEmpty(password))
             {
-                await WriteAuditAsync(null, username, AuditAction.Login,
+                await WriteAuditAsync(null, AuditName(username), AuditAction.Login,
                     "Credentiale lipsa", AuditResult.Failure);
                 return BadRequest(new { message = genericError });
             }
 
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.Username == username, ct);
+            // Limitele se verifică înaintea bazei de date și a lui Argon2. Un nume
+            // mai lung decât orice cont posibil nu identifică pe nimeni, deci
+            // răspunsul imediat nu dezvăluie existența vreunui cont.
+            if (username.Length > MaxLoginUsernameLength || password.Length > MaxLoginPasswordLength)
+            {
+                await WriteAuditAsync(null, AuditName(username), AuditAction.Login,
+                    "Credentiale peste lungimea maxima acceptata", AuditResult.Failure);
+                return BadRequest(new { message = genericError });
+            }
+
+            // Numele de utilizator sunt unice fără diferență între majuscule și
+            // minuscule (indexul UX_Users_Username_Lower). Căutarea urmează aceeași
+            // regulă: „Ion.Popescu” și „ion.popescu” sunt același cont, nu două.
+            var usernameKey = username.ToLowerInvariant();
+            var user = await _context.Users
+                .FirstOrDefaultAsync(u => u.Username.ToLower() == usernameKey, ct);
 
             try
             {
@@ -113,7 +149,7 @@ namespace MAI.Api.Controllers
                     // Consumăm același timp ca o verificare reală, ca să nu se poată
                     // enumera conturile măsurând latența răspunsului.
                     await _hasher.SimulateVerificationAsync(ct);
-                    await WriteAuditAsync(null, username, AuditAction.Login,
+                    await WriteAuditAsync(null, AuditName(username), AuditAction.Login,
                         "Utilizator inexistent", AuditResult.Failure);
                     return BadRequest(new { message = genericError });
                 }
@@ -124,7 +160,7 @@ namespace MAI.Api.Controllers
                 {
                     var remaining = _lockout.RemainingLockoutSeconds(user);
 
-                    await WriteAuditAsync(user.Id, username, AuditAction.Login,
+                    await WriteAuditAsync(user.Id, user.Username, AuditAction.Login,
                         $"Cont blocat, {remaining}s ramase", AuditResult.Failure);
 
                     Response.Headers.RetryAfter = remaining.ToString();
@@ -135,7 +171,7 @@ namespace MAI.Api.Controllers
                     });
                 }
 
-                var verification = await _hasher.VerifyPasswordAsync(request.Password, user.PasswordHash, ct);
+                var verification = await _hasher.VerifyPasswordAsync(password, user.PasswordHash, ct);
 
                 if (verification == PasswordVerificationResult.Failed)
                 {
@@ -147,7 +183,7 @@ namespace MAI.Api.Controllers
                             user.Username, Ip, outcome.LockoutMinutes);
                     }
 
-                    AddAudit(user.Id, username, AuditAction.Login,
+                    AddAudit(user.Id, user.Username, AuditAction.Login,
                         outcome.AuditDetails, AuditResult.Failure);
                     await _context.SaveChangesAsync(ct);
 
@@ -156,7 +192,7 @@ namespace MAI.Api.Controllers
 
                 if (!user.IsActive)
                 {
-                    await WriteAuditAsync(user.Id, username, AuditAction.Login,
+                    await WriteAuditAsync(user.Id, user.Username, AuditAction.Login,
                         "Cont dezactivat", AuditResult.Failure);
                     return BadRequest(new { message = "Contul este dezactivat. Contactați administratorul." });
                 }
@@ -164,9 +200,9 @@ namespace MAI.Api.Controllers
                 // Migrare transparentă plain text / parametri slabi → profilul potrivit rolului.
                 if (verification == PasswordVerificationResult.SuccessRehashNeeded)
                 {
-                    user.PasswordHash = await _hasher.HashPasswordAsync(request.Password, ProfileFor(user.Role), ct);
-                    _logger.LogInformation("Hash parola migrat pentru {Username}.", username);
-                    AddAudit(user.Id, username, AuditAction.UserUpdated, "Hash parola migrat la Argon2id");
+                    user.PasswordHash = await _hasher.HashPasswordAsync(password, ProfileFor(user.Role), ct);
+                    _logger.LogInformation("Hash parola migrat pentru {Username}.", user.Username);
+                    AddAudit(user.Id, user.Username, AuditAction.UserUpdated, "Hash parola migrat la Argon2id");
                 }
 
                 // Parola e corectă: contorul de eșecuri se resetează aici, indiferent
@@ -184,7 +220,7 @@ namespace MAI.Api.Controllers
                 {
                     var challenge = _tokens.IssueTwoFactorChallenge(user);
 
-                    AddAudit(user.Id, username, AuditAction.Login,
+                    AddAudit(user.Id, user.Username, AuditAction.Login,
                         "Parola corecta, se asteapta codul 2FA");
 
                     await _context.SaveChangesAsync(ct);
@@ -211,7 +247,10 @@ namespace MAI.Api.Controllers
                 _sessions.Create(
                     user, issued.RefreshTokenHash, issued.RefreshTokenExpiresAt, UserAgent, Ip);
 
-                AddAudit(user.Id, username, AuditAction.Login, "Autentificare reusita");
+                AddAudit(user.Id, user.Username, AuditAction.Login,
+                    user.MustChangePassword
+                        ? "Autentificare reusita cu parola temporara, schimbarea parolei este obligatorie"
+                        : "Autentificare reusita");
                 await _context.SaveChangesAsync(ct);
 
                 return Ok(issued.Response);
@@ -285,6 +324,7 @@ namespace MAI.Api.Controllers
 
             var usedRecoveryCode = false;
             var accepted         = false;
+            var replayed         = false;
 
             // Codul TOTP are exact Digits cifre. Orice altceva e tratat ca posibil
             // cod de recuperare — nu-l trimitem degeaba prin HMAC.
@@ -295,7 +335,15 @@ namespace MAI.Api.Controllers
                 try
                 {
                     var secret = _protector.Unprotect(user.TwoFactorSecret!);
-                    accepted = _totp.VerifyCode(secret, dto.Code);
+
+                    // Un cod TOTP se acceptă o singură dată (RFC 6238, 5.2). Fără
+                    // regula asta, un cod văzut pe ecranul altcuiva sau interceptat
+                    // mergea refolosit cât timp era valid, adică ~90 de secunde.
+                    var totp = _totp.Verify(secret, dto.Code, user.TwoFactorLastUsedStep);
+                    accepted = totp.IsAccepted;
+                    replayed = totp.Status == TotpVerificationStatus.Replayed;
+
+                    if (accepted) user.TwoFactorLastUsedStep = totp.Step;
                 }
                 catch (CryptographicException ex)
                 {
@@ -328,20 +376,47 @@ namespace MAI.Api.Controllers
 
                 var remaining = _twoFactor.MaxChallengeAttempts - user.TwoFactorChallengeAttempts;
 
+                // Codurile greșite intră și în contorul de blocare al contului. Altfel,
+                // cine știa parola putea încerca coduri la nesfârșit: câte cinci pe
+                // provocare, cu provocări noi cerute de pe alte adrese IP.
+                var lockout = _lockout.RegisterFailedAttempt(user);
+
+                if (lockout.LockedOut)
+                {
+                    _tokens.ClearChallenge(user);
+                    _logger.LogWarning(
+                        "Cont blocat dupa coduri 2FA gresite: {Username}, IP={Ip}, {Minutes} minute",
+                        user.Username, Ip, lockout.LockoutMinutes);
+                }
+
                 AddAudit(user.Id, user.Username, AuditAction.Login,
-                    $"Cod 2FA incorect ({user.TwoFactorChallengeAttempts}/{_twoFactor.MaxChallengeAttempts})",
-                    AuditResult.Failure);
+                    (replayed
+                        ? "Cod 2FA deja folosit, respins (posibila reluare a unui cod interceptat)"
+                        : $"Cod 2FA incorect ({user.TwoFactorChallengeAttempts}/{_twoFactor.MaxChallengeAttempts})") +
+                    (lockout.LockedOut ? $", cont blocat {lockout.LockoutMinutes:0} minute" : string.Empty),
+                    // O reluare nu e o simplă greșeală de tastare: cineva a avut
+                    // un cod valid. E rândul pe care un supervizor trebuie să-l vadă.
+                    replayed ? AuditResult.Warning : AuditResult.Failure);
 
                 await _context.SaveChangesAsync(ct);
 
+                if (lockout.LockedOut)
+                    return Unauthorized(new { message = genericError, attemptsRemaining = 0 });
+
                 return Unauthorized(new
                 {
-                    message = remaining > 0
-                        ? $"Cod incorect. Mai aveți {remaining} încercări."
-                        : genericError,
+                    message = replayed
+                        ? "Codul a fost deja folosit. Așteptați următorul cod din aplicația de autentificare."
+                        : remaining > 0
+                            ? $"Cod incorect. Mai aveți {remaining} încercări."
+                            : genericError,
                     attemptsRemaining = Math.Max(remaining, 0),
                 });
             }
+
+            // Pasul 2FA a reușit: contorul de eșecuri, crescut eventual de coduri
+            // greșite în această provocare, se resetează ca la o parolă corectă.
+            _lockout.ResetCounters(user);
 
             // Provocarea se consumă indiferent de ce urmează: un token de unică
             // folosință care rămâne valid după utilizare nu mai e de unică folosință.
@@ -385,6 +460,8 @@ namespace MAI.Api.Controllers
                 response.ExpiresIn,
                 response.AccessTokenExpiresAt,
                 response.RefreshTokenExpiresAt,
+                response.MustChangePassword,
+                response.MfaEnrollmentRequired,
                 usedRecoveryCode,
                 remainingRecoveryCodes = user.RemainingRecoveryCodes,
             });
@@ -419,11 +496,17 @@ namespace MAI.Api.Controllers
 
             var user = session.User;
 
-            if (!user.IsActive || user.IsLockedOut)
+            // Doar dezactivarea închide sesiunea aici, nu și blocarea. Blocarea
+            // apără login-ul de ghicirea parolei, iar oricine știe un username o
+            // poate declanșa cu cinci parole greșite. Dacă ar închide și
+            // sesiunile, oricine ar putea deconecta pe oricine, oricând. Titularul
+            // sesiunii și-a dovedit deja identitatea; o sesiune suspectă se închide
+            // explicit, din lista de sesiuni sau prin dezactivarea contului.
+            if (!user.IsActive)
             {
-                _sessions.Revoke(session, "cont dezactivat sau blocat");
+                _sessions.Revoke(session, "cont dezactivat");
                 await WriteAuditAsync(user.Id, user.Username, AuditAction.Login,
-                    "Refresh pe cont dezactivat sau blocat", AuditResult.Failure);
+                    "Refresh pe cont dezactivat", AuditResult.Failure);
                 return Unauthorized(new { message = genericError });
             }
 
@@ -511,6 +594,12 @@ namespace MAI.Api.Controllers
                 // Profilul scump: schimbarea de parolă e o operație rară, își permite costul.
                 user.PasswordHash = await _hasher.HashPasswordAsync(dto.NewPassword, _argon2.PrivilegedProfile, ct);
 
+                // Parola nouă e aleasă de utilizator, deci nu mai e cunoscută de
+                // administratorul care a creat sau resetat contul. Abia de acum
+                // serverul acceptă înregistrarea cheilor E2EE (KeysController).
+                var replacedTemporaryPassword = user.MustChangePassword;
+                user.MustChangePassword = false;
+
                 // Schimbarea parolei închide TOATE sesiunile, fără excepție —
                 // inclusiv cea curentă. Motivul obișnuit pentru care cineva își
                 // schimbă parola este suspiciunea că altcineva o știe; a lăsa
@@ -523,7 +612,10 @@ namespace MAI.Api.Controllers
                     user.Id, "schimbare parola", exceptSessionId: null, ct);
 
                 AddAudit(user.Id, user.Username, AuditAction.UserUpdated,
-                    $"Parola schimbata (Argon2id), {closed} sesiuni inchise");
+                    (replacedTemporaryPassword
+                        ? "Parola temporara inlocuita de utilizator (Argon2id)"
+                        : "Parola schimbata (Argon2id)") +
+                    $", {closed} sesiuni inchise");
 
                 await _context.SaveChangesAsync(ct);
                 return Ok(new { message = "Parola a fost actualizată cu succes." });

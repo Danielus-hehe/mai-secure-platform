@@ -1,64 +1,78 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ArrowLeftRight, Landmark, Users, ShieldAlert, Clock, FileCheck, Loader2 } from 'lucide-react';
+import {
+    ArrowLeftRight, ArrowDownLeft, ArrowUpRight, Landmark, Users, ShieldAlert,
+    Clock, FileCheck, Inbox, Loader2,
+} from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader';
 import StatCard   from '../../components/ui/StatCard';
 import Badge      from '../../components/ui/Badge';
 import { useAuth }  from '../../context/AuthContext';
 import { formatDateTime, formatFileSize } from '../../utils/format';
-import api from '../../api/client';
+import { apiErrorMessage } from '../../api/errors';
+import { fetchDashboardStats, type DashboardStats, type RecentTransfer } from '../../api/stats';
 
-// Backend TransferStatus.ToString(): "Pending" | "Downloaded" | "Expired"
+// Backend: TransferStatus.ToString(), plus „Expired” calculat pentru transferurile
+// în așteptare trecute de termen.
 const STATUS_LABEL: Record<string, string> = {
     Pending:    'În așteptare',
     Downloaded: 'Confirmat',
     Expired:    'Expirat',
+    Revoked:    'Retras',
 };
-const STATUS_TONE: Record<string, 'green' | 'gold' | 'red'> = {
+const STATUS_TONE: Record<string, 'green' | 'gold' | 'red' | 'gray'> = {
     Pending:    'gold',
     Downloaded: 'green',
     Expired:    'red',
+    Revoked:    'gray',
 };
 
-interface RecentTransfer {
-    id: string;
-    fileName: string;
-    fileSize: number;
-    senderName: string;
-    recipientName: string;
-    status: string;
-    createdAt: string;
-}
+/** Cealaltă parte a transferului, din perspectiva utilizatorului curent. */
+function Counterpart({ transfer }: { transfer: RecentTransfer }) {
+    const sent = transfer.direction === 'sent';
+    const Icon = sent ? ArrowUpRight : ArrowDownLeft;
 
-interface Stats {
-    activeUsers:         number;
-    totalTransfers:      number;
-    pendingTransfers:    number;
-    totalDocuments:      number;
-    failedLoginsLast24h: number;
-    recentTransfers:     RecentTransfer[];
+    return (
+        <span className="inline-flex items-center gap-1.5">
+            <Icon
+                size={14}
+                className={sent ? 'text-mai-400' : 'text-green-600 dark:text-green-400'}
+                aria-hidden="true"
+            />
+            {sent ? `Către ${transfer.recipientName}` : `De la ${transfer.senderName}`}
+        </span>
+    );
 }
 
 export default function DashboardPage() {
     const { user } = useAuth();
-    const [stats,   setStats]   = useState<Stats | null>(null);
+    const [stats,   setStats]   = useState<DashboardStats | null>(null);
     const [loading, setLoading] = useState(true);
+    const [error,   setError]   = useState('');
 
-    const fetchStats = useCallback(async () => {
+    const loadStats = useCallback(async (signal?: AbortSignal) => {
         setLoading(true);
+        setError('');
         try {
-            const { data } = await api.get<Stats>('/Stats');
-            setStats(data);
-        } catch {
-            setStats({
-                activeUsers: 0, totalTransfers: 0, pendingTransfers: 0,
-                totalDocuments: 0, failedLoginsLast24h: 0, recentTransfers: [],
-            });
+            setStats(await fetchDashboardStats(signal));
+        } catch (err) {
+            if (signal?.aborted) return;
+            // Fără cifre inventate: un 0 afișat după o eroare arată ca o
+            // informație reală („niciun transfer”).
+            setStats(null);
+            setError(apiErrorMessage(err, 'Statisticile nu au putut fi încărcate.'));
         } finally {
-            setLoading(false);
+            if (!signal?.aborted) setLoading(false);
         }
     }, []);
 
-    useEffect(() => { fetchStats(); }, [fetchStats]);
+    useEffect(() => {
+        const controller = new AbortController();
+        void loadStats(controller.signal);
+        return () => controller.abort();
+    }, [loadStats]);
+
+    // null = rolul nu are acces la metrica de securitate: cardul nu se afișează.
+    const showFailedLogins = stats?.failedLoginsLast24h != null;
 
     return (
         <div className="space-y-4 sm:space-y-6">
@@ -67,51 +81,69 @@ export default function DashboardPage() {
                 subtitle={`${user?.department ?? ''} · Prezentare generală a activității`}
             />
 
+            {error && (
+                <div className="flex flex-col gap-3 rounded-xl border border-red-100 dark:border-red-800
+                    bg-red-50 dark:bg-red-900/20 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
+                    <button
+                        type="button"
+                        onClick={() => void loadStats()}
+                        className="text-sm font-semibold text-red-700 underline-offset-2 hover:underline dark:text-red-300"
+                    >
+                        Reîncearcă
+                    </button>
+                </div>
+            )}
+
             {/* Stat cards */}
             {loading ? (
                 <div className="flex items-center gap-3 text-mai-400 py-4">
                     <Loader2 size={18} className="animate-spin" />
                     <span className="text-sm">Se încarcă statisticile…</span>
                 </div>
-            ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            ) : stats && (
+                <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 ${showFailedLogins ? 'xl:grid-cols-4' : 'xl:grid-cols-3'}`}>
                     <StatCard
-                        label="Transferuri în așteptare"
-                        value={stats?.pendingTransfers ?? 0}
-                        icon={ArrowLeftRight}
+                        label="Fișiere care vă așteaptă"
+                        value={stats.awaitingMyDownload}
+                        icon={Inbox}
                         tone="blue"
                     />
                     <StatCard
                         label="Documente normative"
-                        value={stats?.totalDocuments ?? 0}
+                        value={stats.totalDocuments}
                         icon={Landmark}
                         tone="gold"
                     />
                     <StatCard
                         label="Utilizatori activi"
-                        value={stats?.activeUsers ?? 0}
+                        value={stats.activeUsers}
                         icon={Users}
                         tone="green"
                     />
-                    <StatCard
-                        label="Auth. eșuate (24h)"
-                        value={stats?.failedLoginsLast24h ?? 0}
-                        icon={ShieldAlert}
-                        tone="red"
-                    />
+                    {showFailedLogins && (
+                        <StatCard
+                            label="Auth. eșuate (24h)"
+                            value={stats.failedLoginsLast24h ?? 0}
+                            icon={ShieldAlert}
+                            tone="red"
+                        />
+                    )}
                 </div>
             )}
 
-            {/* Ultimele transferuri */}
+            {/* Ultimele transferuri ale utilizatorului */}
             <div className="bg-white dark:bg-mai-800 rounded-xl shadow-card dark:shadow-none
                 border border-mai-100/50 dark:border-mai-700 overflow-hidden">
                 <div className="flex items-center justify-between px-5 py-4 border-b border-mai-100 dark:border-mai-700">
                     <h2 className="font-semibold text-mai-900 dark:text-white flex items-center gap-2">
-                        <Clock size={16} className="text-mai-400" /> Ultimele transferuri
+                        <Clock size={16} className="text-mai-400" /> Ultimele dumneavoastră transferuri
                     </h2>
-                    <span className="text-xs text-mai-400 bg-mai-50 dark:bg-mai-700 px-2.5 py-1 rounded-full">
-                        {stats?.totalTransfers ?? 0} total
-                    </span>
+                    {stats && (
+                        <span className="text-xs text-mai-400 bg-mai-50 dark:bg-mai-700 px-2.5 py-1 rounded-full">
+                            {stats.myTransfersTotal} în total
+                        </span>
+                    )}
                 </div>
 
                 {loading ? (
@@ -122,7 +154,7 @@ export default function DashboardPage() {
                 ) : !stats?.recentTransfers.length ? (
                     <div className="py-14 text-center">
                         <ArrowLeftRight size={36} className="mx-auto text-mai-200 dark:text-mai-600 mb-3" />
-                        <p className="text-sm font-medium text-mai-400">Niciun transfer înregistrat</p>
+                        <p className="text-sm font-medium text-mai-400">Niciun transfer încă</p>
                         <p className="text-xs text-mai-300 dark:text-mai-500 mt-1">
                             Trimiteți primul fișier din secțiunea Transferuri
                         </p>
@@ -133,7 +165,7 @@ export default function DashboardPage() {
                             <thead>
                             <tr className="bg-mai-50 dark:bg-mai-900 text-left text-xs uppercase tracking-wide text-mai-500 dark:text-mai-400">
                                 <th className="px-5 py-3 font-semibold">Fișier</th>
-                                <th className="px-5 py-3 font-semibold">Expeditor → Destinatar</th>
+                                <th className="px-5 py-3 font-semibold">Trimis / primit</th>
                                 <th className="px-5 py-3 font-semibold">Dimensiune</th>
                                 <th className="px-5 py-3 font-semibold">Data</th>
                                 <th className="px-5 py-3 font-semibold">Status</th>
@@ -146,7 +178,7 @@ export default function DashboardPage() {
                                         {t.fileName}
                                     </td>
                                     <td className="px-5 py-3.5 text-mai-500 dark:text-mai-300 whitespace-nowrap">
-                                        {t.senderName} → {t.recipientName}
+                                        <Counterpart transfer={t} />
                                     </td>
                                     <td className="px-5 py-3.5 text-mai-500 dark:text-mai-300 whitespace-nowrap">
                                         {formatFileSize(t.fileSize)}
