@@ -137,7 +137,7 @@ export default function UsersPage() {
         if (!form.fullName || !form.username || !form.password) return;
         setCreateLoading(true);
         try {
-            await api.post('/Users', {
+            const { data } = await api.post<{ message?: string }>('/Users', {
                 fullName:   form.fullName,
                 username:   form.username,
                 password:   form.password,
@@ -146,7 +146,9 @@ export default function UsersPage() {
                 role:       ROLE_STR[form.role],
             });
 
-            toast.success(`Contul @${form.username} a fost creat.`);
+            // Mesajul serverului spune și că utilizatorul își va schimba parola
+            // la prima autentificare — util de transmis odată cu parola inițială.
+            toast.success(data?.message ?? `Contul @${form.username} a fost creat.`);
             setCreateOpen(false);
             setForm(EMPTY_FORM);
             setPage(1);

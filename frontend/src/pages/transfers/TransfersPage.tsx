@@ -278,8 +278,18 @@ export default function TransfersPage() {
 
             saveDecryptedFile(result.plaintext, envelope.fileName);
 
+            // Confirmarea are propriul try: fișierul e deja decriptat și salvat.
+            // Un eșec aici (transfer retras sau expirat între timp, rețea căzută)
+            // nu trebuie raportat ca eșec al descărcării.
             if (transfer.recipientId === String(user?.id)) {
-                await confirmTransfer(transfer.id, result.signatureValid);
+                try {
+                    await confirmTransfer(transfer.id, result.signatureValid);
+                } catch (confirmError) {
+                    toast.warning(apiErrorMessage(
+                        confirmError,
+                        'Fișierul s-a decriptat, dar confirmarea de primire nu s-a putut înregistra.'
+                    ));
+                }
             }
 
             if (result.signatureValid) {

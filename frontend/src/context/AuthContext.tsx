@@ -26,6 +26,17 @@ export interface User {
     fullName: string;
     role: Role;
     department?: string;
+    /**
+     * Parola a fost stabilită de un administrator (cont nou sau resetare).
+     * PasswordChangeGate cere schimbarea ei înaintea oricărei alte acțiuni;
+     * serverul refuză oricum înregistrarea cheilor E2EE până atunci.
+     */
+    mustChangePassword?: boolean;
+    /**
+     * Rolul cere 2FA (TwoFactor:RequiredForPrivilegedRoles), dar sesiunea nu a
+     * fost deschisă cu al doilea factor. Paginile privilegiate primesc 403.
+     */
+    mfaEnrollmentRequired?: boolean;
 }
 
 interface LoginResponse {
@@ -40,6 +51,8 @@ interface LoginResponse {
     expiresIn: number;
     accessTokenExpiresAt: string;
     refreshTokenExpiresAt: string;
+    mustChangePassword?: boolean;
+    mfaEnrollmentRequired?: boolean;
     /** Prezente doar cand autentificarea s-a incheiat prin pasul 2FA. */
     usedRecoveryCode?: boolean;
     remainingRecoveryCodes?: number;
@@ -91,6 +104,8 @@ function normalizeUser(raw: LoginResponse): User {
         fullName: raw.fullName || raw.username,
         role: ROLE_NUM_TO_STRING[Number(raw.role)] ?? 'UTILIZATOR',
         department: raw.department || '',
+        mustChangePassword: raw.mustChangePassword === true,
+        mfaEnrollmentRequired: raw.mfaEnrollmentRequired === true,
     };
 }
 

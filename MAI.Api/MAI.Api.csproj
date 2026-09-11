@@ -28,8 +28,4 @@
         <ProjectReference Include="..\MAI.BusinessLogic\MAI.BusinessLogic.csproj" />
     </ItemGroup>
 
-    <ItemGroup>
-        <Folder Include="MAI.Api\" />
-    </ItemGroup>
-
 </Project>

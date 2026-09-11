@@ -146,6 +146,13 @@ Verificarea parolei de la pasul 5 nu e redundantă. Dacă utilizatorul greșeșt
 parola la confirmare, cheile s-ar încuia cu o parolă care nu există, iar la
 următoarea autentificare ar fi pierdute definitiv.
 
+**Contul creat sau resetat de administrator trece întâi prin schimbarea
+parolei.** Parola primită de la administrator e cunoscută de el. Cheile generate
+cu ea ar putea fi descuiate de administrator din baza de date oricând, fără urmă.
+Contul are deci `MustChangePassword = true`: interfața cere o parolă proprie
+înaintea oricărei alte acțiuni, iar serverul răspunde `403` la `POST /Keys` până
+atunci, chiar dacă un client ocolește interfața.
+
 ### 3.3 Trimiterea unui fișier
 
 ```mermaid
@@ -222,6 +229,10 @@ key escrow, rezultatul ar fi pierderea definitivă a tuturor fișierelor primite
 | Blocare cont | Progresivă, exponențială | 5 eșecuri → 5 min, dublat până la 8 h |
 | Rate limiting per IP | Ferestre fixe, per categorie de endpoint | Login 10 / 5 min · Refresh 30 / min · Operații cu parola 5 / 15 min |
 | 2FA | TOTP (RFC 6238), opțional per utilizator, 10 coduri de recuperare de unică folosință | Secret cifrat AES-GCM cu cheie separată |
+| 2FA pentru roluri privilegiate | `TwoFactor:RequiredForPrivilegedRoles`: endpointurile care cer un rol acceptă doar tokenuri cu `amr = mfa` (`PrivilegedMfaFilter`) | Dezactivat implicit; se activează din configurare |
+| Parolă temporară | Conturile create sau resetate de administrator își aleg o parolă proprie la prima autentificare; până atunci serverul refuză înregistrarea cheilor E2EE | `Users.MustChangePassword` |
+| Unicitatea conturilor | Username și email unice fără diferență de majuscule; username doar din litere latine, cifre, `.` `_` `-` | Indexuri unice pe `lower(...)`; email opțional |
+| Limite de intrare | Corpul cererilor JSON plafonat global; doar upload-urile au limită mare | 1 MB global, 51 MB pe transferuri și documente |
 | Token de acces | JWT HS256, issuer și audience validate, `ClockSkew = 0` | 15 minute |
 | Sesiuni | Per dispozitiv (`UserSessions`), refresh token opac rotit, stocat ca SHA-256 | 7 zile |
 | Autorizare | Roluri (Utilizator, Șef direcție, Administrator), declarate pe fiecare endpoint și **verificate automat în CI** | vezi `AuthorizationPolicyTests` |
@@ -322,11 +333,23 @@ Ordinea este: șterge obiectul din MinIO, apoi marchează rândul. Invers, un e�
 
 ### D9. Aplicația refuză să pornească cu configurație nesigură
 
-Cheie JWT scurtă sau rămasă pe valoarea-șablon, pepper lipsă, lipsa cheii 2FA în
-producție, parole în clar acceptate în afara dezvoltării: toate opresc pornirea,
-cu un mesaj care spune ce lipsește. Un server care pornește cu o cheie
-cunoscută **pare** că funcționează, și exact de aceea e mai periculos decât unul
-care nu pornește.
+În afara mediului Development, pornirea se oprește, cu un mesaj care spune ce
+lipsește, dacă:
+
+- cheia JWT e mai scurtă de 32 de octeți;
+- pepper-ul Argon2 sau cheia 2FA lipsesc;
+- vreun secret (cheia JWT, pepper-ul, cheia 2FA, parola MinIO, parola bazei de
+  date) a rămas pe o valoare-șablon din fișierele versionate (`YOUR_…`,
+  `GENERATI_…`, `SCHIMBA_MA…`) — recunoscute de `PlaceholderSecrets`;
+- parolele în clar sunt încă acceptate (`AllowLegacyPlaintext`).
+
+În Development, secretele-șablon produc doar un avertisment în log. Schimbarea
+pepper-ului invalidează toate parolele, iar un mediu local existent nu trebuie să
+se strice la prima pornire după această verificare. Aceeași configurație rulată
+în Docker (Production) nu pornește.
+
+Un server care pornește cu o cheie cunoscută **pare** că funcționează, și exact
+de aceea e mai periculos decât unul care nu pornește.
 
 ### D10. Jurnalul de audit, separat de loguri
 
@@ -391,6 +414,8 @@ O listă onestă. Fiecare punct e o limită cunoscută, nu o eroare descoperită
 ### 6.4 Metadatele
 
 - Serverul vede cine trimite, cui, când, numele fișierului și dimensiunea lui.
+  Ceilalți utilizatori nu le văd: pagina principală și lista de transferuri
+  arată fiecărui cont doar transferurile trimise sau primite de el.
 - **Semnătura acoperă doar conținutul**, nu și numele fișierului, destinatarul
   sau momentul trimiterii. Un server malițios poate redenumi un fișier fără să
   fie detectat. Un destinatar malițios, în complicitate cu serverul, poate
@@ -404,11 +429,17 @@ O listă onestă. Fiecare punct e o limită cunoscută, nu o eroare descoperită
   contul ar rămâne blocat), iar utilizatorul generează chei noi. Fișierele primite
   anterior pot fi **retrimise de expeditori**, care își păstrează propria copie
   a DEK-ului.
+- **Parola aleasă de administrator nu protejează chei.** După creare sau
+  resetare, utilizatorul își alege o parolă proprie înainte să-și genereze
+  cheile (vezi 3.2). Fără regula asta, cheile ar fi fost încuiate cu o parolă
+  cunoscută de administrator, care le-ar fi putut descuia din bază în tăcere:
+  amprenta nu s-ar fi schimbat.
 - **Administratorul poate prelua o identitate.** Resetează parola, se
-  autentifică, generează chei noi pe numele utilizatorului, iar transferurile
-  viitoare către acel utilizator vor fi criptate pentru el. Situația e
-  **detectabilă** (amprenta se schimbă, jurnalul are o intrare `Warning`), dar
-  nu **prevenibilă** fără un al doilea factor de încredere în afara serverului.
+  autentifică, își alege el parola nouă, generează chei noi pe numele
+  utilizatorului, iar transferurile viitoare către acel utilizator vor fi
+  criptate pentru el. Situația e **detectabilă** (amprenta se schimbă, jurnalul
+  are o intrare `Warning`), dar nu **prevenibilă** fără un al doilea factor de
+  încredere în afara serverului.
 - Cine are acces de scriere la baza de date poate modifica jurnalul de audit.
   Jurnalul nu este *tamper-evident*.
 
@@ -453,7 +484,8 @@ la fiecare push:
 
 - verifică faptul că fiecare migrare EF are fișierul `.Designer.cs`;
 - `dotnet build` și `dotnet test`;
-- `tsc -b` pe frontend.
+- `npm run build` (`tsc -b` + `vite build`) și oxlint pe frontend;
+- construiește imaginea Docker a API-ului din `Dockerfile`.
 
 **Teste** (xUnit), fără bază de date:
 
@@ -465,6 +497,9 @@ la fiecare push:
 | `PasswordPolicyTests` | Regulile politicii de parole |
 | `AccountLockoutServiceTests` | Progresia exponențială a blocării |
 | `JwtOptionsTests` | Refuzul cheilor slabe și al configurațiilor incomplete |
+| `JwtOptionsTemplateKeyTests` | Cheia-șablon din `.env.example` e refuzată în afara Development |
+| `PlaceholderSecretsTests` | Valorile-șablon sunt recunoscute, secretele reale nu sunt confundate cu ele |
+| `PrivilegedMfaFilterTests` | 2FA obligatoriu doar pe endpointurile cu rol, doar când opțiunea e activă |
 | `AuthorizationPolicyTests` | Fiecare endpoint are o decizie explicită de autorizare, iar cele administrative cer rolul corect |
 
 **Loguri:** Serilog, o linie JSON per eveniment. Refuzurile 401, 403 și 429 apar
@@ -528,6 +563,7 @@ MAI.Api/                 controllere, middleware, sesiuni, job de expirare, Prog
 MAI.Tests/               teste xUnit
 frontend/                React 19 + TypeScript + Vite; src/crypto/ conține E2EE
 docker-compose.yml       MinIO + API (+ PostgreSQL local, opțional)
+Dockerfile               imaginea API-ului (build în două etape, utilizator neprivilegiat)
 docs/DEPLOYMENT.md       instalare și configurare
 .github/workflows/       CI
 ```

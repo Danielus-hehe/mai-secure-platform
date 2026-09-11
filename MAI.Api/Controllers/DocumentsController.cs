@@ -1,4 +1,5 @@
 using MAI.Api.Models;
+using MAI.Api.Security;
 using MAI.BusinessLogic.Interfaces;
 using MAI.BusinessLogic.Storage;
 using MAI.DataAccessLayer;
@@ -124,7 +125,7 @@ namespace MAI.Api.Controllers
         [HttpPost]
         [Consumes("multipart/form-data")]
         [Authorize(Roles = "SefDirectie,Administrator")]
-        [RequestSizeLimit(52_428_800)]
+        [RequestSizeLimit(UploadLimits.MaxRequestBytes)]
         public async Task<IActionResult> Create(
             [FromForm] CreateDocumentRequest request, CancellationToken ct)
         {
@@ -206,7 +207,7 @@ namespace MAI.Api.Controllers
         [HttpPost("{id:guid}/versions")]
         [Consumes("multipart/form-data")]
         [Authorize(Roles = "SefDirectie,Administrator")]
-        [RequestSizeLimit(52_428_800)]
+        [RequestSizeLimit(UploadLimits.MaxRequestBytes)]
         public async Task<IActionResult> AddVersion(
             Guid id, [FromForm] AddDocumentVersionRequest request, CancellationToken ct)
         {

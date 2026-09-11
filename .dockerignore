@@ -1,0 +1,37 @@
+# Ce NU intră în contextul de build al imaginii Docker.
+#
+# Două motive: viteza (fără node_modules, bin/obj și .git, contextul trimis
+# daemonului scade de la sute de MB la câțiva) și, mai important, secretele:
+# un appsettings.Development.json sau un .env copiat în imagine ajunge în
+# fiecare strat al ei și în orice registru în care imaginea e publicată.
+
+# ── Secrete și configurare locală ──────────────────────────────────────────
+.env
+.env.*
+!.env.example
+**/appsettings.Development.json
+**/appsettings.Production.json
+**/*.pfx
+**/*.p12
+**/*.key
+docker-compose.override.yml
+
+# ── Artefacte de build și date locale ─────────────────────────────────────
+**/bin/
+**/obj/
+**/TestResults/
+MAI.Api/Storage/
+MAI.Api/uploads/
+**/*.user
+**/*.suo
+
+# ── Ce nu are legătură cu imaginea API-ului ───────────────────────────────
+frontend/
+MAI.Tests/
+docs/
+.git/
+.github/
+.idea/
+.vs/
+.vscode/
+**/node_modules/

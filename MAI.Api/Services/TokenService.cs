@@ -5,6 +5,7 @@ using System.Text;
 using MAI.BusinessLogic.Dtos;
 using MAI.BusinessLogic.Security;
 using MAI.Domain.Entities;
+using MAI.Domain.Enums;
 using Microsoft.IdentityModel.Tokens;
 
 namespace MAI.Api.Services
@@ -40,7 +41,8 @@ namespace MAI.Api.Services
             var accessExpires  = now.AddMinutes(_jwt.AccessTokenMinutes);
             var refreshExpires = now.AddDays(_jwt.RefreshTokenDays);
 
-            var accessToken  = GenerateJwtToken(user, accessExpires);
+            var mfa          = CompletedSecondFactor(user);
+            var accessToken  = GenerateJwtToken(user, accessExpires, mfa);
             var refreshToken = GenerateOpaqueToken(64);
 
             var response = new TokenResponseDto
@@ -56,6 +58,10 @@ namespace MAI.Api.Services
                 ExpiresIn             = _jwt.AccessTokenMinutes * 60,
                 AccessTokenExpiresAt  = accessExpires,
                 RefreshTokenExpiresAt = refreshExpires,
+                MustChangePassword    = user.MustChangePassword,
+                MfaEnrollmentRequired = _twoFactor.RequiredForPrivilegedRoles
+                                        && user.Role >= UserRole.SefDirectie
+                                        && !mfa,
             };
 
             return new TokenIssueResult(response, HashOpaqueToken(refreshToken), refreshExpires);
@@ -90,7 +96,24 @@ namespace MAI.Api.Services
 
         // ─────────────────────────────────────────────────────────────────────
 
-        private string GenerateJwtToken(User user, DateTime expires)
+        /// <summary>
+        /// True dacă sesiunea pentru acest cont se poate deschide DOAR prin pasul 2FA.
+        ///
+        /// Aceeași condiție ca în AuthController.Login: provocarea 2FA se emite
+        /// când 2FA e activ ȘI secretul există. Înainte, claim-ul „amr” depindea
+        /// doar de TwoFactorEnabled, deci un cont cu stare incoerentă (activat, dar
+        /// fără secret) primea „mfa” fără să fi trecut prin al doilea factor.
+        /// Acum claim-ul decide accesul la endpointurile privilegiate, deci
+        /// trebuie să spună adevărul.
+        ///
+        /// La refresh condiția rămâne corectă: activarea 2FA închide toate
+        /// sesiunile, iar dezactivarea lui face ca tokenurile următoare să
+        /// primească „pwd”.
+        /// </summary>
+        private static bool CompletedSecondFactor(User user) =>
+            user.TwoFactorEnabled && !string.IsNullOrEmpty(user.TwoFactorSecret);
+
+        private string GenerateJwtToken(User user, DateTime expires, bool mfa)
         {
             var claims = new List<Claim>
             {
@@ -100,9 +123,9 @@ namespace MAI.Api.Services
                 new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
 
                 // "amr" (authentication methods references), RFC 8176. Consemnează
-                // cu ce a fost obținut tokenul. Nu schimbă nimic azi, dar face
-                // posibil mai târziu ca operațiile sensibile să ceară "mfa".
-                new("amr", user.TwoFactorEnabled ? "mfa" : "pwd"),
+                // cu ce a fost obținut tokenul. PrivilegedMfaFilter îl citește
+                // când TwoFactor:RequiredForPrivilegedRoles este activ.
+                new("amr", mfa ? "mfa" : "pwd"),
             };
 
             // Issuer și Audience sunt emise explicit pentru că sunt și validate

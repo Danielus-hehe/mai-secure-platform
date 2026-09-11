@@ -1,153 +1,122 @@
 # Migrări de bază de date
 
-Schema SGDM se administrează prin fișierele SQL din acest folder, rulate manual
-în ordine. **Nu** prin `dotnet ef database update` — vezi „Despre
-`__EFMigrationsHistory`" mai jos.
+Schema SGDM se administrează prin **migrări EF Core** din acest folder. Tabela
+`__EFMigrationsHistory` din bază e sursa de adevăr: EF aplică doar migrările
+care nu apar încă în ea.
+
+> Versiunea anterioară a acestui fișier descria scripturi SQL numerotate
+> (`000_baseline.sql` … `007_…sql`) și spunea că migrările EF nu se folosesc.
+> Scripturile nu mai există în repository, iar proiectul a trecut complet pe
+> migrări EF. Singurul SQL rămas aici este `900_seed_demo.sql`.
 
 ---
 
-## Care fișier, când
+## Cum aplici migrările
 
-| Situație | Ce rulezi |
+Din rădăcina soluției:
+
+```bash
+dotnet ef database update --project MAI.DataAccessLayer --startup-project MAI.Api
+```
+
+Pentru un mediu unde nu vrei să rulezi `dotnet ef` direct (de exemplu Supabase,
+din SQL Editor), generează un script idempotent și rulează-l acolo:
+
+```bash
+dotnet ef migrations script --idempotent \
+  --project MAI.DataAccessLayer --startup-project MAI.Api \
+  --output migrare.sql
+```
+
+Scriptul idempotent verifică `__EFMigrationsHistory` înaintea fiecărei migrări,
+deci îl poți rula pe o bază parțial actualizată fără să se repete nimic.
+
+---
+
+## Lista migrărilor
+
+| Migrare | Ce aduce |
 |---|---|
-| Bază nouă, goală (Docker, alt mediu, alt coleg) | `000_baseline.sql`, apoi `007` |
-| Baza de producție existentă (Supabase) | Doar `007` — restul sunt deja aplicate |
-| Vrei date pentru demonstrație | `900_seed_demo.sql`, la final |
-
-`001`–`006` sunt **istoric**. Arată ce s-a schimbat și în ce ordine, dar nu se
-rulează pe o bază creată din baseline. Sunt idempotente, deci n-ar strica nimic —
-doar n-ar face nimic.
-
----
-
-## Starea la data generării
-
-Verificată direct în Supabase, prin `information_schema` și `pg_indexes`.
-
-| # | Fișier | Ce aduce | Aplicată |
-|---|---|---|---|
-| 000 | `000_baseline.sql` | Schema completă, echivalentă cu 001–006 | — |
-| 001 | `001_refresh_token_columns.sql` | Refresh token cu rotație | da |
-| 002 | `002_lockout_columns.sql` | Blocare progresivă a contului | da |
-| 003 | `003_e2e_encryption.sql` | Chei E2EE + plic criptografic | da |
-| 004 | `004_transfers_storage.sql` | MinIO: `StorageKey`, indexuri | da |
-| 005 | `005_two_factor.sql` | TOTP, coduri de recuperare, provocare | da |
-| 006 | `006_audit_result.sql` | `AuditResult` ca enum + indexuri | da |
-| 007 | `007_sessions_and_revocation.sql` | `UserSessions`, retragere, dovadă de primire | **nu** |
-| 900 | `900_seed_demo.sql` | Date demonstrative | opțional |
-
-### Note despre reconstituire
-
-`001`–`005` au fost **reconstituite** din conversațiile în care au fost scrise,
-pentru că fișierele originale nu erau versionate. Corespund schemei reale, dar
-comentariile originale s-au pierdut parțial.
-
-`004` se numea inițial `003_transfers_storage.sql` și `006` se numea
-`004_audit_result.sql`. Renumerotate aici, fiindcă numerele erau deja folosite.
-Redenumirea unui fișier nu reaplică migrarea — ce e în bază rămâne în bază.
-
-`000_baseline.sql` este generat din schema reală, deci este **autoritativ**.
-Unde diferă de 001–006, baseline-ul are dreptate.
+| `20260906181449_InitialSupabase` | Schema inițială |
+| `20260906183425_MakeFieldsOptional` | `FullName` și `Department` devin opționale |
+| `20260907212431_AddRefreshToken` | Refresh token (prima variantă, pe `Users`) |
+| `20260907215548_AddRefreshTokenAndLockout` | Blocare progresivă: încercări eșuate, ultimul login |
+| `20260907223135_AddE2eeKeyColumns` | Chei E2EE + plicul criptografic al transferului |
+| `20260908181941_AddTwoFactorAuthentication` | TOTP, coduri de recuperare, provocarea 2FA |
+| `20260909155033_AddAuditResultAndIndexes` | `AuditResult` + indexurile jurnalului |
+| `20260909205811_AddUserSessionsAndTransferRevocation` | `UserSessions`, retragere, dovadă de primire |
+| `20260909210242_AddUserUniqueIndexes` | Unicitate pe `Username` și `Email` |
+| `20260910200000_AddMustChangePassword` | Parolă temporară după creare/resetare de către admin |
+| `20260910200100_CaseInsensitiveUserIndexes` | Unicitate fără diferență de majuscule; email opțional |
 
 ---
 
-## Probleme deschise, găsite la verificarea schemei
+## Înainte de `CaseInsensitiveUserIndexes`
 
-### `Users.Username` nu are unicitate și nici index
-
-Cea mai importantă. Baza de producție are pe `Users` un singur index: cheia
-primară pe `Id`.
-
-Două consecințe. Login-ul face `WHERE "Username" = ...`, deci fiecare
-autentificare scanează toată tabela. La zeci de utilizatori nu se simte; la mii,
-da. Mai grav: **nimic din baza de date nu împiedică două conturi cu același
-`Username`**. Dacă se întâmplă, `FirstOrDefaultAsync` returnează unul dintre ele
-nedeterminist, iar rezultatul e un utilizator care se autentifică uneori pe
-contul altcuiva.
-
-`000_baseline.sql` include indexul corect, dar el nu există în producție. De
-aplicat separat, după verificare:
+Migrarea creează două indexuri unice pe expresii:
 
 ```sql
--- 1. Există duplicate? Dacă întoarce rânduri, NU crea indexul —
---    rezolvă întâi duplicatele.
+UX_Users_Username_Lower  UNIQUE (lower("Username"))
+UX_Users_Email_Lower     UNIQUE (lower("Email")) WHERE "Email" <> ''
+```
+
+Dacă în bază există deja două conturi care diferă doar prin majuscule
+(`Ion.Popescu` și `ion.popescu`), crearea indexului eșuează și **migrarea nu se
+aplică deloc** (rulează într-o tranzacție). Verifică întâi:
+
+```sql
+-- Trebuie să nu întoarcă niciun rând.
 SELECT lower("Username"), count(*)
   FROM "Users" GROUP BY 1 HAVING count(*) > 1;
 
+-- Emailurile goale sunt permise de mai multe ori; doar cele completate contează.
 SELECT lower("Email"), count(*)
-  FROM "Users" GROUP BY 1 HAVING count(*) > 1;
-
--- 2. Dacă ambele sunt goale:
-CREATE UNIQUE INDEX CONCURRENTLY "UX_Users_Username" ON "Users" ("Username");
-CREATE UNIQUE INDEX CONCURRENTLY "UX_Users_Email"    ON "Users" ("Email");
+  FROM "Users" WHERE "Email" <> ''
+ GROUP BY 1 HAVING count(*) > 1;
 ```
 
-`CONCURRENTLY` nu blochează tabela, dar **nu poate rula într-o tranzacție** —
-deci se execută singur, nu în interiorul unui `BEGIN`.
+Dacă apar rânduri, redenumește sau dezactivează conturile duplicate înainte de
+`dotnet ef database update`.
 
-### `IX_Users_RefreshTokenHash` lipsește din producție
-
-Migrarea 001 îl creează, dar nu apare în `pg_indexes`. Ori nu a fost rulată
-integral, ori indexul a fost șters ulterior. Efectul: fiecare `/refresh`
-scanează tabela.
-
-Devine irelevant după `007`, care mută căutarea pe `UserSessions` — unde indexul
-unic pe hash este creat de migrare. Nu-l adăuga acum; aplică `007`.
-
-### `FileTransfers.EncryptedStoragePath` e cod mort
-
-Coloană rămasă dinainte de MinIO. Nimic din codul actual nu o scrie. Se poate
-elimina, dar abia după ce confirmi că nu mai există rânduri istorice care depind
-de ea:
-
-```sql
-SELECT count(*) FROM "FileTransfers"
- WHERE "EncryptedStoragePath" IS NOT NULL AND "StorageKey" = '';
-```
-
-### Coloanele de refresh token de pe `Users`
-
-`007` le migrează în `UserSessions`, dar **nu le șterge**. Intenționat: dacă
-apare o problemă și trebuie rollback la versiunea anterioară a API-ului, aceasta
-are nevoie de ele. Se elimină într-o migrare separată, după ce noua versiune a
-rulat stabil câteva zile.
+Indexurile pe expresii **nu apar** în `AppDbContextModelSnapshot.cs`: EF Core nu
+le poate descrie în model. E normal. `dotnet ef migrations add` nu le va propune
+spre ștergere, pentru că nu le vede.
 
 ---
 
-## Despre `__EFMigrationsHistory`
+## Reguli pentru migrările noi
 
-Tabela există în bază, creată de EF Core la un moment dat, dar este
-**nefolosită**. Schema se administrează prin fișierele de aici.
-
-Nu se pot folosi amândouă. Dacă vreodată treci pe migrări EF, tabela devine
-sursa de adevăr, iar fișierele din acest folder trebuie abandonate — altfel EF
-va încerca să aplice modificări care există deja și va eșua.
-
----
-
-## Cum rulezi
-
-**Supabase:** Dashboard → SQL Editor → New query → lipești conținutul → Run.
-
-**Postgres local sau Docker:**
-
-```bash
-psql "$CONNECTION_STRING" -f migrations/007_sessions_and_revocation.sql
-```
-
-Toate sunt idempotente (`IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`), deci o
-rulare accidentală de două ori nu strică nimic.
+- **Fiecare migrare are și fișierul `.Designer.cs`.** Fără el, EF Core nu
+  descoperă migrarea și nu o aplică niciodată, deși proiectul compilează.
+  Workflow-ul CI verifică perechile la fiecare push.
+- **Generează-le cu `dotnet ef migrations add <Nume>`**, nu de mână, ca
+  snapshot-ul să rămână sincron cu modelul.
+- **Verifică întâi ce există în bază.** Un index creat cu alt nume decât unul
+  existent pe aceleași coloane nu înlocuiește duplicatul: se plătește la fiecare
+  scriere de două ori.
+- Coloanele noi pe tabele cu date primesc o valoare implicită
+  (`defaultValue`), altfel migrarea eșuează pe rândurile existente.
 
 ---
 
-## Următoarea migrare
+## Date demonstrative
 
-Se numește `008_`. Reguli:
+`900_seed_demo.sql` creează conturi și documente pentru demonstrație. Se rulează
+**după** migrări, manual (Supabase: SQL Editor; local: `psql -f`). Nu face parte
+din migrările EF și nu trebuie rulat pe o bază cu date reale.
 
-- Idempotentă. `IF NOT EXISTS` peste tot.
-- Într-o singură tranzacție, cu excepția `CREATE INDEX CONCURRENTLY`.
-- Cu interogările de verificare în comentariu, la final.
-- **Verifică întâi ce există în bază.** Un `CREATE INDEX IF NOT EXISTS` cu alt
-  nume decât un index existent pe aceleași coloane nu prinde duplicatul și
-  creează un al doilea, plătit la fiecare scriere. S-a întâmplat deja o dată,
-  între 004 și 007.
+---
+
+## Datorie tehnică cunoscută
+
+- **Coloanele vechi de refresh token de pe `Users`** (`RefreshTokenHash`,
+  `RefreshTokenIssuedAt`, `RefreshTokenExpiresAt`) nu mai sunt citite de cod:
+  sesiunile stau în `UserSessions`. Au rămas intenționat, pentru un eventual
+  rollback. Se elimină într-o migrare separată.
+- **`FileTransfers.EncryptedStoragePath`** e rămasă dinainte de MinIO. Înainte
+  de ștergere, confirmă că nu există rânduri istorice care depind de ea:
+
+  ```sql
+  SELECT count(*) FROM "FileTransfers"
+   WHERE "EncryptedStoragePath" IS NOT NULL AND "StorageKey" = '';
+  ```

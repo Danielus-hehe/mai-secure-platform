@@ -1,21 +1,32 @@
 ﻿import api from './client';
+// ── GET /api/Stats (pagina principală) ──────────────────────────────────────
+//
+// Transferurile sunt doar ale utilizatorului curent (trimise sau primite).
+// Serverul nu mai întoarce transferurile altor conturi: numele fișierelor și
+// perechile expeditor–destinatar sunt metadate sensibile.
+
 export interface RecentTransfer {
     id: string;
     fileName: string;
     fileSize: number;
+    /** Din perspectiva utilizatorului curent. */
+    direction: 'sent' | 'received';
     senderName: string;
     recipientName: string;
-    /** "Pending" | "Downloaded" | "Expired" */
+    /** "Pending" | "Downloaded" | "Expired" | "Revoked" */
     status: string;
     createdAt: string;
 }
 
 export interface DashboardStats {
     activeUsers: number;
-    totalTransfers: number;
-    pendingTransfers: number;
     totalDocuments: number;
-    failedLoginsLast24h: number;
+    /** Transferurile trimise sau primite de utilizatorul curent. */
+    myTransfersTotal: number;
+    /** Fișierele primite, încă nedescărcate și în termen. */
+    awaitingMyDownload: number;
+    /** null pentru rolurile care nu au acces la metricile de securitate. */
+    failedLoginsLast24h: number | null;
     recentTransfers: RecentTransfer[];
 }
 

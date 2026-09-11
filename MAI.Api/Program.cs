@@ -60,7 +60,46 @@ try
         .Enrich.WithProperty("Environment", context.HostingEnvironment.EnvironmentName)
         .WriteTo.Console(new RenderedCompactJsonFormatter()));
 
-    builder.Services.AddControllers();
+    var isDevelopment = builder.Environment.IsDevelopment();
+
+    // ─── Secrete rămase pe valoarea-șablon ─────────────────────────────────────
+    // Fișierele versionate (appsettings.json, .env.example, *.example) conțin
+    // valori-șablon. Un secret rămas pe ele e public: îl știe oricine vede
+    // repository-ul.
+    //
+    // Regula e aceeași pentru toate secretele:
+    //   • în afara mediului Development → aplicația refuză să pornească;
+    //   • în Development → pornește, dar scrie un avertisment în log.
+    //
+    // Toleranța din Development e deliberată. Schimbarea pepper-ului invalidează
+    // toate parolele, iar schimbarea cheii JWT schimbă și cheia 2FA derivată din
+    // ea. Un mediu local existent nu trebuie să se strice la prima pornire după
+    // această verificare. Exact aceeași configurație în Docker (Production) nu
+    // mai pornește.
+    void EnsureNotTemplate(string setting, string? value, string howToFix)
+    {
+        if (!PlaceholderSecrets.IsPlaceholder(value)) return;
+
+        if (!isDevelopment)
+        {
+            throw new InvalidOperationException(
+                $"{setting} are încă valoarea-șablon din repository, deci este publică. {howToFix}");
+        }
+
+        Log.Warning(
+            "{Setting} are valoarea-șablon din repository. Acceptat DOAR în Development; " +
+            "în orice alt mediu aplicația refuză să pornească. {HowToFix}",
+            setting, howToFix);
+    }
+
+    builder.Services.AddControllers(options =>
+    {
+        // 2FA obligatoriu pentru operațiile privilegiate, dacă
+        // TwoFactor:RequiredForPrivilegedRoles = true. Filtrul se aplică doar
+        // endpointurilor care cer explicit un rol; restul aplicației, inclusiv
+        // înrolarea 2FA din profil, rămâne accesibil. Vezi PrivilegedMfaFilter.
+        options.Filters.Add<PrivilegedMfaFilter>();
+    });
     builder.Services.AddEndpointsApiExplorer();
 
     // ─── Swagger complet configurat ────────────────────────────────────────────
@@ -123,6 +162,15 @@ try
     if (!string.IsNullOrWhiteSpace(storageSecretKey)) storageOptions.SecretKey = storageSecretKey;
 
     storageOptions.Validate();
+
+    if (storageOptions.IsS3)
+    {
+        EnsureNotTemplate(
+            "Storage:SecretKey (MAI_STORAGE_SECRET_KEY)",
+            storageOptions.SecretKey,
+            "Setați MINIO_ROOT_PASSWORD în .env la o parolă generată (minim 8 caractere).");
+    }
+
     builder.Services.AddSingleton(storageOptions);
 
     if (storageOptions.IsS3)
@@ -130,14 +178,20 @@ try
     else
         builder.Services.AddSingleton<IFileStorage, LocalFileStorage>();
 
-    // ─── Kestrel și multipart — limita de upload ───────────────────────────────
-    // Cele două limite trebuie ținute sincron cu Storage:MaxFileSizeMb și cu
-    // atributul [RequestSizeLimit] de pe endpointul de upload. Dacă diverg,
-    // utilizatorul primește o eroare de rețea opacă în loc de un mesaj clar.
+    // ─── Kestrel și multipart — limitele corpului cererii ──────────────────────
+    // Limita GLOBALĂ e mică: toate endpointurile JSON (login, chei, 2FA,
+    // administrare) primesc câțiva kiloocteți. Înainte era ridicată global la
+    // 51 MB pentru upload, deci și /api/Auth/login, anonim, accepta 51 MB de
+    // JSON pe cerere.
+    //
+    // Doar endpointurile de upload ridică limita, prin
+    // [RequestSizeLimit(UploadLimits.MaxRequestBytes)]. Valoarea din atribut
+    // trebuie ținută sincron cu Storage:MaxFileSizeMb; verificarea exactă a
+    // dimensiunii fișierului se face oricum în controller.
 
     builder.Services.Configure<KestrelServerOptions>(options =>
     {
-        options.Limits.MaxRequestBodySize = storageOptions.MaxFileSizeBytes + 1_048_576; // +1 MB antet multipart
+        options.Limits.MaxRequestBodySize = UploadLimits.MaxJsonRequestBytes;
     });
 
     builder.Services.Configure<FormOptions>(options =>
@@ -162,6 +216,27 @@ try
         argon2Options.Pepper = null;
 
     argon2Options.Validate();
+
+    // Fără pepper, o copie a bazei de date ajunge ca să se încerce parole offline.
+    // Validarea de mai sus nu îl cerea: aplicația pornea și hash-uia fără el, deși
+    // documentația spunea că pepper-ul lipsă oprește pornirea.
+    if (string.IsNullOrWhiteSpace(argon2Options.Pepper))
+    {
+        if (!isDevelopment)
+        {
+            throw new InvalidOperationException(
+                "MAI_ARGON2_PEPPER lipsește. Generați: openssl rand -base64 32. " +
+                "Setați-l ÎNAINTE de crearea conturilor: schimbarea ulterioară a " +
+                "pepper-ului invalidează toate parolele existente.");
+        }
+
+        Log.Warning("Argon2: pepper-ul lipsește. Acceptat DOAR în Development.");
+    }
+
+    EnsureNotTemplate(
+        "Argon2:Pepper (MAI_ARGON2_PEPPER)",
+        argon2Options.Pepper,
+        "Generați: openssl rand -base64 32. Atenție: schimbarea pepper-ului invalidează parolele existente.");
 
     // Acceptarea parolelor în clar are sens doar cât timp mai există conturi
     // nemigrate, adică în dezvoltare. În producție, lăsată pe true, transformă o
@@ -205,6 +280,11 @@ try
             throw new InvalidOperationException(
                 "MAI_TWOFACTOR_KEY lipsește. Generați: openssl rand -base64 32");
     }
+
+    EnsureNotTemplate(
+        "TwoFactor:EncryptionKey (MAI_TWOFACTOR_KEY)",
+        twoFactorOptions.EncryptionKey,
+        "Generați: openssl rand -base64 32.");
 
     twoFactorOptions.Validate();
 
@@ -255,7 +335,12 @@ try
     // Oprește pornirea dacă tokenurile ar fi falsificabile sau dacă issuer/audience
     // lipsesc — un server care rulează cu o cheie slabă e mai rău decât unul care
     // nu pornește, fiindcă primul pare că funcționează.
-    jwtOptions.Validate();
+    EnsureNotTemplate(
+        "Jwt:Key (MAI_JWT_KEY)",
+        jwtOptions.Key,
+        "Generați: openssl rand -base64 48.");
+
+    jwtOptions.Validate(allowTemplateKey: isDevelopment);
 
     builder.Services.AddSingleton(jwtOptions);
 
@@ -329,8 +414,26 @@ try
     });
 
     // ─── Database ──────────────────────────────────────────────────────────────
+    var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+
+    // „YOUR_DATABASE_CONNECTION_STRING_HERE” nu poate funcționa în niciun mediu.
+    // Fără verificarea asta, eroarea apărea abia la prima interogare, ca un
+    // mesaj Npgsql despre formatul șirului, fără legătură vizibilă cu cauza.
+    if (string.IsNullOrWhiteSpace(connectionString) ||
+        connectionString.StartsWith("YOUR_", StringComparison.Ordinal))
+    {
+        throw new InvalidOperationException(
+            "ConnectionStrings:DefaultConnection lipsește. Setați-l în " +
+            "appsettings.Development.json sau prin ConnectionStrings__DefaultConnection.");
+    }
+
+    EnsureNotTemplate(
+        "ConnectionStrings:DefaultConnection",
+        connectionString,
+        "Parola bazei de date e încă „SCHIMBA_MA”. Setați DB_CONNECTION_STRING în .env.");
+
     builder.Services.AddDbContext<AppDbContext>(options =>
-        options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+        options.UseNpgsql(connectionString));
 
     // ─── Job de expirare a transferurilor ──────────────────────────────────────
     // Fără el, "Expirat" era doar o etichetă calculată la afișare: coloana Status
@@ -387,10 +490,10 @@ try
         jwtOptions.Issuer, jwtOptions.Audience, jwtOptions.AccessTokenMinutes, jwtOptions.RefreshTokenDays);
 
     app.Logger.LogInformation(
-        "Restrictie intranet: {State}{Mode}. 2FA optional: disponibil, cerut pentru roluri privilegiate = {Required}",
+        "Restrictie intranet: {State}{Mode}. 2FA obligatoriu pe endpointurile privilegiate: {Required}",
         intranetOptions.Enabled ? "activata" : "dezactivata",
         intranetOptions.Enabled && intranetOptions.AuditOnly ? " (doar audit)" : string.Empty,
-        twoFactorOptions.RequiredForPrivilegedRoles);
+        twoFactorOptions.RequiredForPrivilegedRoles ? "DA" : "nu");
 
     if (app.Environment.IsDevelopment())
     {

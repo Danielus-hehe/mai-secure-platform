@@ -116,6 +116,22 @@ namespace MAI.Api.Controllers
             var user = await _context.Users.FindAsync(new object?[] { CurrentUserId }, ct);
             if (user is null) return NotFound();
 
+            // Parola curentă a fost aleasă de un administrator (cont nou sau
+            // resetare). Cheile private se încuie cu o cheie derivată din ea, deci
+            // administratorul le-ar putea descuia din baza de date oricând, fără
+            // urmă. Verificarea se face aici, pe server, nu doar în interfață: un
+            // client care ocolește ecranul de schimbare a parolei tot nu poate
+            // înregistra chei.
+            if (user.MustChangePassword)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new
+                {
+                    code    = "PASSWORD_CHANGE_REQUIRED",
+                    message = "Parola contului a fost stabilită de administrator. Schimbați-o " +
+                              "înainte de a genera cheile de criptare.",
+                });
+            }
+
             // Republicarea ar invalida toate fișierele primite anterior: cheile lor
             // sunt împachetate cu vechea cheie publică și nu s-ar mai putea deschide.
             if (!string.IsNullOrEmpty(user.PublicKeyEncryption))

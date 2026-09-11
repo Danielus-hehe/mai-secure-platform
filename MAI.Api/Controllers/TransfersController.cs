@@ -1,3 +1,4 @@
+using MAI.Api.Security;
 using MAI.BusinessLogic.Dtos;
 using MAI.BusinessLogic.Interfaces;
 using MAI.BusinessLogic.Storage;
@@ -190,7 +191,7 @@ namespace MAI.Api.Controllers
         /// </summary>
         [HttpPost]
         [Consumes("multipart/form-data")]
-        [RequestSizeLimit(52_428_800)]  // 50 MB; trebuie ținut sincron cu Storage:MaxFileSizeMb
+        [RequestSizeLimit(UploadLimits.MaxRequestBytes)]  // 50 MB + antet multipart; vezi UploadLimits
         public async Task<IActionResult> Upload(
             [FromForm] UploadTransferRequest request,
             CancellationToken ct)
@@ -509,11 +510,27 @@ namespace MAI.Api.Controllers
         /// Apelat de client DUPĂ ce decriptarea și verificarea semnăturii au reușit.
         /// Momentul contează: dacă statusul s-ar seta la emiterea URL-ului, un
         /// transfer eșuat ar apărea în jurnal ca preluat cu succes.
+        ///
+        /// Trei reguli fac din confirmare o dovadă, nu doar un contor:
+        ///   • Rezultatul semnăturii e obligatoriu. O cerere fără el nu mai e
+        ///     înregistrată implicit ca „semnătură validă”.
+        ///   • Prima confirmare rămâne. O descărcare repetată primește 200, dar nu
+        ///     rescrie rezultatul și nu adaugă alt rând în audit: altfel un
+        ///     „INVALIDĂ” consemnat putea fi înlocuit ulterior cu „VALIDĂ”.
+        ///   • Transferurile retrase sau expirate nu se mai confirmă.
         /// </summary>
         [HttpPatch("{id:guid}/confirm")]
         public async Task<IActionResult> Confirm(
             Guid id, [FromBody] ConfirmTransferDto? dto, CancellationToken ct)
         {
+            if (dto?.SignatureValid is not bool signatureValid)
+            {
+                return BadRequest(new
+                {
+                    message = "Rezultatul verificării semnăturii (signatureValid) este obligatoriu.",
+                });
+            }
+
             var userId   = CurrentUserId;
             var transfer = await _context.FileTransfers
                 .FirstOrDefaultAsync(t => t.Id == id, ct);
@@ -521,19 +538,45 @@ namespace MAI.Api.Controllers
             if (transfer is null) return NotFound(new { message = "Transferul nu a fost găsit." });
             if (transfer.RecipientId != userId) return Forbid();
 
-            var signatureValid = dto?.SignatureValid ?? true;
-
-            if (transfer.Status == TransferStatus.Pending)
+            if (transfer.Status == TransferStatus.Downloaded)
             {
-                transfer.Status       = TransferStatus.Downloaded;
-                transfer.DownloadedAt = DateTime.UtcNow;
+                return Ok(new
+                {
+                    message          = "Primirea era deja confirmată.",
+                    alreadyConfirmed = true,
+                    downloadedAt     = transfer.DownloadedAt,
+                    signatureValid   = transfer.RecipientSignatureValid,
+                });
             }
 
-            // Rezultatul verificarii se persista, ca expeditorul sa poata vedea
-            // nu doar CA fisierul a fost primit, ci si daca semnatura lui s-a
-            // verificat pe calculatorul destinatarului. Ramane o afirmatie a
-            // clientului: serverul nu poate verifica singur semnatura, pentru ca
-            // prin constructie nu are textul in clar.
+            if (transfer.Status == TransferStatus.Revoked)
+            {
+                return StatusCode(StatusCodes.Status410Gone, new
+                {
+                    message = "Transferul a fost retras de expeditor. Primirea nu se mai înregistrează.",
+                });
+            }
+
+            // Doar statusul Expired, pus de job, oprește confirmarea. Un transfer
+            // încă Pending, dar trecut de ExpiresAt, se confirmă: plicul s-a putut
+            // obține doar înainte de termen (GetEnvelope refuză după), deci
+            // descărcarea a început la timp și primirea e reală.
+            if (transfer.Status != TransferStatus.Pending)
+            {
+                return StatusCode(StatusCodes.Status410Gone, new
+                {
+                    message = "Transferul a expirat. Primirea nu se mai înregistrează.",
+                });
+            }
+
+            transfer.Status                  = TransferStatus.Downloaded;
+            transfer.DownloadedAt            = DateTime.UtcNow;
+
+            // Rezultatul verificării se păstrează, ca expeditorul să vadă nu doar CĂ
+            // fișierul a fost primit, ci și dacă semnătura lui s-a verificat pe
+            // calculatorul destinatarului. Rămâne o afirmație a clientului:
+            // serverul nu poate verifica singur semnătura, pentru că prin
+            // construcție nu are textul în clar.
             transfer.RecipientSignatureValid = signatureValid;
 
             _context.AuditLogs.Add(new AuditLog
@@ -544,9 +587,9 @@ namespace MAI.Api.Controllers
                 Details   = signatureValid
                     ? $"Fisier descarcat si decriptat '{transfer.FileName}', semnatura expeditorului VALIDA"
                     : $"Fisier descarcat '{transfer.FileName}', semnatura expeditorului INVALIDA",
-                // O semnatura invalida nu e o eroare de sistem — descarcarea a
-                // reusit — dar e exact genul de rand pe care un supervizor
-                // trebuie sa il gaseasca filtrand, nu citind toate detaliile.
+                // O semnătură invalidă nu e o eroare de sistem — descărcarea a
+                // reușit — dar e exact genul de rând pe care un supervizor
+                // trebuie să îl găsească filtrând, nu citind toate detaliile.
                 Result    = signatureValid ? AuditResult.Success : AuditResult.Warning,
                 IpAddress = CallerIp,
                 Timestamp = DateTime.UtcNow,
@@ -554,7 +597,7 @@ namespace MAI.Api.Controllers
 
             await _context.SaveChangesAsync(ct);
 
-            return Ok(new { message = "Transfer confirmat." });
+            return Ok(new { message = "Transfer confirmat.", alreadyConfirmed = false });
         }
 
         // ═════════════════════════════════════════════════════════════════════
@@ -861,8 +904,11 @@ namespace MAI.Api.Controllers
         /// serverul nu poate verifica el însuși, dar poate consemna ce a raportat
         /// clientul, iar o valoare falsă în jurnal este exact genul de eveniment
         /// pe care un ofițer de securitate trebuie să-l vadă.
+        ///
+        /// Nullable și fără valoare implicită: un câmp lipsă e o cerere invalidă
+        /// (400), nu o semnătură presupus validă.
         /// </summary>
-        public bool SignatureValid { get; set; } = true;
+        public bool? SignatureValid { get; set; }
     }
 
     /// <summary>Corpul cererii POST /api/Transfers/{id}/revoke.</summary>
