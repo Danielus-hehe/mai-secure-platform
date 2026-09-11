@@ -51,6 +51,16 @@ interface Doc {
     versions:       DocVersion[];
 }
 
+/**
+ * SHA-256 al unui fișier, în hexazecimal cu litere mici. Null dacă browserul nu
+ * oferă WebCrypto (pagină deschisă pe HTTP, în afara lui localhost).
+ */
+async function sha256Hex(blob: Blob): Promise<string | null> {
+    if (!globalThis.crypto?.subtle) return null;
+    const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+    return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
+}
+
 export default function DocumentsPage() {
     const { hasRole } = useAuth();
     const toast = useToast();
@@ -152,18 +162,47 @@ export default function DocumentsPage() {
         }
     };
 
-    // ── Descărcare versiune curentă ──────────────────────────────────────
+    // ── Descărcare versiune curentă, cu verificarea integrității ─────────
+    //
+    // La publicare, serverul calculează SHA-256 al fișierului și îl trece în
+    // registru. La descărcare, browserul recalculează amprenta și o compară. Un
+    // document modificat direct în depozit (MinIO) sau pe drum nu mai ajunge pe
+    // disc ca și cum ar fi autentic: e oprit aici, cu un avertisment.
     const handleDownload = async (doc: Doc) => {
+        const current = doc.versions?.find(v => v.version === doc.currentVersion);
+        const expected = current?.sha256?.trim().toLowerCase() || null;
+
         try {
             const { data: blob } = await api.get<Blob>(`/Documents/${doc.id}/download`, {
                 responseType: 'blob',
                 timeout: 300_000,
             });
+
+            const actual = expected ? await sha256Hex(blob) : null;
+
+            if (expected && actual && actual !== expected) {
+                toast.error(
+                    'Fișierul descărcat NU corespunde amprentei SHA-256 din registru și nu a fost salvat. ' +
+                    'Documentul poate fi alterat. Anunțați administratorul.'
+                );
+                return;
+            }
+
             const url = URL.createObjectURL(blob);
             const a    = document.createElement('a');
-            a.href = url; a.download = doc.title;
+            a.href = url;
+            a.download = current?.fileName || doc.title;
             a.click();
-            URL.revokeObjectURL(url);
+            // Revocarea imediată poate anula descărcarea în unele browsere.
+            window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+            if (expected && actual) {
+                toast.success('Integritate verificată: amprenta SHA-256 corespunde registrului.');
+            } else if (expected) {
+                toast.warning('Descărcat, dar amprenta nu a putut fi verificată: browserul nu oferă WebCrypto pe această adresă.');
+            } else {
+                toast.warning('Descărcat. Această versiune nu are amprentă SHA-256 în registru, deci nu a putut fi verificată.');
+            }
         } catch {
             toast.error('Fișierul nu a putut fi descărcat.');
         }

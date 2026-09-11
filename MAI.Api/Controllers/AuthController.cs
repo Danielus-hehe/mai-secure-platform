@@ -324,6 +324,7 @@ namespace MAI.Api.Controllers
 
             var usedRecoveryCode = false;
             var accepted         = false;
+            var replayed         = false;
 
             // Codul TOTP are exact Digits cifre. Orice altceva e tratat ca posibil
             // cod de recuperare — nu-l trimitem degeaba prin HMAC.
@@ -334,7 +335,15 @@ namespace MAI.Api.Controllers
                 try
                 {
                     var secret = _protector.Unprotect(user.TwoFactorSecret!);
-                    accepted = _totp.VerifyCode(secret, dto.Code);
+
+                    // Un cod TOTP se acceptă o singură dată (RFC 6238, 5.2). Fără
+                    // regula asta, un cod văzut pe ecranul altcuiva sau interceptat
+                    // mergea refolosit cât timp era valid, adică ~90 de secunde.
+                    var totp = _totp.Verify(secret, dto.Code, user.TwoFactorLastUsedStep);
+                    accepted = totp.IsAccepted;
+                    replayed = totp.Status == TotpVerificationStatus.Replayed;
+
+                    if (accepted) user.TwoFactorLastUsedStep = totp.Step;
                 }
                 catch (CryptographicException ex)
                 {
@@ -367,20 +376,47 @@ namespace MAI.Api.Controllers
 
                 var remaining = _twoFactor.MaxChallengeAttempts - user.TwoFactorChallengeAttempts;
 
+                // Codurile greșite intră și în contorul de blocare al contului. Altfel,
+                // cine știa parola putea încerca coduri la nesfârșit: câte cinci pe
+                // provocare, cu provocări noi cerute de pe alte adrese IP.
+                var lockout = _lockout.RegisterFailedAttempt(user);
+
+                if (lockout.LockedOut)
+                {
+                    _tokens.ClearChallenge(user);
+                    _logger.LogWarning(
+                        "Cont blocat dupa coduri 2FA gresite: {Username}, IP={Ip}, {Minutes} minute",
+                        user.Username, Ip, lockout.LockoutMinutes);
+                }
+
                 AddAudit(user.Id, user.Username, AuditAction.Login,
-                    $"Cod 2FA incorect ({user.TwoFactorChallengeAttempts}/{_twoFactor.MaxChallengeAttempts})",
-                    AuditResult.Failure);
+                    (replayed
+                        ? "Cod 2FA deja folosit, respins (posibila reluare a unui cod interceptat)"
+                        : $"Cod 2FA incorect ({user.TwoFactorChallengeAttempts}/{_twoFactor.MaxChallengeAttempts})") +
+                    (lockout.LockedOut ? $", cont blocat {lockout.LockoutMinutes:0} minute" : string.Empty),
+                    // O reluare nu e o simplă greșeală de tastare: cineva a avut
+                    // un cod valid. E rândul pe care un supervizor trebuie să-l vadă.
+                    replayed ? AuditResult.Warning : AuditResult.Failure);
 
                 await _context.SaveChangesAsync(ct);
 
+                if (lockout.LockedOut)
+                    return Unauthorized(new { message = genericError, attemptsRemaining = 0 });
+
                 return Unauthorized(new
                 {
-                    message = remaining > 0
-                        ? $"Cod incorect. Mai aveți {remaining} încercări."
-                        : genericError,
+                    message = replayed
+                        ? "Codul a fost deja folosit. Așteptați următorul cod din aplicația de autentificare."
+                        : remaining > 0
+                            ? $"Cod incorect. Mai aveți {remaining} încercări."
+                            : genericError,
                     attemptsRemaining = Math.Max(remaining, 0),
                 });
             }
+
+            // Pasul 2FA a reușit: contorul de eșecuri, crescut eventual de coduri
+            // greșite în această provocare, se resetează ca la o parolă corectă.
+            _lockout.ResetCounters(user);
 
             // Provocarea se consumă indiferent de ce urmează: un token de unică
             // folosință care rămâne valid după utilizare nu mai e de unică folosință.
@@ -460,11 +496,17 @@ namespace MAI.Api.Controllers
 
             var user = session.User;
 
-            if (!user.IsActive || user.IsLockedOut)
+            // Doar dezactivarea închide sesiunea aici, nu și blocarea. Blocarea
+            // apără login-ul de ghicirea parolei, iar oricine știe un username o
+            // poate declanșa cu cinci parole greșite. Dacă ar închide și
+            // sesiunile, oricine ar putea deconecta pe oricine, oricând. Titularul
+            // sesiunii și-a dovedit deja identitatea; o sesiune suspectă se închide
+            // explicit, din lista de sesiuni sau prin dezactivarea contului.
+            if (!user.IsActive)
             {
-                _sessions.Revoke(session, "cont dezactivat sau blocat");
+                _sessions.Revoke(session, "cont dezactivat");
                 await WriteAuditAsync(user.Id, user.Username, AuditAction.Login,
-                    "Refresh pe cont dezactivat sau blocat", AuditResult.Failure);
+                    "Refresh pe cont dezactivat", AuditResult.Failure);
                 return Unauthorized(new { message = genericError });
             }
 

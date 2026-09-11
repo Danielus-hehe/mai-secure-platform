@@ -148,7 +148,9 @@ export function KeysProvider({ children }: { children: ReactNode }) {
         // Câteva secunde de calcul: RSA-3072 caută numere prime mari.
         const bundle = await generateKeyBundle(password);
 
-        await api.post('/Keys', bundle);
+        // Serverul verifică din nou parola înainte de înregistrare: un token de
+        // acces furat nu ajunge ca să planteze chei pe un cont care nu are încă.
+        await api.post('/Keys', { ...bundle, currentPassword: password });
 
         const unlocked = await unlockKeys(password, bundle);
         const publicKey = await importEncryptionPublicKey(bundle.publicKeyEncryption);

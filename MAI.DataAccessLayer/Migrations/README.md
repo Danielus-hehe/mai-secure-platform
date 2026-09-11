@@ -48,6 +48,7 @@ deci îl poți rula pe o bază parțial actualizată fără să se repete nimic.
 | `20260909210242_AddUserUniqueIndexes` | Unicitate pe `Username` și `Email` |
 | `20260910200000_AddMustChangePassword` | Parolă temporară după creare/resetare de către admin |
 | `20260910200100_CaseInsensitiveUserIndexes` | Unicitate fără diferență de majuscule; email opțional |
+| `20260911090000_AddTotpReplayProtection` | Un cod TOTP nu mai poate fi folosit de două ori |
 
 ---
 

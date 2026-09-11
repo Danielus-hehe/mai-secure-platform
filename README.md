@@ -44,6 +44,7 @@ deschis în [secțiunea 6](#6-ce-nu-protejează-sistemul).
 | Integritate | Tag-ul de autentificare GCM (128 biți) | Browserul destinatarului; decriptarea eșuează, nu produce gunoi |
 | Autenticitatea expeditorului | Semnătură RSA-PSS-3072 peste SHA-256 al conținutului în clar | Browserul destinatarului, cu cheia publică de semnare a expeditorului |
 | Integritatea încărcării | SHA-256 al cifrotextului, declarat de client și recalculat pe server | Serverul, înainte de a scrie în MinIO |
+| Integritatea documentelor normative | SHA-256 calculat la publicare și trecut în registru | Browserul, la descărcare; un fișier care nu corespunde nu se salvează |
 | Trasabilitate | Jurnal de audit în baza de date, cu rezultat Success / Warning / Failure | Administratorul și șeful de direcție |
 
 **Unde să vă uitați în cod, în ordinea asta:**
@@ -137,7 +138,7 @@ sequenceDiagram
     B->>S: POST /Keys/verify-password
     S-->>B: valid = true
     Note over B: generează RSA-OAEP-3072 + RSA-PSS-3072<br/>KEK = PBKDF2(parolă, salt, 600k)<br/>blob = AES-GCM(KEK, cheile private)
-    B->>S: POST /Keys (cheile publice, blob, salt, iv)
+    B->>S: POST /Keys (parola, cheile publice, blob, salt, iv)
     Note over S: Stochează cheile publice în clar<br/>și blobul opac. Nu îl poate descuia.
     Note over B: Cheile private sunt reimportate NON-EXTRACTABLE<br/>și țin doar cât tabul e deschis.
 ```
@@ -228,7 +229,7 @@ key escrow, rezultatul ar fi pierderea definitivă a tuturor fișierelor primite
 | Politica de parole | Lungime, clase de caractere, fără username în parolă | Minim 12 caractere |
 | Blocare cont | Progresivă, exponențială | 5 eșecuri → 5 min, dublat până la 8 h |
 | Rate limiting per IP | Ferestre fixe, per categorie de endpoint | Login 10 / 5 min · Refresh 30 / min · Operații cu parola 5 / 15 min |
-| 2FA | TOTP (RFC 6238), opțional per utilizator, 10 coduri de recuperare de unică folosință | Secret cifrat AES-GCM cu cheie separată |
+| 2FA | TOTP (RFC 6238), opțional per utilizator, 10 coduri de recuperare de unică folosință. Un cod acceptat nu mai trece a doua oară, iar codurile greșite intră în blocarea contului | Secret cifrat AES-GCM cu cheie separată; ultimul interval folosit în `Users.TwoFactorLastUsedStep` |
 | 2FA pentru roluri privilegiate | `TwoFactor:RequiredForPrivilegedRoles`: endpointurile care cer un rol acceptă doar tokenuri cu `amr = mfa` (`PrivilegedMfaFilter`) | Dezactivat implicit; se activează din configurare |
 | Parolă temporară | Conturile create sau resetate de administrator își aleg o parolă proprie la prima autentificare; până atunci serverul refuză înregistrarea cheilor E2EE | `Users.MustChangePassword` |
 | Unicitatea conturilor | Username și email unice fără diferență de majuscule; username doar din litere latine, cifre, `.` `_` `-` | Indexuri unice pe `lower(...)`; email opțional |
@@ -243,6 +244,11 @@ Operațiile care închid **toate** sesiunile unui cont: schimbarea parolei,
 resetarea parolei sau a 2FA de către administrator, activarea 2FA, schimbarea
 rolului, dezactivarea contului. Utilizatorul poate închide oricând o sesiune
 anume sau pe toate celelalte, din profil.
+
+Blocarea contului după încercări eșuate **nu** închide sesiunile existente: ea
+oprește doar autentificările noi. Oricine știe un username poate declanșa
+blocarea cu cinci parole greșite; dacă ar închide și sesiunile, oricine ar putea
+deconecta pe oricine.
 
 ---
 
@@ -291,6 +297,15 @@ uitat pe desktop e mai rău decât un blob criptat în bază.
 **Costul:** securitatea cheilor private se reduce la tăria parolei plus
 PBKDF2 cu 600.000 de iterații (pragul OWASP 2023). Politica de minim 12
 caractere nu e decorativă. Limita principală e discutată în 6.1.
+
+O consecință mai puțin evidentă: cine obține blobul — dintr-o copie a bazei de
+date sau printr-un token de acces furat, cu `GET /Keys/me` — poate încerca parole
+**offline**, la viteza PBKDF2 și **fără pepper-ul** care protejează hash-urile
+Argon2id. Pentru un atacator care vrea parola, blobul e o țintă mai ieftină decât
+hash-ul. Lungimea minimă a parolei și numărul de iterații fac atacul costisitor,
+nu imposibil. O evoluție posibilă: un secret per utilizator, ținut de server și
+livrat doar la autentificare, amestecat în derivarea cheii de împachetare. O copie
+a bazei singură n-ar mai ajunge.
 
 ### D5. Tokenul de acces în antetul `Authorization`, nu în cookie
 
@@ -500,6 +515,7 @@ la fiecare push:
 | `JwtOptionsTemplateKeyTests` | Cheia-șablon din `.env.example` e refuzată în afara Development |
 | `PlaceholderSecretsTests` | Valorile-șablon sunt recunoscute, secretele reale nu sunt confundate cu ele |
 | `PrivilegedMfaFilterTests` | 2FA obligatoriu doar pe endpointurile cu rol, doar când opțiunea e activă |
+| `TotpReplayTests` | Un cod TOTP acceptat nu mai trece a doua oară, nici unul mai vechi decât el |
 | `AuthorizationPolicyTests` | Fiecare endpoint are o decizie explicită de autorizare, iar cele administrative cer rolul corect |
 
 **Loguri:** Serilog, o linie JSON per eveniment. Refuzurile 401, 403 și 429 apar

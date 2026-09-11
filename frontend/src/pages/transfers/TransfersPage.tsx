@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader';
 import { apiErrorMessage } from '../../api/errors';
+import KeyFingerprint from '../../components/security/KeyFingerprint';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import Modal from '../../components/ui/Modal';
@@ -388,7 +389,7 @@ export default function TransfersPage() {
                     <ShieldCheck size={15} className="shrink-0 text-mai-600 dark:text-mai-400" />
                     <p className="text-xs text-mai-500 dark:text-mai-400">
                         Amprenta cheii dumneavoastră publice:{' '}
-                        <span className="font-mono font-semibold text-mai-700 dark:text-mai-200">{fingerprint}</span>
+                        <KeyFingerprint value={fingerprint} />
                         {' '}— comparați-o cu colegii pe alt canal pentru a exclude substituirea cheilor.
                     </p>
                 </div>

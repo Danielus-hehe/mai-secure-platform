@@ -364,6 +364,11 @@ namespace MAI.Api.Controllers
             var last24h  = now.AddHours(-24);
             var next24h  = now.AddHours(24);
 
+            // Sonda depozitului pornește prima și rulează în paralel cu interogările.
+            // Nu folosește DbContext, deci nu concurează cu ele. Rezultatul se
+            // așteaptă abia la final, iar sonda are oricum o limită de 3 secunde.
+            var storageProbe = ProbeStorageAsync(ct);
+
             // ── Utilizatori ──────────────────────────────────────────────────
             var totalUsers   = await _context.Users.CountAsync(ct);
             var activeUsers  = await _context.Users.CountAsync(u => u.IsActive, ct);
@@ -512,7 +517,7 @@ namespace MAI.Api.Controllers
 
             // ── Starea modulelor ─────────────────────────────────────────────
             var (dbOnline, dbLatencyMs)           = await ProbeDatabaseAsync(ct);
-            var (storageOnline, storageLatencyMs) = await ProbeStorageAsync(ct);
+            var (storageOnline, storageLatencyMs) = await storageProbe;
 
             return Ok(new
             {
@@ -649,37 +654,62 @@ namespace MAI.Api.Controllers
         /// Latenta reala a bazei de date, masurata pe o interogare triviala.
         /// Inlocuieste "24ms" scris in JSX.
         /// </summary>
+        /// <summary>
+        /// Durata maximă a unei sonde; aceeași valoare ca în HealthController.
+        ///
+        /// Fără limită, o sondă către un depozit oprit sau inaccesibil aștepta cât
+        /// îi permiteau reîncercările clientului S3 — pe Windows, zeci de secunde.
+        /// Tot răspunsul /api/Stats/admin aștepta după ea, iar browserul renunța
+        /// după 30 de secunde cu „Serverul nu răspunde”, deși API-ul funcționa.
+        /// Acum pagina se încarcă, iar modulul afectat apare ca indisponibil.
+        /// </summary>
+        private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(3);
+
         private async Task<(bool Online, int LatencyMs)> ProbeDatabaseAsync(CancellationToken ct)
         {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(ProbeTimeout);
+
             var sw = Stopwatch.StartNew();
             try
             {
-                var canConnect = await _context.Database.CanConnectAsync(ct);
+                var canConnect = await _context.Database.CanConnectAsync(cts.Token);
                 sw.Stop();
                 return (canConnect, (int)sw.ElapsedMilliseconds);
             }
             catch (Exception ex)
             {
                 sw.Stop();
-                _logger.LogWarning(ex, "Sonda catre baza de date a esuat.");
+                if (!ct.IsCancellationRequested)
+                    _logger.LogWarning(ex, "Sonda catre baza de date a esuat sau a depasit {Seconds} s.",
+                        ProbeTimeout.TotalSeconds);
                 return (false, (int)sw.ElapsedMilliseconds);
             }
         }
         
+        /// <summary>
+        /// Nu aruncă niciodată: rulează în paralel cu interogările, iar o excepție
+        /// neobservată nu trebuie să transforme o sondă eșuată într-un răspuns 500.
+        /// </summary>
         private async Task<(bool Online, int LatencyMs)> ProbeStorageAsync(CancellationToken ct)
         {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(ProbeTimeout);
+
             var sw = Stopwatch.StartNew();
             try
             {
                 await _storage.ExistsAsync(
-                    $"{_storageOptions.TransfersPrefix}/.healthcheck-{Guid.NewGuid():N}", ct);
+                    $"{_storageOptions.TransfersPrefix}/.healthcheck-{Guid.NewGuid():N}", cts.Token);
                 sw.Stop();
                 return (true, (int)sw.ElapsedMilliseconds);
             }
             catch (Exception ex)
             {
                 sw.Stop();
-                _logger.LogWarning(ex, "Sonda catre depozitul de fisiere a esuat.");
+                if (!ct.IsCancellationRequested)
+                    _logger.LogWarning(ex, "Sonda catre depozitul de fisiere a esuat sau a depasit {Seconds} s.",
+                        ProbeTimeout.TotalSeconds);
                 return (false, (int)sw.ElapsedMilliseconds);
             }
         }

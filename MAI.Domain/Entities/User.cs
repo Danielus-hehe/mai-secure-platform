@@ -61,6 +61,13 @@ namespace MAI.Domain.Entities
         /// </summary>
         public bool MustChangePassword { get; set; }
 
+        /// <summary>
+        /// Intervalul TOTP (Unix time / 30 s) al ultimului cod acceptat. Un cod
+        /// dintr-un interval egal sau mai vechi e respins: același cod nu poate
+        /// fi folosit de două ori (RFC 6238, 5.2). Null până la primul cod.
+        /// </summary>
+        public long? TwoFactorLastUsedStep { get; set; }
+
         // ── Chei criptografice pentru transferuri E2E ────────────────────────
         // Cheile publice sunt publice prin definiție. Cheile private ajung aici
         // DOAR criptate cu o cheie derivată din parola utilizatorului, în browser.

@@ -111,6 +111,7 @@ namespace MAI.Api.Controllers
         // POST api/Keys — înregistrează pachetul de chei (o singură dată)
         // ─────────────────────────────────────────────────────────────────────
         [HttpPost]
+        [EnableRateLimiting(RateLimitPolicies.PasswordWrite)]
         public async Task<IActionResult> PublishBundle([FromBody] PublishKeysDto dto, CancellationToken ct)
         {
             var user = await _context.Users.FindAsync(new object?[] { CurrentUserId }, ct);
@@ -130,6 +131,43 @@ namespace MAI.Api.Controllers
                     message = "Parola contului a fost stabilită de administrator. Schimbați-o " +
                               "înainte de a genera cheile de criptare.",
                 });
+            }
+
+            // Înregistrarea cheilor stabilește identitatea criptografică a contului:
+            // tot ce primește ulterior utilizatorul va fi criptat pentru ele. Un
+            // token de acces furat (de exemplu prin XSS) nu trebuie să ajungă
+            // pentru asta, pe un cont încă fără chei. Ca la reîmpachetare, se cere
+            // parola.
+            if (string.IsNullOrEmpty(dto.CurrentPassword))
+                return BadRequest(new { message = "Parola contului este obligatorie pentru înregistrarea cheilor." });
+
+            try
+            {
+                var verification = await _passwordHasher.VerifyPasswordAsync(
+                    dto.CurrentPassword, user.PasswordHash, ct);
+
+                if (verification == PasswordVerificationResult.Failed)
+                {
+                    _context.AuditLogs.Add(new AuditLog
+                    {
+                        UserId    = user.Id,
+                        Username  = CurrentUsername,
+                        Action    = AuditAction.UserUpdated,
+                        Details   = "Inregistrare chei refuzata: parola incorecta",
+                        Result    = AuditResult.Failure,
+                        IpAddress = CallerIp,
+                        Timestamp = DateTime.UtcNow,
+                    });
+                    await _context.SaveChangesAsync(ct);
+
+                    return BadRequest(new { message = "Parola nu este corectă. Cheile nu au fost înregistrate." });
+                }
+            }
+            catch (HashingCapacityExceededException ex)
+            {
+                Response.Headers.RetryAfter = "5";
+                return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                    new { message = ex.Message, retryAfter = 5 });
             }
 
             // Republicarea ar invalida toate fișierele primite anterior: cheile lor
@@ -404,6 +442,12 @@ namespace MAI.Api.Controllers
 
     public class PublishKeysDto
     {
+        /// <summary>
+        /// Parola contului, verificată pe server înainte de înregistrare. Nu se
+        /// stochează și nu se jurnalizează.
+        /// </summary>
+        public string CurrentPassword { get; set; } = string.Empty;
+
         public string PublicKeyEncryption { get; set; } = string.Empty;
         public string PublicKeySigning { get; set; } = string.Empty;
         public string EncryptedPrivateBundle { get; set; } = string.Empty;

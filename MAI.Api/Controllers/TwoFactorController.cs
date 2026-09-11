@@ -184,7 +184,11 @@ namespace MAI.Api.Controllers
                 return StatusCode(500, new { message = "Înrolarea a eșuat. Reluați configurarea." });
             }
 
-            if (!_totp.VerifyCode(pendingSecret, dto.Code))
+            // Codul de activare devine primul cod folosit: nu mai poate fi refolosit
+            // imediat la autentificarea care urmează.
+            var enrollment = _totp.Verify(pendingSecret, dto.Code, lastUsedStep: null);
+
+            if (!enrollment.IsAccepted)
             {
                 await AuditAsync(user, "Cod incorect la activarea 2FA", ct, AuditResult.Failure);
                 return BadRequest(new
@@ -198,6 +202,7 @@ namespace MAI.Api.Controllers
             user.TwoFactorSecret             = user.TwoFactorPendingSecret;
             user.TwoFactorPendingSecret      = null;
             user.TwoFactorEnabled            = true;
+            user.TwoFactorLastUsedStep       = enrollment.Step;
             user.TwoFactorEnrolledAt         = DateTime.UtcNow;
             user.TwoFactorRecoveryCodeHashes = string.Join(';',
                 recoveryCodes.Select(TotpService.HashRecoveryCode));
@@ -271,6 +276,7 @@ namespace MAI.Api.Controllers
 
             user.TwoFactorEnabled            = false;
             user.TwoFactorSecret             = null;
+            user.TwoFactorLastUsedStep       = null;
             user.TwoFactorPendingSecret      = null;
             user.TwoFactorRecoveryCodeHashes = null;
             user.TwoFactorEnrolledAt         = null;
@@ -354,6 +360,7 @@ namespace MAI.Api.Controllers
 
             target.TwoFactorEnabled            = false;
             target.TwoFactorSecret             = null;
+            target.TwoFactorLastUsedStep       = null;
             target.TwoFactorPendingSecret      = null;
             target.TwoFactorRecoveryCodeHashes = null;
             target.TwoFactorEnrolledAt         = null;
@@ -409,7 +416,18 @@ namespace MAI.Api.Controllers
             try
             {
                 var secret = _protector.Unprotect(user.TwoFactorSecret);
-                if (_totp.VerifyCode(secret, code)) return Task.FromResult(true);
+                var totp   = _totp.Verify(secret, code, user.TwoFactorLastUsedStep);
+
+                if (totp.IsAccepted)
+                {
+                    user.TwoFactorLastUsedStep = totp.Step;
+                    return Task.FromResult(true);
+                }
+
+                // Un cod deja folosit nu trece nici aici: cine l-a văzut pe ecranul
+                // utilizatorului nu îl poate refolosi ca să dezactiveze 2FA.
+                if (totp.Status == TotpVerificationStatus.Replayed)
+                    return Task.FromResult(false);
             }
             catch (CryptographicException ex)
             {

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Building2, KeyRound, ShieldCheck, Fingerprint, CalendarClock, AlertTriangle } from 'lucide-react';
+import KeyFingerprint from '../../components/security/KeyFingerprint';
 import PageHeader from '../../components/ui/PageHeader';
 import Button     from '../../components/ui/Button';
 import Input      from '../../components/ui/Input';
@@ -199,9 +200,9 @@ export default function ProfilePage() {
                             <Fingerprint size={15} className="text-mai-400 mt-0.5 shrink-0" />
                             <div className="min-w-0">
                                 <p className="text-[11px] text-mai-400 uppercase tracking-wide">Amprentă chei</p>
-                                <p className="text-xs text-mai-800 dark:text-mai-200 font-mono font-medium break-all">
-                                    {fingerprint || '—'}
-                                </p>
+                                <div className="text-xs text-mai-800 dark:text-mai-200 font-medium">
+                                    <KeyFingerprint value={fingerprint || ''} />
+                                </div>
                             </div>
                         </div>
 
