@@ -62,8 +62,8 @@ namespace MAI.Domain.Entities
         /// la confirmare.
         ///
         /// Null pentru transferurile necriptate sau neconfirmate încă. Contează
-        /// pentru dovada de primire: „a fost descărcat” și „a fost descărcat, iar
-        /// semnătura expeditorului s-a verificat” sunt afirmații diferite, iar
+        /// pentru dovada de primire: „a fost descărcat" și „a fost descărcat, iar
+        /// semnătura expeditorului s-a verificat" sunt afirmații diferite, iar
         /// expeditorul are dreptul să o vadă pe a doua.
         ///
         /// Server-side rămâne o afirmație a clientului, nu o verificare proprie —
@@ -84,6 +84,12 @@ namespace MAI.Domain.Entities
         /// în care un document sensibil stă degeaba pe server.
         /// </summary>
         public DateTime? ExpiresAt { get; set; }
+
+        /// <summary>
+        /// Categoria transferului — pentru filtrare și prioritizare vizuală.
+        /// Valoarea implicită este General; expeditorul o poate schimba la trimitere.
+        /// </summary>
+        public TransferCategory Category { get; set; } = TransferCategory.General;
 
         // ── Plicul criptografic ──────────────────────────────────────────────
         // Serverul stochează aceste valori dar nu le poate folosi: cheile de fișier

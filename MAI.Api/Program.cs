@@ -1,5 +1,6 @@
 ﻿using MAI.Api.BackgroundJobs;
 using MAI.Api.Middleware;
+using MAI.Api.Options;
 using MAI.Api.Security;
 using MAI.Api.Services;
 using MAI.BusinessLogic.Interfaces;
@@ -462,6 +463,27 @@ try
     builder.Services.AddSingleton<TransferExpirationState>();
     builder.Services.AddSingleton<TransferExpirationService>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<TransferExpirationService>());
+
+    // ─── Email SMTP (notificări la transfer primit) ────────────────────────────
+    // Parola vine preferabil din variabila de mediu MAI_SMTP_PASSWORD, nu din
+    // appsettings.json care ajunge în Git.
+    var smtpOptions = new SmtpOptions();
+    builder.Configuration.GetSection("Smtp").Bind(smtpOptions);
+
+    var smtpPasswordFromEnv = Environment.GetEnvironmentVariable("MAI_SMTP_PASSWORD");
+    if (!string.IsNullOrWhiteSpace(smtpPasswordFromEnv))
+        smtpOptions.Password = smtpPasswordFromEnv;
+
+    if (!smtpOptions.IsConfigured)
+    {
+        Log.Warning(
+            "SMTP nu este configurat (Smtp:Host/From/Username/Password lipsesc). " +
+            "Notificările email sunt dezactivate. Setați MAI_SMTP_PASSWORD și " +
+            "completați secțiunea Smtp din appsettings pentru a le activa.");
+    }
+
+    builder.Services.AddSingleton(smtpOptions);
+    builder.Services.AddSingleton<IEmailService, SmtpEmailService>();
 
     var app = builder.Build();
 

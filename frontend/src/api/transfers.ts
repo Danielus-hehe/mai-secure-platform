@@ -25,6 +25,28 @@ export interface PagedResult<T> {
 /** Statusurile returnate de backend (TransferStatus.ToString()). */
 export type TransferStatus = 'Pending' | 'Downloaded' | 'Expired' | 'Revoked';
 
+/**
+ * Categoria unui transfer — oglindește enum-ul TransferCategory din backend.
+ * Folosim const object în loc de enum: erasableSyntaxOnly interzice enum-urile
+ * care emit cod JavaScript la runtime.
+ */
+export const TransferCategory = {
+    Critical:  0,
+    Important: 1,
+    General:   2,
+    Normal:    3,
+} as const;
+
+/** Tipul numeric al categoriei: 0 | 1 | 2 | 3. */
+export type TransferCategory = typeof TransferCategory[keyof typeof TransferCategory];
+
+export const CATEGORY_LABELS: Record<TransferCategory, string> = {
+    [TransferCategory.Critical]:  'Critic',
+    [TransferCategory.Important]: 'Important',
+    [TransferCategory.General]:   'General',
+    [TransferCategory.Normal]:    'Obișnuit',
+};
+
 export interface TransferListItem {
     id: string;
     fileName: string;
@@ -48,7 +70,7 @@ export interface TransferListItem {
     /**
      * Ce a raportat browserul destinatarului la verificarea semnaturii.
      * null pentru transferurile necriptate sau nedescarcate inca — stare
-     * diferita de false, care inseamna „descarcat, dar semnatura nu s-a verificat”.
+     * diferita de false, care inseamna „descarcat, dar semnatura nu s-a verificat".
      */
     signatureValid: boolean | null;
 
@@ -64,7 +86,13 @@ export interface TransferListItem {
      */
     canRevoke: boolean;
 
+    // ── Expirare și categorie ────────────────────────────────────────────────
+
     expiresAt: string | null;
+
+    /** Categoria transferului (0=Critical … 3=Normal). */
+    category: TransferCategory;
+
     isMine: boolean;
     isEncrypted: boolean;
     cryptoSuite: string | null;
@@ -115,6 +143,10 @@ export interface UploadInput {
     plaintextSize: number;
     ciphertext: Blob;
     envelope: TransferCryptoEnvelope;
+    /** Categoria selectată de expeditor. Implicit: General. */
+    category: TransferCategory;
+    /** Data de expirare aleasă (ISO 8601). Dacă lipsește, backend aplică 7 zile. */
+    expiresAt?: string;
 }
 
 // ── Operații ─────────────────────────────────────────────────────────────────
@@ -162,9 +194,13 @@ export async function uploadTransfer(
     form.append('CiphertextSha256', input.envelope.ciphertextSha256);
     form.append('Suite', input.envelope.suite);
 
+    // Câmpuri noi: categorie și expirare
+    form.append('Category', String(input.category));
+    if (input.expiresAt) {
+        form.append('ExpiresAt', input.expiresAt);
+    }
+
     const { data } = await api.post('/Transfers', form, {
-        // Uploadul unui fișier de 50 MB pe o rețea lentă depășește ușor timeoutul
-        // implicit de 30 s al clientului.
         timeout: 300_000,
         onUploadProgress: (event) => {
             if (!onProgress || !event.total) return;
@@ -190,8 +226,6 @@ export async function fetchCiphertext(
     onProgress?: (percent: number) => void
 ): Promise<ArrayBuffer> {
     if (envelope.downloadUrl) {
-        // fetch simplu, FĂRĂ antetul Authorization: autorizarea e deja în
-        // semnătura URL-ului, iar un antet în plus ar invalida cererea.
         const response = await fetch(envelope.downloadUrl);
         if (!response.ok) {
             throw new Error(`Depozitul a răspuns cu ${response.status}.`);
@@ -218,11 +252,6 @@ export async function confirmTransfer(id: string, signatureValid: boolean): Prom
 
 /**
  * Retrage un transfer inainte ca destinatarul sa il descarce.
- *
- * Diferit de deleteTransfer: randul ramane, iar destinatarul vede ca i s-a
- * trimis ceva si ca a fost retras. Serverul raspunde 409 daca fisierul a fost
- * deja descarcat — caz in care nu mai poate fi luat de pe dispozitivul
- * destinatarului si interfata trebuie sa spuna asta, nu sa pretinda altceva.
  */
 export async function revokeTransfer(id: string, reason?: string): Promise<{ message: string }> {
     const { data } = await api.post<{ message: string }>(
