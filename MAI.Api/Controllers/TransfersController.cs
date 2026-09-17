@@ -34,17 +34,20 @@ namespace MAI.Api.Controllers
         private readonly AppDbContext _context;
         private readonly IFileStorage _storage;
         private readonly StorageOptions _storageOptions;
+        private readonly IEmailService _email;
         private readonly ILogger<TransfersController> _logger;
 
         public TransfersController(
             AppDbContext context,
             IFileStorage storage,
             StorageOptions storageOptions,
+            IEmailService email,
             ILogger<TransfersController> logger)
         {
             _context        = context;
             _storage        = storage;
             _storageOptions = storageOptions;
+            _email          = email;
             _logger         = logger;
         }
 
@@ -64,7 +67,10 @@ namespace MAI.Api.Controllers
 
         /// <summary>Motivul retragerii e text liber de la utilizator; se trunchiază.</summary>
         private const int MaxRevokeReasonChars = 256;
-        private const int MaxIvChars         = 32;
+        private const int MaxIvChars           = 32;
+
+        /// <summary>Durata implicită de valabilitate dacă expeditorul nu specifică alta.</summary>
+        private static readonly TimeSpan DefaultExpiry = TimeSpan.FromDays(7);
 
         // ═════════════════════════════════════════════════════════════════════
         // GET api/Transfers?search=&status=&direction=&sortBy=&sortDir=&page=&pageSize=
@@ -149,10 +155,8 @@ namespace MAI.Api.Controllers
                 RevokedAt           = t.RevokedAt,
                 RevokedReason       = t.RevokedReason,
                 ExpiresAt           = t.ExpiresAt,
+                Category            = t.Category,
                 IsMine              = t.SenderId == userId,
-                // Retragerea e posibila doar pentru expeditor si doar cat timp
-                // fisierul nu a fost descarcat. Calculul se face aici, nu in
-                // frontend, ca butonul si endpointul sa nu poata diverge.
                 CanRevoke           = t.SenderId == userId
                                       && t.Status == TransferStatus.Pending
                                       && (!t.ExpiresAt.HasValue || t.ExpiresAt.Value > now),
@@ -217,6 +221,20 @@ namespace MAI.Api.Controllers
 
             if (!TryValidateEnvelope(request, out var envelopeError))
                 return BadRequest(new { message = envelopeError });
+
+            // ExpiresAt: clientul poate trimite o dată; dacă lipsește se aplică
+            // implicit 7 zile. Se impune că data să nu fie în trecut.
+            DateTime expiresAt;
+            if (request.ExpiresAt.HasValue)
+            {
+                expiresAt = request.ExpiresAt.Value.ToUniversalTime();
+                if (expiresAt <= DateTime.UtcNow)
+                    return BadRequest(new { message = "Data de expirare nu poate fi în trecut." });
+            }
+            else
+            {
+                expiresAt = DateTime.UtcNow.Add(DefaultExpiry);
+            }
 
             // ── Verificarea părților ─────────────────────────────────────────
 
@@ -305,7 +323,8 @@ namespace MAI.Api.Controllers
                 ChecksumSHA256           = computedHash,
                 Status                   = TransferStatus.Pending,
                 CreatedAt                = DateTime.UtcNow,
-                ExpiresAt                = DateTime.UtcNow.AddDays(30),
+                ExpiresAt                = expiresAt,
+                Category                 = request.Category,
                 EncryptionIv             = request.Iv,
                 EncryptedKeyForRecipient = request.EncryptedKeyForRecipient,
                 EncryptedKeyForSender    = request.EncryptedKeyForSender,
@@ -321,7 +340,8 @@ namespace MAI.Api.Controllers
                 Username  = CurrentUsername,
                 Action    = AuditAction.FileUpload,
                 Details   = $"Fisier criptat trimis '{safeName}' ({request.File.Length} octeti) " +
-                            $"catre {recipient.FullName ?? recipient.Username}, suita {request.Suite}",
+                            $"catre {recipient.FullName ?? recipient.Username}, suita {request.Suite}, " +
+                            $"categorie {request.Category}, expira {expiresAt:yyyy-MM-dd}",
                 IpAddress = CallerIp,
                 Timestamp = DateTime.UtcNow,
             });
@@ -347,12 +367,30 @@ namespace MAI.Api.Controllers
                 throw;
             }
 
+            // ── Notificare email ──────────────────────────────────────────────
+            // Eșecul emailului nu afectează răspunsul: transferul e deja salvat
+            // și cifrotextul e în depozit. Se loghează un warning, atât.
+            _ = _email.SendTransferNotificationAsync(
+                    toEmail:    recipient.Email,
+                    toName:     recipient.FullName ?? recipient.Username,
+                    senderName: CurrentUsername,
+                    fileName:   safeName,
+                    expiresAt:  transfer.ExpiresAt,
+                    ct:         CancellationToken.None)   // nu anulăm odată cu cererea HTTP
+                .ContinueWith(t =>
+                {
+                    if (t.IsFaulted)
+                        _logger.LogWarning(t.Exception,
+                            "Notificarea email pentru transferul {Id} nu a putut fi trimisă.", transfer.Id);
+                }, TaskScheduler.Default);
+
             return Ok(new
             {
-                id          = transfer.Id,
-                sha256      = computedHash,
-                expiresAt   = transfer.ExpiresAt,
-                message     = $"Fișierul '{safeName}' a fost trimis criptat.",
+                id        = transfer.Id,
+                sha256    = computedHash,
+                expiresAt = transfer.ExpiresAt,
+                category  = transfer.Category.ToString(),
+                message   = $"Fișierul '{safeName}' a fost trimis criptat.",
             });
         }
 
@@ -389,7 +427,7 @@ namespace MAI.Api.Controllers
 
             // Verificat explicit, înaintea expirării și a cheilor. Fără el, un
             // transfer retras ajungea la ramura „nu există cheie împachetată
-            // pentru contul dumneavoastră” (retragerea golește cheile) — un 409
+            // pentru contul dumneavoastră" (retragerea golește cheile) — un 409
             // care îl trimite pe destinatar să caute o problemă de chei, nu să
             // afle că expeditorul a retras documentul.
             if (transfer.Status == TransferStatus.Revoked)
@@ -513,10 +551,10 @@ namespace MAI.Api.Controllers
         ///
         /// Trei reguli fac din confirmare o dovadă, nu doar un contor:
         ///   • Rezultatul semnăturii e obligatoriu. O cerere fără el nu mai e
-        ///     înregistrată implicit ca „semnătură validă”.
+        ///     înregistrată implicit ca „semnătură validă".
         ///   • Prima confirmare rămâne. O descărcare repetată primește 200, dar nu
         ///     rescrie rezultatul și nu adaugă alt rând în audit: altfel un
-        ///     „INVALIDĂ” consemnat putea fi înlocuit ulterior cu „VALIDĂ”.
+        ///     „INVALIDĂ" consemnat putea fi înlocuit ulterior cu „VALIDĂ".
         ///   • Transferurile retrase sau expirate nu se mai confirmă.
         /// </summary>
         [HttpPatch("{id:guid}/confirm")]
@@ -571,12 +609,6 @@ namespace MAI.Api.Controllers
 
             transfer.Status                  = TransferStatus.Downloaded;
             transfer.DownloadedAt            = DateTime.UtcNow;
-
-            // Rezultatul verificării se păstrează, ca expeditorul să vadă nu doar CĂ
-            // fișierul a fost primit, ci și dacă semnătura lui s-a verificat pe
-            // calculatorul destinatarului. Rămâne o afirmație a clientului:
-            // serverul nu poate verifica singur semnătura, pentru că prin
-            // construcție nu are textul în clar.
             transfer.RecipientSignatureValid = signatureValid;
 
             _context.AuditLogs.Add(new AuditLog
@@ -587,9 +619,6 @@ namespace MAI.Api.Controllers
                 Details   = signatureValid
                     ? $"Fisier descarcat si decriptat '{transfer.FileName}', semnatura expeditorului VALIDA"
                     : $"Fisier descarcat '{transfer.FileName}', semnatura expeditorului INVALIDA",
-                // O semnătură invalidă nu e o eroare de sistem — descărcarea a
-                // reușit — dar e exact genul de rând pe care un supervizor
-                // trebuie să îl găsească filtrând, nu citind toate detaliile.
                 Result    = signatureValid ? AuditResult.Success : AuditResult.Warning,
                 IpAddress = CallerIp,
                 Timestamp = DateTime.UtcNow,
@@ -603,18 +632,6 @@ namespace MAI.Api.Controllers
         // ═════════════════════════════════════════════════════════════════════
         // POST api/Transfers/{id}/revoke
         // ═════════════════════════════════════════════════════════════════════
-        /// <summary>
-        /// Retrage un transfer înainte ca destinatarul să îl descarce.
-        ///
-        /// Diferența față de DELETE: rândul rămâne. Destinatarul trebuie să vadă
-        /// că i s-a trimis ceva și că a fost retras — altfel transferul dispare
-        /// din interfața lui fără explicație, iar el rămâne să aștepte un fișier
-        /// despre care i s-a spus verbal că a fost trimis.
-        ///
-        /// Ordinea e ștergere obiect → commit status, ca la jobul de expirare.
-        /// Inversul ar produce un rând care afirmă „retras” cu cifrotextul încă
-        /// în bucket.
-        /// </summary>
         [HttpPost("{id:guid}/revoke")]
         public async Task<IActionResult> Revoke(
             Guid id, [FromBody] RevokeTransferDto? dto, CancellationToken ct)
@@ -625,20 +642,11 @@ namespace MAI.Api.Controllers
             if (transfer is null)
                 return NotFound(new { message = "Transferul nu a fost găsit." });
 
-            // Doar expeditorul. Nici administratorul nu retrage în locul altcuiva:
-            // retragerea e o declarație de intenție a expeditorului, consemnată ca
-            // atare în jurnal. Un administrator care trebuie să facă un fișier să
-            // dispară folosește DELETE, care e o acțiune diferită și se vede ca
-            // acțiune diferită.
             if (transfer.SenderId != userId)
                 return Forbid();
 
             if (transfer.Status == TransferStatus.Downloaded)
             {
-                // Onest, nu optimist. Fișierul e deja pe calculatorul
-                // destinatarului; nimic din ce face serverul nu îl mai poate lua
-                // de acolo, iar un mesaj care ar sugera altceva ar fi o minciună
-                // exact în momentul în care utilizatorul are nevoie de adevăr.
                 return Conflict(new
                 {
                     message = "Transferul a fost deja descărcat și nu mai poate fi retras. " +
@@ -658,11 +666,6 @@ namespace MAI.Api.Controllers
                 }
                 catch (Exception ex)
                 {
-                    // Aici NU continuăm, spre deosebire de DELETE. Retragerea
-                    // promite utilizatorului că fișierul nu mai poate fi descărcat;
-                    // dacă obiectul a rămas în depozit, promisiunea e falsă, iar
-                    // un rând marcat „retras” peste un cifrotext încă prezent e
-                    // mai rău decât o eroare vizibilă.
                     _logger.LogError(ex,
                         "Retragere esuata: obiectul {Key} nu a putut fi sters.", transfer.StorageKey);
 
@@ -690,9 +693,6 @@ namespace MAI.Api.Controllers
             transfer.RevokedAt     = DateTime.UtcNow;
             transfer.RevokedReason = Truncate(dto?.Reason, MaxRevokeReasonChars);
 
-            // Cheile împachetate se șterg odată cu obiectul. Fără cifrotext nu mai
-            // au ce descuia, iar păstrarea lor ar lăsa în bază material
-            // criptografic legat de un fișier care nu mai există.
             transfer.EncryptedKeyForRecipient = null;
             transfer.EncryptedKeyForSender    = null;
             transfer.StorageKey               = string.Empty;
@@ -705,8 +705,6 @@ namespace MAI.Api.Controllers
                 Details   = string.IsNullOrWhiteSpace(transfer.RevokedReason)
                     ? $"Transfer retras '{transfer.FileName}' inainte de descarcare"
                     : $"Transfer retras '{transfer.FileName}' inainte de descarcare: {transfer.RevokedReason}",
-                // Nu e un eșec — dar e o acțiune umană asupra unui document deja
-                // trimis, exact genul de rând care contează într-o verificare.
                 Result    = AuditResult.Warning,
                 IpAddress = CallerIp,
                 Timestamp = DateTime.UtcNow,
@@ -720,10 +718,6 @@ namespace MAI.Api.Controllers
         // ═════════════════════════════════════════════════════════════════════
         // DELETE api/Transfers/{id}
         // ═════════════════════════════════════════════════════════════════════
-        /// <summary>
-        /// Șterge rândul și obiectul din depozit. Fără asta, depozitul crește
-        /// monoton: implementarea veche nu ștergea niciodată nimic.
-        /// </summary>
         [HttpDelete("{id:guid}")]
         public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
         {
@@ -743,9 +737,6 @@ namespace MAI.Api.Controllers
                 }
                 catch (Exception ex)
                 {
-                    // Rândul se șterge oricum: un obiect orfan în depozit expiră
-                    // prin lifecycle policy, dar un rând orfan în bază rămâne
-                    // vizibil în interfață și induce în eroare utilizatorul.
                     _logger.LogError(ex,
                         "Obiectul {Key} nu a putut fi șters din depozit.", transfer.StorageKey);
                 }
@@ -771,11 +762,6 @@ namespace MAI.Api.Controllers
         // Helpers
         // ═════════════════════════════════════════════════════════════════════
 
-        /// <summary>
-        /// Cheie ierarhică pe an și lună. Nu conține nimic derivat din datele
-        /// utilizatorului: numele fișierului în cheie ar scurge informație către
-        /// oricine vede listarea bucketului.
-        /// </summary>
         private static string? Truncate(string? value, int max) =>
             string.IsNullOrWhiteSpace(value)
                 ? null
@@ -787,11 +773,6 @@ namespace MAI.Api.Controllers
             return $"{_storageOptions.TransfersPrefix}/{now:yyyy}/{now:MM}/{transferId:N}.enc";
         }
 
-        /// <summary>
-        /// SHA-256 al stream-ului, calculat incremental. Nu se încarcă tot
-        /// conținutul în memorie — un fișier de 50 MB ar însemna 50 MB de heap
-        /// per upload simultan.
-        /// </summary>
         private static async Task<string> ComputeSha256HexAsync(Stream stream, CancellationToken ct)
         {
             using var sha    = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -804,11 +785,6 @@ namespace MAI.Api.Controllers
             return Convert.ToHexString(sha.GetHashAndReset()).ToLowerInvariant();
         }
 
-        /// <summary>
-        /// Validare structurală a plicului. Serverul nu poate verifica criptografic
-        /// nimic (nu are cheile), dar poate refuza valori evident greșite înainte
-        /// să scrie ceva în depozit.
-        /// </summary>
         private static bool TryValidateEnvelope(UploadTransferRequest r, out string error)
         {
             error = string.Empty;
@@ -869,12 +845,6 @@ namespace MAI.Api.Controllers
     // Modele
     // ═════════════════════════════════════════════════════════════════════════
 
-    /// <summary>
-    /// Corpul multipart al unui upload.
-    ///
-    /// Clasa asta lipsea complet din proiect, deși TransfersController o folosea:
-    /// soluția nu compila.
-    /// </summary>
     public class UploadTransferRequest
     {
         /// <summary>Cifrotextul. Conținutul în clar nu ajunge niciodată aici.</summary>
@@ -888,6 +858,18 @@ namespace MAI.Api.Controllers
         /// <summary>Dimensiunea conținutului în clar, informativă.</summary>
         public long PlaintextSize { get; set; }
 
+        /// <summary>
+        /// Dată de expirare aleasă de expeditor (UTC, opțional).
+        /// Dacă lipsește, se aplică implicit 7 zile de la creare.
+        /// </summary>
+        public DateTime? ExpiresAt { get; set; }
+
+        /// <summary>
+        /// Categoria transferului pentru filtrare și prioritizare.
+        /// Valoarea implicită este General dacă clientul nu trimite altceva.
+        /// </summary>
+        public TransferCategory Category { get; set; } = TransferCategory.General;
+
         // ── Plicul criptografic ──────────────────────────────────────────────
         public string? Iv { get; set; }
         public string? EncryptedKeyForRecipient { get; set; }
@@ -899,26 +881,11 @@ namespace MAI.Api.Controllers
 
     public class ConfirmTransferDto
     {
-        /// <summary>
-        /// Rezultatul verificării semnăturii în browser. Se jurnalizează ca atare:
-        /// serverul nu poate verifica el însuși, dar poate consemna ce a raportat
-        /// clientul, iar o valoare falsă în jurnal este exact genul de eveniment
-        /// pe care un ofițer de securitate trebuie să-l vadă.
-        ///
-        /// Nullable și fără valoare implicită: un câmp lipsă e o cerere invalidă
-        /// (400), nu o semnătură presupus validă.
-        /// </summary>
         public bool? SignatureValid { get; set; }
     }
 
-    /// <summary>Corpul cererii POST /api/Transfers/{id}/revoke.</summary>
     public class RevokeTransferDto
     {
-        /// <summary>
-        /// Motivul retragerii, opțional. Ajunge în jurnalul de audit și e vizibil
-        /// destinatarului: dacă un document a fost retras pentru că era versiunea
-        /// greșită, e mai util să scrie asta decât să dispară fără explicație.
-        /// </summary>
         public string? Reason { get; set; }
     }
 
@@ -940,28 +907,25 @@ namespace MAI.Api.Controllers
 
         // ── Dovada de primire ────────────────────────────────────────────────
 
-        /// <summary>Când a descărcat destinatarul. Null = încă nu.</summary>
         public DateTime? DownloadedAt { get; set; }
-
-        /// <summary>
-        /// Ce a raportat browserul destinatarului la verificarea semnăturii.
-        /// Null pentru transferurile necriptate sau nedescărcate încă.
-        /// </summary>
         public bool? SignatureValid { get; set; }
 
         // ── Retragere ────────────────────────────────────────────────────────
 
         public DateTime? RevokedAt { get; set; }
         public string? RevokedReason { get; set; }
-
-        /// <summary>
-        /// Dacă utilizatorul curent poate retrage acest transfer chiar acum.
-        /// Calculat server-side, ca butonul din interfață și verificarea din
-        /// endpoint să nu poată diverge.
-        /// </summary>
         public bool CanRevoke { get; set; }
 
+        // ── Expirare și categorie ────────────────────────────────────────────
+
         public DateTime? ExpiresAt { get; set; }
+
+        /// <summary>
+        /// Categoria transferului. Serialized ca număr de către ASP.NET;
+        /// frontul îl mapează la eticheta corespunzătoare.
+        /// </summary>
+        public TransferCategory Category { get; set; }
+
         public bool IsMine { get; set; }
         public bool IsEncrypted { get; set; }
         public string? CryptoSuite { get; set; }

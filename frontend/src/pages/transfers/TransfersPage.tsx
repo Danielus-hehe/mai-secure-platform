@@ -44,6 +44,7 @@ import { formatDateTime, formatFileSize, truncateSha } from '../../utils/format'
 import {
     listTransfers, listRecipients, uploadTransfer, getEnvelope,
     fetchCiphertext, confirmTransfer, deleteTransfer, revokeTransfer,
+    TransferCategory, CATEGORY_LABELS,
     type TransferListItem, type Recipient, type PagedResult,
 } from '../../api/transfers';
 import {
@@ -59,20 +60,65 @@ const EMPTY_PAGE: PagedResult<TransferListItem> = {
     totalPages: 0, hasPrevious: false, hasNext: false,
 };
 
+// ── Badge-uri ────────────────────────────────────────────────────────────────
+
 const statusBadge = (status: string) => {
     if (status === 'Downloaded') return <Badge tone="green">Confirmat</Badge>;
-    if (status === 'Expired') return <Badge tone="red">Expirat</Badge>;
-    if (status === 'Revoked') return <Badge tone="gray">Retras</Badge>;
+    if (status === 'Expired')    return <Badge tone="red">Expirat</Badge>;
+    if (status === 'Revoked')    return <Badge tone="gray">Retras</Badge>;
     return <Badge tone="gold">În așteptare</Badge>;
+};
+
+/** Badge vizual pentru categoria transferului. */
+const CATEGORY_STYLES: Record<TransferCategory, string> = {
+    [TransferCategory.Critical]:  'bg-red-100   text-red-800   border-red-200   dark:bg-red-900/30   dark:text-red-300   dark:border-red-700',
+    [TransferCategory.Important]: 'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-700',
+    [TransferCategory.General]:   'bg-teal-100  text-teal-800  border-teal-200  dark:bg-teal-900/30  dark:text-teal-300  dark:border-teal-700',
+    [TransferCategory.Normal]:    'bg-gray-100  text-gray-600  border-gray-200  dark:bg-gray-700/40  dark:text-gray-400  dark:border-gray-600',
+};
+
+const categoryBadge = (category: TransferCategory) => (
+    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${CATEGORY_STYLES[category]}`}>
+        {CATEGORY_LABELS[category]}
+    </span>
+);
+
+/** Afișează când expiră transferul, sau "Expirat" dacă data e trecută. */
+const expiryLine = (expiresAt: string | null) => {
+    if (!expiresAt) return null;
+
+    const expiry = new Date(expiresAt);
+    const now    = new Date();
+
+    if (expiry < now) {
+        return (
+            <p className="mt-0.5 text-[11px] font-medium text-red-600 dark:text-red-400">
+                ⊘ Expirat
+            </p>
+        );
+    }
+
+    const diffMs    = expiry.getTime() - now.getTime();
+    const diffHours = Math.ceil(diffMs / 3_600_000);
+    const diffDays  = Math.ceil(diffMs / 86_400_000);
+
+    if (diffHours <= 24) {
+        return (
+            <p className="mt-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                Expiră în {diffHours}h
+            </p>
+        );
+    }
+
+    return (
+        <p className="mt-0.5 text-[11px] text-mai-400 dark:text-mai-500">
+            Expiră în {diffDays}z
+        </p>
+    );
 };
 
 /**
  * Dovada de primire, afisata expeditorului sub statusul transferului.
- *
- * Distinge trei situatii pe care un singur badge „Confirmat” le amesteca:
- * nedescarcat, descarcat cu semnatura verificata, si descarcat cu semnatura
- * INVALIDA. Ultima nu e o eroare de sistem — fisierul a ajuns — dar inseamna ca
- * nu se poate dovedi cine l-a trimis, iar expeditorul are dreptul sa stie.
  */
 const receiptLine = (t: TransferListItem) => {
     if (!t.isMine || !t.downloadedAt) return null;
@@ -98,6 +144,18 @@ const receiptLine = (t: TransferListItem) => {
     );
 };
 
+// ── Helpers pentru expirare implicită ────────────────────────────────────────
+
+/** Returnează data peste 7 zile, formatată pentru <input type="datetime-local">. */
+const defaultExpiryValue = (): string => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    // datetime-local nu acceptă secunde sau timezone — tăiem la minut
+    return d.toISOString().slice(0, 16);
+};
+
+// ── Componenta principală ────────────────────────────────────────────────────
+
 export default function TransfersPage() {
     const { user } = useAuth();
     const toast = useToast();
@@ -119,6 +177,8 @@ export default function TransfersPage() {
     const [recipients, setRecipients] = useState<Recipient[]>([]);
     const [recipientId, setRecipientId] = useState('');
     const [file, setFile] = useState<File | null>(null);
+    const [category, setCategory] = useState<TransferCategory>(TransferCategory.General);
+    const [expiresAt, setExpiresAt] = useState<string>(defaultExpiryValue);
     const [sending, setSending] = useState(false);
     const [sendStage, setSendStage] = useState('');
     const [uploadPercent, setUploadPercent] = useState(0);
@@ -169,6 +229,8 @@ export default function TransfersPage() {
         setUploadOpen(true);
         setFile(null);
         setRecipientId('');
+        setCategory(TransferCategory.General);
+        setExpiresAt(defaultExpiryValue());
         setUploadPercent(0);
         setSendStage('');
 
@@ -218,6 +280,8 @@ export default function TransfersPage() {
                     plaintextSize: file.size,
                     ciphertext: encrypted.ciphertext,
                     envelope: encrypted.envelope,
+                    category,
+                    expiresAt: expiresAt ? new Date(expiresAt).toISOString() : undefined,
                 },
                 setUploadPercent
             );
@@ -279,9 +343,6 @@ export default function TransfersPage() {
 
             saveDecryptedFile(result.plaintext, envelope.fileName);
 
-            // Confirmarea are propriul try: fișierul e deja decriptat și salvat.
-            // Un eșec aici (transfer retras sau expirat între timp, rețea căzută)
-            // nu trebuie raportat ca eșec al descărcării.
             if (transfer.recipientId === String(user?.id)) {
                 try {
                     await confirmTransfer(transfer.id, result.signatureValid);
@@ -321,8 +382,6 @@ export default function TransfersPage() {
         );
         if (!ok) return;
 
-        // Motivul e optional: prompt-ul anulat sau lasat gol trimite null, iar
-        // destinatarul vede doar ca transferul a fost retras.
         const reason = window.prompt('Motivul retragerii (opțional):') ?? undefined;
 
         setDeletingId(transfer.id);
@@ -331,9 +390,6 @@ export default function TransfersPage() {
             toast.success(result.message);
             await load();
         } catch (e) {
-            // 409 inseamna ca destinatarul a apucat sa descarce intre incarcarea
-            // listei si apasarea butonului. Mesajul serverului spune exact asta si
-            // e mai util decat un generic „a esuat”.
             toast.error(apiErrorMessage(e, 'Retragerea a eșuat.'));
             await load();
         } finally {
@@ -477,6 +533,7 @@ export default function TransfersPage() {
                                     <th className="px-5 py-3 font-semibold">Direcție</th>
                                     <th className="px-5 py-3 font-semibold">Contraparte</th>
                                     <th className="px-5 py-3 font-semibold">Data</th>
+                                    <th className="px-5 py-3 font-semibold">Categorie</th>
                                     <th className="px-5 py-3 font-semibold">Status</th>
                                     <th className="px-5 py-3 text-right font-semibold">Acțiuni</th>
                                 </tr>
@@ -500,6 +557,7 @@ export default function TransfersPage() {
                                                                 </span>
                                                         )}
                                                     </p>
+                                                    {expiryLine(t.expiresAt)}
                                                 </div>
                                             </div>
                                         </td>
@@ -529,6 +587,11 @@ export default function TransfersPage() {
                                             {formatDateTime(t.createdAt)}
                                         </td>
 
+                                        {/* ── Categorie ── */}
+                                        <td className="px-5 py-3">
+                                            {categoryBadge(t.category)}
+                                        </td>
+
                                         <td className="px-5 py-3">
                                             {statusBadge(t.status)}
                                             {receiptLine(t)}
@@ -555,14 +618,6 @@ export default function TransfersPage() {
                                                         : <Download size={15} />}
                                                 </Button>
 
-                                                {/*
-                                                  Retragerea apare doar cat timp
-                                                  serverul spune ca e posibila.
-                                                  Conditia e calculata acolo
-                                                  (canRevoke), nu aici: butonul si
-                                                  verificarea din endpoint nu
-                                                  trebuie sa poata diverge.
-                                                */}
                                                 {t.canRevoke && (
                                                     <Button
                                                         variant="ghost"
@@ -620,6 +675,7 @@ export default function TransfersPage() {
                 onClose={() => { if (!sending) setUploadOpen(false); }}
             >
                 <div className="space-y-4">
+                    {/* Destinatar */}
                     <div>
                         <label htmlFor="recipient" className="mb-1.5 block text-sm font-medium text-mai-700 dark:text-mai-200">
                             Destinatar
@@ -648,6 +704,7 @@ export default function TransfersPage() {
                         )}
                     </div>
 
+                    {/* Fișier */}
                     <div>
                         <label htmlFor="file" className="mb-1.5 block text-sm font-medium text-mai-700 dark:text-mai-200">
                             Fișier
@@ -670,6 +727,45 @@ export default function TransfersPage() {
                         )}
                     </div>
 
+                    {/* Categorie */}
+                    <div>
+                        <label htmlFor="transfer-category" className="mb-1.5 block text-sm font-medium text-mai-700 dark:text-mai-200">
+                            Categorie
+                        </label>
+                        <select
+                            id="transfer-category"
+                            value={category}
+                            disabled={sending}
+                            onChange={(e) => setCategory(Number(e.target.value) as TransferCategory)}
+                            className={`${selectClass} w-full`}
+                        >
+                            <option value={TransferCategory.Critical}>Critic</option>
+                            <option value={TransferCategory.Important}>Important</option>
+                            <option value={TransferCategory.General}>General</option>
+                            <option value={TransferCategory.Normal}>Obișnuit</option>
+                        </select>
+                    </div>
+
+                    {/* Data de expirare */}
+                    <div>
+                        <label htmlFor="transfer-expiry" className="mb-1.5 block text-sm font-medium text-mai-700 dark:text-mai-200">
+                            Expiră la
+                        </label>
+                        <input
+                            id="transfer-expiry"
+                            type="datetime-local"
+                            value={expiresAt}
+                            min={new Date().toISOString().slice(0, 16)}
+                            disabled={sending}
+                            onChange={(e) => setExpiresAt(e.target.value)}
+                            className={`${selectClass} w-full`}
+                        />
+                        <p className="mt-1 text-xs text-mai-400">
+                            Implicit: 7 zile de la creare dacă nu modificați.
+                        </p>
+                    </div>
+
+                    {/* Notă E2EE */}
                     <div className="rounded-lg border border-mai-100 dark:border-mai-700
                         bg-mai-50 dark:bg-mai-900 px-4 py-3">
                         <p className="text-xs leading-relaxed text-mai-500 dark:text-mai-400">
@@ -679,7 +775,7 @@ export default function TransfersPage() {
                         </p>
                     </div>
 
-                    {/* Avertisment: numele fișierului este vizibil serverului */}
+                    {/* Avertisment nume fișier */}
                     <div className="rounded-lg border border-amber-200 dark:border-amber-700/50
                         bg-amber-50 dark:bg-amber-900/20 px-4 py-2.5">
                         <p className="text-xs text-amber-700 dark:text-amber-400 leading-relaxed">
@@ -688,6 +784,7 @@ export default function TransfersPage() {
                         </p>
                     </div>
 
+                    {/* Progress */}
                     {sending && (
                         <div className="space-y-2">
                             <div className="flex items-center gap-2 text-sm text-mai-600 dark:text-mai-300">
