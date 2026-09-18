@@ -27,6 +27,10 @@ export function apiErrorMessage(error: unknown, fallback = 'Operația a eșuat.'
             const message = (data as { message?: unknown }).message;
             if (typeof message === 'string' && message.trim()) return message;
 
+            // Endpointurile de invitație răspund cu `{ error }`, nu cu `{ message }`.
+            const errorText = (data as { error?: unknown }).error;
+            if (typeof errorText === 'string' && errorText.trim()) return errorText;
+
             // ProblemDetails din ASP.NET, când validarea modelului eșuează.
             const title = (data as { title?: unknown }).title;
             if (typeof title === 'string' && title.trim()) return title;

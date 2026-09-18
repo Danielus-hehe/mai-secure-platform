@@ -36,6 +36,25 @@
     "Bucket": "mai-secure"
   },
 
+  "Smtp": {
+    "//": "Optional. Lasat pe valorile-sablon, API-ul porneste fara email (parola",
+    "//_2": "temporara la conturile noi). Parola se pune in variabila de mediu",
+    "//_3": "MAI_SMTP_PASSWORD sau cu dotnet user-secrets, nu aici.",
+    "//_4": "Gmail: smtp.gmail.com, 465, UseSsl true, parola de aplicatie (16 caractere).",
+    "Host": "YOUR_SMTP_HOST_HERE",
+    "Port": 465,
+    "UseSsl": true,
+    "From": "YOUR_SMTP_FROM_EMAIL_HERE",
+    "DisplayName": "SGDM MAI",
+    "Username": "YOUR_SMTP_USERNAME_HERE",
+    "Password": "YOUR_SMTP_PASSWORD_HERE"
+  },
+
+  "Frontend": {
+    "//": "Adresa din linkul de activare trimis pe email.",
+    "BaseUrl": "http://localhost:5173"
+  },
+
   "Serilog": {
     "//": "Nivelurile se citesc de aici; sink-ul (consola, JSON) e fixat in Program.cs.",
     "//_2": "Pentru a vedea SQL-ul generat de EF, pune Database.Command pe Information.",

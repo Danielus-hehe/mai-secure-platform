@@ -49,6 +49,27 @@ deci îl poți rula pe o bază parțial actualizată fără să se repete nimic.
 | `20260910200000_AddMustChangePassword` | Parolă temporară după creare/resetare de către admin |
 | `20260910200100_CaseInsensitiveUserIndexes` | Unicitate fără diferență de majuscule; email opțional |
 | `20260911090000_AddTotpReplayProtection` | Un cod TOTP nu mai poate fi folosit de două ori |
+| `20260918120000_AddCategoryRecipientsInvitation` | Categoria transferului, `TransferRecipients` (forward), invitația de activare (`EmailConfirmed`, `InvitationToken`) |
+
+---
+
+## `AddCategoryRecipientsInvitation` — dacă ai rulat scripturile 008–010
+
+Migrarea înlocuiește patru migrări scrise fără `.Designer.cs`
+(`AddExpiryAndCategory`, `AddTransferCategory`, `AddTransferRecipients`,
+`AddInvitationToken`) și scripturile SQL manuale `008`, `009`, `010`. EF nu le
+descoperea, deci nu apar în `__EFMigrationsHistory` și nu trebuie șterse de acolo.
+
+SQL-ul ei e idempotent (`IF NOT EXISTS`), deci rulează corect indiferent dacă
+scripturile manuale au fost aplicate în Supabase sau nu. Coloana
+`EmailConfirmed` e tratată separat: conturile existente sunt marcate confirmate
+**doar** dacă migrarea creează coloana. Dacă ai adăugat-o deja de mână, verifică
+după aplicare:
+
+```sql
+-- Conturile vechi trebuie să fie confirmate; altfel nu se pot autentifica.
+SELECT "Username", "EmailConfirmed" FROM "Users" WHERE NOT "EmailConfirmed";
+```
 
 ---
 
@@ -89,7 +110,12 @@ spre ștergere, pentru că nu le vede.
 
 - **Fiecare migrare are și fișierul `.Designer.cs`.** Fără el, EF Core nu
   descoperă migrarea și nu o aplică niciodată, deși proiectul compilează.
-  Workflow-ul CI verifică perechile la fiecare push.
+  Workflow-ul CI (`.github/workflows/ci.yml`, în rădăcina repository-ului)
+  verifică perechile și unicitatea identificatorilor la fiecare push, iar
+  `MigrationsTests` verifică același lucru prin reflecție.
+- **Fără scripturi SQL paralele.** O modificare de schemă se face doar prin
+  migrare EF. Scripturile manuale 008–010 au produs exact desincronizarea pe
+  care a trebuit s-o repare `AddCategoryRecipientsInvitation`.
 - **Generează-le cu `dotnet ef migrations add <Nume>`**, nu de mână, ca
   snapshot-ul să rămână sincron cu modelul.
 - **Verifică întâi ce există în bază.** Un index creat cu alt nume decât unul

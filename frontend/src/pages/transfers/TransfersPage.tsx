@@ -37,6 +37,7 @@ import Button from '../../components/ui/Button';
 import Modal from '../../components/ui/Modal';
 import EmptyState from '../../components/ui/EmptyState';
 import Pagination from '../../components/ui/Pagination';
+import RecipientCombobox from '../../components/transfers/RecipientCombobox';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { useKeys } from '../../context/KeysContext';
@@ -800,20 +801,12 @@ export default function TransfersPage() {
                         <label htmlFor="recipient" className="mb-1.5 block text-sm font-medium text-mai-700 dark:text-mai-200">
                             Destinatar
                         </label>
-                        <select
-                            id="recipient"
+                        <RecipientCombobox
+                            recipients={recipients}
                             value={recipientId}
-                            onChange={(e) => setRecipientId(e.target.value)}
+                            onChange={setRecipientId}
                             disabled={sending}
-                            className={`${selectClass} w-full`}
-                        >
-                            <option value="">Selectați un destinatar…</option>
-                            {recipients.map((r) => (
-                                <option key={r.id} value={r.id}>
-                                    {r.fullName} {r.department ? `— ${r.department}` : ''}
-                                </option>
-                            ))}
-                        </select>
+                        />
 
                         {!recipientHasKeys && (
                             <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">
@@ -943,7 +936,7 @@ export default function TransfersPage() {
 
             {/* ── Modal forward ─────────────────────────────────────────── */}
             <Modal
-                isOpen={forwardTarget !== null}
+                open={forwardTarget !== null}
                 title={`Redirecționează „${forwardTarget?.fileName ?? ''}"`}
                 onClose={() => { if (!forwardSubmitting) setForwardTarget(null); }}
             >

@@ -38,6 +38,8 @@ namespace MAI.Api.Controllers
         private readonly Argon2Options _argon2;
         private readonly ISessionService _sessions;
         private readonly IInvitationService _invitation;
+        private readonly IInvitationDispatcher _invitationDispatcher;
+        private readonly IEmailService _email;
         private readonly ILogger<UsersController> _logger;
 
         public UsersController(
@@ -47,15 +49,19 @@ namespace MAI.Api.Controllers
             Argon2Options argon2,
             ISessionService sessions,
             IInvitationService invitation,
+            IInvitationDispatcher invitationDispatcher,
+            IEmailService email,
             ILogger<UsersController> logger)
         {
-            _context  = context;
-            _hasher   = hasher;
-            _policy   = policy;
-            _argon2   = argon2;
-            _sessions  = sessions;
-            _invitation = invitation;
-            _logger     = logger;
+            _context              = context;
+            _hasher               = hasher;
+            _policy               = policy;
+            _argon2               = argon2;
+            _sessions             = sessions;
+            _invitation           = invitation;
+            _invitationDispatcher = invitationDispatcher;
+            _email                = email;
+            _logger               = logger;
         }
 
         private string CallerUsername => HttpContext.User.Identity?.Name ?? "sistem";
@@ -297,6 +303,13 @@ namespace MAI.Api.Controllers
                     return Conflict(new { message = $"Adresa de email '{email}' este deja folosită." });
             }
 
+            // Invitația prin email se folosește doar dacă are pe unde să plece.
+            // Fără SMTP configurat, un cont cu EmailConfirmed=false nu s-ar mai
+            // putea autentifica niciodată: login-ul îl refuză, iar linkul de
+            // activare nu ajunge la nimeni. În cazul ăsta contul pornește pe
+            // fluxul clasic: confirmat, cu parolă temporară și schimbare forțată.
+            var useInvitation = !string.IsNullOrEmpty(email) && _email.IsConfigured;
+
             try
             {
                 var user = new User
@@ -309,11 +322,11 @@ namespace MAI.Api.Controllers
                     Department         = dto.Department?.Trim() ?? string.Empty,
                     Role               = dto.Role,
                     IsActive           = true,
-                    // Dacă s-a furnizat email, contul pornește neconfirmat —
-                    // userul activează prin linkul din email și își setează parola.
-                    // Fără email, fluxul clasic: contul e direct confirmat, se
-                    // aplică doar schimbarea forțată de parolă.
-                    EmailConfirmed     = string.IsNullOrEmpty(email),
+                    // Cu invitație: contul pornește neconfirmat, userul îl activează
+                    // din linkul primit și își setează singur parola.
+                    // Fără invitație (fără email sau fără SMTP): fluxul clasic —
+                    // cont confirmat, schimbare forțată a parolei temporare.
+                    EmailConfirmed     = !useInvitation,
                     CreatedAt          = DateTime.UtcNow,
                     MustChangePassword = true,
                 };
@@ -336,32 +349,34 @@ namespace MAI.Api.Controllers
                         user.Username, user.Role, CallerUsername, CallerIp);
                 }
 
-                // Dacă emailul a fost furnizat, trimitem invitația asincron,
-                // fără să blocăm răspunsul HTTP. Un eșec SMTP nu anulează crearea.
-                if (!string.IsNullOrEmpty(email))
+                // Invitația pleacă în fundal, cu scope DI propriu (vezi
+                // InvitationDispatcher). Contul e deja salvat; un eșec SMTP nu
+                // anulează crearea, ci apare în audit și se poate retrimite.
+                if (useInvitation)
                 {
-                    _ = _invitation.SendInvitationAsync(user.Id, CancellationToken.None)
-                        .ContinueWith(t =>
-                        {
-                            if (t.IsFaulted)
-                                _logger.LogWarning(t.Exception,
-                                    "Invitația pentru {Username} nu a putut fi trimisă.", user.Username);
-                        }, TaskScheduler.Default);
+                    _invitationDispatcher.Enqueue(user.Id, user.Username);
 
                     return Ok(new
                     {
-                        message = $"Contul @{user.Username} a fost creat. " +
-                                  "Un email de activare a fost trimis la adresa furnizată.",
+                        message = $"Contul @{user.Username} a fost creat. Emailul de activare " +
+                                  "se trimite acum la adresa furnizată. Dacă nu ajunge, îl puteți " +
+                                  "retrimite din lista de utilizatori.",
                         id                 = user.Id,
                         mustChangePassword = true,
+                        // „programată”, nu „trimisă”: trimiterea reală se confirmă
+                        // în jurnalul de audit, nu în acest răspuns.
                         invitationSent     = true,
                     });
                 }
 
                 return Ok(new
                 {
-                    message = $"Contul @{user.Username} a fost creat. La prima autentificare, " +
-                              "utilizatorul va fi obligat să-și aleagă o parolă proprie.",
+                    message = !string.IsNullOrEmpty(email) && !_email.IsConfigured
+                        ? $"Contul @{user.Username} a fost creat. SMTP nu este configurat, așa că nu s-a " +
+                          "trimis email de activare: comunicați parola temporară utilizatorului. La prima " +
+                          "autentificare va fi obligat să-și aleagă o parolă proprie."
+                        : $"Contul @{user.Username} a fost creat. La prima autentificare, " +
+                          "utilizatorul va fi obligat să-și aleagă o parolă proprie.",
                     id = user.Id,
                     mustChangePassword = true,
                     invitationSent     = false,
@@ -406,11 +421,29 @@ namespace MAI.Api.Controllers
             if (!user.IsActive)
                 return BadRequest(new { message = "Contul este dezactivat. Activați-l înainte de a retrimite invitația." });
 
-            await _invitation.SendInvitationAsync(id, ct);
+            if (!_email.IsConfigured)
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+                {
+                    message = "Serverul SMTP nu este configurat, deci invitația nu poate fi trimisă. " +
+                              "Configurați secțiunea Smtp sau resetați parola contului din această pagină.",
+                });
+
+            // Aici trimiterea e AȘTEPTATĂ, pe scope-ul cererii: administratorul a
+            // cerut explicit retrimiterea și trebuie să afle dacă a reușit.
+            var sent = await _invitation.SendInvitationAsync(id, ct);
 
             AddAudit(id, AuditAction.UserUpdated,
-                $"Invitație retrimisă pentru @{user.Username}");
+                sent
+                    ? $"Invitatie retrimisa pentru @{user.Username}"
+                    : $"Retrimiterea invitatiei pentru @{user.Username} a esuat (SMTP indisponibil)",
+                sent ? AuditResult.Success : AuditResult.Failure);
             await _context.SaveChangesAsync(ct);
+
+            if (!sent)
+                return StatusCode(StatusCodes.Status502BadGateway, new
+                {
+                    message = "Serverul SMTP nu a acceptat emailul. Invitația NU a fost trimisă; încercați din nou mai târziu.",
+                });
 
             return Ok(new { message = $"Invitația a fost retrimisă la {user.Email}." });
         }

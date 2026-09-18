@@ -34,7 +34,57 @@ namespace MAI.BusinessLogic.Security
             "qwertyuiop", "admin", "administrator", "welcome", "iloveyou",
             "parola123", "admin123", "password123", "moldova", "chisinau",
             "politia", "ministerul", "mai2026", "secret",
+            "letmein", "parolamea", "parolanoua", "welcomeback", "passwordpassword",
+            "sgdm", "internal", "ministry", "politie", "securitate",
         };
+
+        /// <summary>Înlocuiri „leetspeak” uzuale: P@ssw0rd → password.</summary>
+        private static readonly Dictionary<char, char> Leet = new()
+        {
+            ['@'] = 'a', ['4'] = 'a', ['0'] = 'o', ['1'] = 'i', ['!'] = 'i',
+            ['3'] = 'e', ['5'] = 's', ['$'] = 's', ['7'] = 't', ['9'] = 'g',
+        };
+
+        /// <summary>
+        /// True dacă parola e un cuvânt banal cu decor: majusculă la început,
+        /// cifre și simboluri la coadă, litere înlocuite cu cifre.
+        ///
+        /// Înainte se compara doar parola întreagă cu lista. „password123” era
+        /// respinsă, dar „Password123!” trecea: are 12 caractere, majusculă, cifră
+        /// și simbol, deci bifa toate regulile, deși e printre primele încercate
+        /// de orice atac cu dicționar. Regulile de compoziție singure nu opresc
+        /// asta; tocmai de aceea NIST SP 800-63B cere verificarea contra
+        /// listelor de parole cunoscute.
+        ///
+        /// Se compară doar „nucleul” întreg cu lista, nu se caută subșiruri:
+        /// „Parola-Sigura-2026!” conține „parola”, dar nucleul ei, „parolasigura”,
+        /// nu e banal și trebuie acceptat.
+        /// </summary>
+        private static bool IsCommonVariant(string password)
+        {
+            if (CommonPasswords.Contains(password)) return true;
+
+            // Decorul de la capete: „Password123!” → „Password”, „!!Admin2026” → „Admin”.
+            var start = 0;
+            var end   = password.Length - 1;
+            while (start <= end && !char.IsLetter(password[start])) start++;
+            while (end >= start && !char.IsLetter(password[end]))   end--;
+            if (start > end) return false;
+
+            var core = password.Substring(start, end - start + 1);
+
+            // Nucleul așa cum e, fără cifre și simboluri rămase la mijloc.
+            var lettersOnly = new string(core.Where(char.IsLetter).ToArray());
+            if (CommonPasswords.Contains(lettersOnly)) return true;
+
+            // Nucleul după înlocuirile leetspeak: „P@ssw0rd” → „password”.
+            var deLeet = new string(core
+                .Select(c => Leet.TryGetValue(char.ToLowerInvariant(c), out var r) ? r : c)
+                .Where(char.IsLetter)
+                .ToArray());
+
+            return CommonPasswords.Contains(deLeet);
+        }
 
         public PasswordPolicy(PasswordPolicyOptions options) =>
             _options = options ?? new PasswordPolicyOptions();
@@ -67,8 +117,8 @@ namespace MAI.BusinessLogic.Security
             if (_options.RequireNonAlphanumeric && password.All(char.IsLetterOrDigit))
                 result.Errors.Add("Parola trebuie să conțină cel puțin un caracter special.");
 
-            if (CommonPasswords.Contains(password))
-                result.Errors.Add("Parola este prea comună și ușor de ghicit.");
+            if (IsCommonVariant(password))
+                result.Errors.Add("Parola este prea comună și ușor de ghicit (un cuvânt banal cu cifre sau simboluri adăugate rămâne banal).");
 
             if (_options.ForbidUsernameInPassword
                 && !string.IsNullOrWhiteSpace(username)

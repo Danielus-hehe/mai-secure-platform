@@ -203,6 +203,19 @@ services:
       # Originile frontend-ului. Fara ele, browserul refuza fiecare raspuns.
       Cors__AllowedOrigins__0: ${FRONTEND_ORIGIN:-http://localhost:5173}
 
+      # Adresa din linkul de activare trimis pe email. Trebuie sa fie adresa la
+      # care utilizatorii deschid efectiv frontend-ul.
+      Frontend__BaseUrl: ${FRONTEND_ORIGIN:-http://localhost:5173}
+
+      # SMTP pentru notificari si invitatii. Lasate goale, API-ul porneste fara
+      # email: conturile noi primesc parola temporara, transferurile nu notifica.
+      Smtp__Host: ${SMTP_HOST:-}
+      Smtp__Port: ${SMTP_PORT:-465}
+      Smtp__UseSsl: ${SMTP_USE_SSL:-true}
+      Smtp__From: ${SMTP_FROM:-}
+      Smtp__Username: ${SMTP_USERNAME:-}
+      MAI_SMTP_PASSWORD: ${MAI_SMTP_PASSWORD:-}
+
       # In spatele unui reverse proxy: fara asta, toti utilizatorii ajung in
       # aceeasi galeata de rate limit, fiindca RemoteIpAddress e IP-ul proxy-ului.
       RateLimit__BehindReverseProxy: "false"

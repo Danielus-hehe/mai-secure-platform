@@ -78,7 +78,11 @@ namespace MAI.BusinessLogic.Services
         public async Task<PasswordVerificationResult> VerifyPasswordAsync(
             string password, string? storedHash, CancellationToken ct = default)
         {
-            if (password is null || string.IsNullOrWhiteSpace(storedHash))
+            // Parola goală: Konscious.Argon2 refuză un input gol cu ArgumentException,
+            // care ajungea ca 500 la login cu câmpul de parolă gol. O parolă goală
+            // nu poate corespunde niciunui hash (politica o respinge la creare),
+            // deci răspunsul corect e Failed — cu timp simulat, ca la hash invalid.
+            if (string.IsNullOrEmpty(password) || string.IsNullOrWhiteSpace(storedHash))
             {
                 await SimulateVerificationAsync(ct);
                 return PasswordVerificationResult.Failed;

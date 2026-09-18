@@ -109,8 +109,21 @@ namespace MAI.BusinessLogic.Security
 
             var plain = new byte[cipherLength];
 
-            using (var aes = new AesGcm(_key, TagSize))
+            // În .NET 8, AesGcm aruncă AuthenticationTagMismatchException (o
+            // subclasă). O normalizăm la CryptographicException cu mesaj propriu:
+            // apelanții tratează un singur tip, iar mesajul nu divulgă dacă a
+            // fost cheia greșită sau datele alterate — ambele arată la fel.
+            try
+            {
+                using var aes = new AesGcm(_key, TagSize);
                 aes.Decrypt(nonce, cipher, tag, plain);
+            }
+            catch (AuthenticationTagMismatchException ex)
+            {
+                CryptographicOperations.ZeroMemory(plain);
+                throw new CryptographicException(
+                    "Valoarea protejata nu poate fi decriptata: cheie diferita sau date alterate.", ex);
+            }
 
             return Encoding.UTF8.GetString(plain);
         }
