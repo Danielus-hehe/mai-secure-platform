@@ -1,4 +1,4 @@
-import { Suspense } from 'react';
+import { Suspense, type ReactNode } from 'react';
 import { Outlet } from 'react-router-dom';
 import ErrorBoundary from './ErrorBoundary';
 
@@ -16,11 +16,16 @@ import ErrorBoundary from './ErrorBoundary';
  * butonul de reîncercare — dar remontarea la schimbarea rutei ar fi o adăugire
  * naturală dacă apar cazuri în care eroarea persistă între pagini.
  */
-export function RouteBoundary() {
+export function RouteBoundary({ children }: { children?: ReactNode }) {
+    // Două moduri de folosire:
+    //   • ca rută-părinte (<Route element={<RouteBoundary />}>) → randează <Outlet />;
+    //   • ca înveliș direct (<RouteBoundary><Pagina /></RouteBoundary>) → randează
+    //     copiii. Pagina /confirm-account e folosită așa; fără ramura asta,
+    //     <Outlet /> nu avea ce randa și pagina de activare ieșea goală.
     return (
         <ErrorBoundary>
             <Suspense fallback={<RouteFallback />}>
-                <Outlet />
+                {children ?? <Outlet />}
             </Suspense>
         </ErrorBoundary>
     );

@@ -55,7 +55,7 @@ namespace MAI.Api.Services
         // ═════════════════════════════════════════════════════════════════════
 
         /// <inheritdoc />
-        public async Task SendInvitationAsync(Guid userId, CancellationToken ct = default)
+        public async Task<bool> SendInvitationAsync(Guid userId, CancellationToken ct = default)
         {
             var user = await _db.Users.FindAsync([userId], ct)
                 ?? throw new InvalidOperationException($"Userul {userId} nu există.");
@@ -76,17 +76,30 @@ namespace MAI.Api.Services
             var baseUrl = (_config["Frontend:BaseUrl"] ?? "http://localhost:5173").TrimEnd('/');
             var link    = $"{baseUrl}/confirm-account?token={Uri.EscapeDataString(rawToken)}";
 
-            // Dacă emailul eșuează, aruncăm excepție (apelantul poate decide dacă loghează
-            // sau ignoră). SendInvitationAsync din UsersController o prinde în ContinueWith.
-            await _email.SendInvitationEmailAsync(
+            // IEmailService nu aruncă: întoarce false la SMTP neconfigurat sau căzut.
+            // Înainte rezultatul era ignorat și logul spunea „Invitație trimisă”
+            // chiar când emailul nu plecase.
+            var sent = await _email.SendInvitationEmailAsync(
                 user.Email,
                 user.FullName ?? user.Username,
                 link,
                 ct);
 
-            _logger.LogInformation(
-                "Invitație trimisă pentru {UserId} ({Email}), expiră la {Expiry:u}",
-                userId, user.Email, user.InvitationTokenExpiry);
+            if (sent)
+            {
+                _logger.LogInformation(
+                    "Invitație trimisă pentru {UserId} ({Email}), expiră la {Expiry:u}",
+                    userId, user.Email, user.InvitationTokenExpiry);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Invitația pentru {UserId} ({Email}) NU a fost trimisă (SMTP neconfigurat sau indisponibil). " +
+                    "Tokenul e salvat; administratorul o poate retrimite din pagina Utilizatori.",
+                    userId, user.Email);
+            }
+
+            return sent;
         }
 
         // ═════════════════════════════════════════════════════════════════════

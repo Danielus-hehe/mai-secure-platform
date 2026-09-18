@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using MAI.Domain.Entities;
 
@@ -23,6 +23,16 @@ namespace MAI.DataAccessLayer.Configurations
             builder.HasIndex(u => u.Username)
                 .IsUnique()
                 .HasDatabaseName("UX_Users_Username");
+
+            // Tokenul de invitație (hash SHA-256) e căutat la fiecare deschidere a
+            // linkului de activare. Unic, ca un hash să indice un singur cont;
+            // parțial, ca toate conturile fără invitație (NULL) să nu intre în
+            // index. Declarat aici ca EF să-l cunoască: altfel următorul
+            // `migrations add` l-ar vedea doar în bază și ar genera un DropIndex.
+            builder.HasIndex(u => u.InvitationToken)
+                .IsUnique()
+                .HasFilter("\"InvitationToken\" IS NOT NULL")
+                .HasDatabaseName("IX_Users_InvitationToken");
 
             // Indexurile care contează efectiv pentru unicitate NU apar aici, ci
             // în migrarea CaseInsensitiveUserIndexes, ca SQL:

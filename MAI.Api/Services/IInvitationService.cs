@@ -13,8 +13,19 @@ namespace MAI.Api.Services
         /// Generează un token de invitație valid 72 de ore, îl salvează pe user
         /// (hash SHA-256) și trimite emailul cu linkul de activare.
         /// Userul trebuie să aibă adresă de email configurată.
+        ///
+        /// Folosește <c>AppDbContext</c>-ul scope-ului curent. Apelantul care vrea
+        /// să nu aștepte trimiterea (crearea contului) NU are voie să pornească
+        /// metoda fire-and-forget pe scope-ul cererii HTTP: scope-ul se închide la
+        /// răspuns și contextul devine disposed. Se folosește
+        /// <see cref="IInvitationDispatcher"/>, care își creează propriul scope.
         /// </summary>
-        Task SendInvitationAsync(Guid userId, CancellationToken ct = default);
+        /// <returns>
+        /// True dacă emailul a plecat. False dacă serverul SMTP nu e configurat
+        /// sau a refuzat trimiterea — tokenul rămâne salvat, deci invitația se
+        /// poate retrimite din /users fără alte efecte.
+        /// </returns>
+        Task<bool> SendInvitationAsync(Guid userId, CancellationToken ct = default);
 
         /// <summary>
         /// Validează tokenul, hashează parola cu Argon2id și activează contul.

@@ -1,4 +1,4 @@
-﻿using MAI.Api.BackgroundJobs;
+using MAI.Api.BackgroundJobs;
 using MAI.Api.Middleware;
 using MAI.Api.Options;
 using MAI.Api.Security;
@@ -476,10 +476,21 @@ try
 
     if (!smtpOptions.IsConfigured)
     {
+        // Valorile-șablon („YOUR_SMTP_HOST_HERE”) contează ca lipsă: altfel
+        // serviciul încerca conexiuni spre un host inexistent la fiecare transfer.
+        // Fără SMTP, conturile noi pornesc direct confirmate, cu parolă temporară
+        // (vezi UsersController.CreateUser) — nu rămân blocate așteptând un email.
         Log.Warning(
-            "SMTP nu este configurat (Smtp:Host/From/Username/Password lipsesc). " +
-            "Notificările email sunt dezactivate. Setați MAI_SMTP_PASSWORD și " +
-            "completați secțiunea Smtp din appsettings pentru a le activa.");
+            "SMTP nu este configurat; notificările email și invitațiile sunt dezactivate. " +
+            "Câmpuri lipsă sau rămase pe valoarea-șablon: {Missing}",
+            string.Join(", ", smtpOptions.MissingFields()));
+    }
+    else
+    {
+        Log.Information(
+            "SMTP: {Host}:{Port} ({Mode}), expeditor {From}",
+            smtpOptions.Host, smtpOptions.Port,
+            smtpOptions.UseSsl ? "SSL implicit" : "STARTTLS", smtpOptions.From);
     }
 
     builder.Services.AddSingleton(smtpOptions);
@@ -487,6 +498,11 @@ try
 
     // Invitație cont nou — Scoped (are nevoie de AppDbContext, care e Scoped).
     builder.Services.AddScoped<IInvitationService, InvitationService>();
+
+    // Trimiterea în fundal a invitației la crearea contului. Singleton, dar
+    // fiecare trimitere își creează propriul scope (deci propriul AppDbContext):
+    // scope-ul cererii HTTP se închide la răspuns și nu poate fi folosit după.
+    builder.Services.AddSingleton<IInvitationDispatcher, InvitationDispatcher>();
 
     var app = builder.Build();
 

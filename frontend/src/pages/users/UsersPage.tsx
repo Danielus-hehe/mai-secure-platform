@@ -47,6 +47,7 @@ interface PagedUsers {
 }
 
 type AppUser = User & {
+    emailConfirmed: boolean;
     isLockedOut: boolean;
     lockoutEndsAt: string | null;
     lastLoginAt: string | null;
@@ -173,22 +174,23 @@ export default function UsersPage() {
 
     /* ── Dezactivare / Activare ──────────────────────────────────────── */
     const handleToggleActive = (u: AppUser) => {
-        async function handleResendInvitation(u: AppUser) {
-            if (!confirm(`Retrimiți invitația de activare la ${u.email || u.username}?`)) return;
-            try {
-                const { data } = await api.post<{ message: string }>(
-                    `/Users/${u.id}/resend-invitation`
-                );
-                toast.success(data.message ?? 'Invitație retrimisă.');
-            } catch {
-                toast.error('Eroare la retrimiterea invitației.');
-            }
-        }
-
         if (u.isActive) {
             setConfirmTarget(u);           // cere confirmare
         } else {
             void activateUser(u);
+        }
+    };
+
+    /* ── Retrimitere invitație de activare ───────────────────────────── */
+    const handleResendInvitation = async (u: AppUser) => {
+        if (!confirm(`Retrimiți invitația de activare la ${u.email || u.username}?`)) return;
+        try {
+            const { data } = await api.post<{ message: string }>(
+                `/Users/${u.id}/resend-invitation`
+            );
+            toast.success(data.message ?? 'Invitație retrimisă.');
+        } catch (e: unknown) {
+            toast.error(apiErrorMessage(e, 'Invitația nu a putut fi retrimisă.'));
         }
     };
 

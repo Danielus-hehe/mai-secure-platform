@@ -3,6 +3,7 @@ using System;
 using MAI.DataAccessLayer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace MAI.DataAccessLayer.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260918120000_AddCategoryRecipientsInvitation")]
+    partial class AddCategoryRecipientsInvitation
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -69,7 +72,7 @@ namespace MAI.DataAccessLayer.Migrations
                     b.HasIndex("Action", "Result", "Timestamp")
                         .HasDatabaseName("IX_AuditLogs_Action_Result_Timestamp");
 
-                    b.ToTable("AuditLogs", (string)null);
+                    b.ToTable("AuditLogs");
                 });
 
             modelBuilder.Entity("MAI.Domain.Entities.Document", b =>
@@ -107,7 +110,7 @@ namespace MAI.DataAccessLayer.Migrations
 
                     b.HasIndex("CreatedById");
 
-                    b.ToTable("Documents", (string)null);
+                    b.ToTable("Documents");
                 });
 
             modelBuilder.Entity("MAI.Domain.Entities.DocumentVersion", b =>
@@ -145,7 +148,7 @@ namespace MAI.DataAccessLayer.Migrations
 
                     b.HasIndex("DocumentId");
 
-                    b.ToTable("DocumentVersions", (string)null);
+                    b.ToTable("DocumentVersions");
                 });
 
             modelBuilder.Entity("MAI.Domain.Entities.FileTransfer", b =>
@@ -251,7 +254,7 @@ namespace MAI.DataAccessLayer.Migrations
                     b.HasIndex("SenderId", "CreatedAt")
                         .HasDatabaseName("IX_FileTransfers_Sender_CreatedAt");
 
-                    b.ToTable("FileTransfers", (string)null);
+                    b.ToTable("FileTransfers");
                 });
 
             modelBuilder.Entity("MAI.Domain.Entities.TransferRecipient", b =>
@@ -283,7 +286,7 @@ namespace MAI.DataAccessLayer.Migrations
                     b.HasIndex("UserId")
                         .HasDatabaseName("IX_TransferRecipients_UserId");
 
-                    b.ToTable("TransferRecipients", (string)null);
+                    b.ToTable("TransferRecipients");
                 });
 
             modelBuilder.Entity("MAI.Domain.Entities.User", b =>
@@ -414,7 +417,7 @@ namespace MAI.DataAccessLayer.Migrations
                         .IsUnique()
                         .HasDatabaseName("UX_Users_Username");
 
-                    b.ToTable("Users", (string)null);
+                    b.ToTable("Users");
                 });
 
             modelBuilder.Entity("MAI.Domain.Entities.UserSession", b =>
@@ -467,7 +470,7 @@ namespace MAI.DataAccessLayer.Migrations
                     b.HasIndex("UserId", "RevokedAt")
                         .HasDatabaseName("IX_UserSessions_UserId_RevokedAt");
 
-                    b.ToTable("UserSessions", (string)null);
+                    b.ToTable("UserSessions");
                 });
 
             modelBuilder.Entity("MAI.Domain.Entities.Document", b =>

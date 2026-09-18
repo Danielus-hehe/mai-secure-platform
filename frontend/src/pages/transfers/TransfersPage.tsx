@@ -943,7 +943,7 @@ export default function TransfersPage() {
 
             {/* ── Modal forward ─────────────────────────────────────────── */}
             <Modal
-                isOpen={forwardTarget !== null}
+                open={forwardTarget !== null}
                 title={`Redirecționează „${forwardTarget?.fileName ?? ''}"`}
                 onClose={() => { if (!forwardSubmitting) setForwardTarget(null); }}
             >
