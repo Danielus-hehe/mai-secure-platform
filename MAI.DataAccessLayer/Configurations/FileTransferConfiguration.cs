@@ -20,6 +20,10 @@ namespace MAI.DataAccessLayer.Configurations
                 .HasForeignKey(f => f.RecipientId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            // Destinatarii suplimentari (forward). Relația inversă e configurată
+            // în TransferRecipientConfiguration (HasOne.WithMany).
+            // Nu duplicăm HasMany aici ca să nu creăm relații ambigue în EF.
+
             // ── Limite de lungime ────────────────────────────────────────────
             // Fără ele, Npgsql creează 'text' nemărginit: un client poate trimite
             // un nume de fișier de 10 MB și umple baza de date.

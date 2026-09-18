@@ -27,7 +27,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     ArrowLeftRight, Upload, Download, Search, Trash2, Loader2, Undo2, CheckCheck,
-    ShieldCheck, ShieldAlert, Lock, Inbox, Send, FileWarning, AlertTriangle,
+    ShieldCheck, ShieldAlert, Lock, Inbox, Send, FileWarning, AlertTriangle, Share2, X,
 } from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader';
 import { apiErrorMessage } from '../../api/errors';
@@ -44,8 +44,9 @@ import { formatDateTime, formatFileSize, truncateSha } from '../../utils/format'
 import {
     listTransfers, listRecipients, uploadTransfer, getEnvelope,
     fetchCiphertext, confirmTransfer, deleteTransfer, revokeTransfer,
+    forwardTransfer, searchUsers,
     TransferCategory, CATEGORY_LABELS,
-    type TransferListItem, type Recipient, type PagedResult,
+    type TransferListItem, type Recipient, type PagedResult, type UserSearchResult,
 } from '../../api/transfers';
 import {
     encryptFileForRecipient, decryptTransfer, saveDecryptedFile,
@@ -186,6 +187,15 @@ export default function TransfersPage() {
     // ── Descărcare ───────────────────────────────────────────────────────────
     const [busyId, setBusyId] = useState<string | null>(null);
     const [deletingId, setDeletingId] = useState<string | null>(null);
+
+    // ── Stare forward ────────────────────────────────────────────────────────
+    const [forwardTarget, setForwardTarget]       = useState<TransferListItem | null>(null);
+    const [forwardQuery, setForwardQuery]         = useState('');
+    const [forwardResults, setForwardResults]     = useState<UserSearchResult[]>([]);
+    const [forwardSelected, setForwardSelected]   = useState<UserSearchResult[]>([]);
+    const [forwardSearching, setForwardSearching] = useState(false);
+    const [forwardSubmitting, setForwardSubmitting] = useState(false);
+    const [forwardDropOpen, setForwardDropOpen]   = useState(false);
 
     useEffect(() => {
         const timer = window.setTimeout(() => {
@@ -414,6 +424,103 @@ export default function TransfersPage() {
         }
     };
 
+    // ── Forward: căutare utilizatori (debounced) ─────────────────────────────
+
+    useEffect(() => {
+        if (!forwardQuery.trim()) {
+            setForwardResults([]);
+            setForwardDropOpen(false);
+            return;
+        }
+        const timer = window.setTimeout(async () => {
+            setForwardSearching(true);
+            try {
+                const results = await searchUsers(forwardQuery);
+                // Exclude utilizatorii deja selectați
+                const selectedIds = new Set(forwardSelected.map((u) => u.id));
+                setForwardResults(results.filter((u) => !selectedIds.has(u.id)));
+                setForwardDropOpen(true);
+            } catch {
+                // Eroare silențioasă — utilizatorul poate reîncerca
+            } finally {
+                setForwardSearching(false);
+            }
+        }, 300);
+        return () => window.clearTimeout(timer);
+    }, [forwardQuery, forwardSelected]);
+
+    const openForward = (transfer: TransferListItem) => {
+        setForwardTarget(transfer);
+        setForwardQuery('');
+        setForwardResults([]);
+        setForwardSelected([]);
+        setForwardDropOpen(false);
+    };
+
+    const addForwardRecipient = (user: UserSearchResult) => {
+        setForwardSelected((prev) => [...prev, user]);
+        setForwardQuery('');
+        setForwardResults([]);
+        setForwardDropOpen(false);
+    };
+
+    const removeForwardRecipient = (userId: string) => {
+        setForwardSelected((prev) => prev.filter((u) => u.id !== userId));
+    };
+
+    // ── Forward: trimitere ────────────────────────────────────────────────────
+
+    const handleForwardSubmit = async () => {
+        if (!forwardTarget || forwardSelected.length === 0 || !keys) return;
+
+        setForwardSubmitting(true);
+        try {
+            // 1. Plicul conține wrappedKeyForMe — DEK-ul împachetat pentru userul curent.
+            const envelope = await getEnvelope(forwardTarget.id);
+
+            // 2. Despachetăm DEK-ul cu cheia privată proprie.
+            const rawDek = await crypto.subtle.decrypt(
+                { name: 'RSA-OAEP' },
+                keys.decryptionKey,
+                Uint8Array.from(atob(envelope.wrappedKeyForMe), (c) => c.charCodeAt(0))
+            );
+
+            // 3. Re-împachetăm DEK-ul cu cheia publică a fiecărui destinatar.
+            //    Operațiile sunt independente — le rulăm în paralel.
+            const recipientInputs = await Promise.all(
+                forwardSelected.map(async (user) => {
+                    const pubKey = await crypto.subtle.importKey(
+                        'spki',
+                        Uint8Array.from(atob(user.publicKeyEncryption), (c) => c.charCodeAt(0)),
+                        { name: 'RSA-OAEP', hash: 'SHA-256' },
+                        false,
+                        ['encrypt']
+                    );
+                    const wrapped = await crypto.subtle.encrypt(
+                        { name: 'RSA-OAEP' },
+                        pubKey,
+                        rawDek
+                    );
+                    // base64 fără bucle pentru ArrayBuffer → string
+                    const bytes = new Uint8Array(wrapped);
+                    let binary = '';
+                    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+                    return { userId: user.id, encryptedKeyForUser: btoa(binary) };
+                })
+            );
+
+            // 4. Trimitem la server.
+            const result = await forwardTransfer(forwardTarget.id, recipientInputs);
+            toast.success(result.message);
+            setForwardTarget(null);
+            await load();
+        } catch (err) {
+            toast.error(apiErrorMessage(err, 'Redirecționarea a eșuat.'));
+        } finally {
+            setForwardSubmitting(false);
+        }
+    };
+
     // ── Render ───────────────────────────────────────────────────────────────
 
     const selectClass =
@@ -618,6 +725,19 @@ export default function TransfersPage() {
                                                         : <Download size={15} />}
                                                 </Button>
 
+                                                {(t.status === 'Pending' || t.status === 'Downloaded') && (
+                                                    <Button
+                                                        variant="ghost"
+                                                        className="!px-2.5 !py-1.5 text-mai-600 hover:bg-mai-50
+                                                            dark:text-mai-400 dark:hover:bg-mai-900/30"
+                                                        disabled={!keys}
+                                                        onClick={() => openForward(t)}
+                                                        title={keys ? 'Redirecționează' : 'Cheile nu sunt descuiate'}
+                                                    >
+                                                        <Share2 size={15} />
+                                                    </Button>
+                                                )}
+
                                                 {t.canRevoke && (
                                                     <Button
                                                         variant="ghost"
@@ -816,6 +936,147 @@ export default function TransfersPage() {
                         >
                             {sending ? <Loader2 size={16} className="animate-spin" /> : <ShieldAlert size={16} />}
                             Criptează și trimite
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* ── Modal forward ─────────────────────────────────────────── */}
+            <Modal
+                isOpen={forwardTarget !== null}
+                title={`Redirecționează „${forwardTarget?.fileName ?? ''}"`}
+                onClose={() => { if (!forwardSubmitting) setForwardTarget(null); }}
+            >
+                <div className="space-y-4">
+                    <p className="text-sm text-mai-500 dark:text-mai-400">
+                        Fișierul rămâne criptat. DEK-ul va fi re-împachetat în browser
+                        cu cheia publică a fiecărui destinatar ales.
+                    </p>
+
+                    {/* Căutare utilizatori */}
+                    <div className="relative">
+                        <label className="mb-1.5 block text-sm font-medium text-mai-700 dark:text-mai-200">
+                            Caută destinatar
+                        </label>
+                        <div className="relative">
+                            <input
+                                type="text"
+                                placeholder="Nume, username sau departament…"
+                                value={forwardQuery}
+                                disabled={forwardSubmitting}
+                                onChange={(e) => setForwardQuery(e.target.value)}
+                                onFocus={() => { if (forwardResults.length > 0) setForwardDropOpen(true); }}
+                                className={`${selectClass} w-full pr-8`}
+                            />
+                            {forwardSearching && (
+                                <Loader2 size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2
+                                    animate-spin text-mai-400" />
+                            )}
+                        </div>
+
+                        {/* Dropdown rezultate */}
+                        {forwardDropOpen && forwardResults.length > 0 && (
+                            <ul className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg border
+                                border-mai-200 dark:border-mai-600 bg-white dark:bg-mai-800 shadow-lg">
+                                {forwardResults.map((u) => (
+                                    <li key={u.id}>
+                                        <button
+                                            type="button"
+                                            className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left
+                                                text-sm hover:bg-mai-50 dark:hover:bg-mai-700
+                                                focus:bg-mai-50 dark:focus:bg-mai-700 outline-none"
+                                            onClick={() => addForwardRecipient(u)}
+                                        >
+                                            <span className="font-medium text-mai-800 dark:text-mai-200">
+                                                {u.fullName}
+                                            </span>
+                                            {u.department && (
+                                                <span className="text-xs text-mai-400 dark:text-mai-500">
+                                                    — {u.department}
+                                                </span>
+                                            )}
+                                        </button>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+
+                        {forwardDropOpen && !forwardSearching && forwardResults.length === 0 && forwardQuery.trim() && (
+                            <div className="absolute z-10 mt-1 w-full rounded-lg border border-mai-200
+                                dark:border-mai-600 bg-white dark:bg-mai-800 px-3 py-2.5 text-sm
+                                text-mai-400 dark:text-mai-500 shadow-lg">
+                                Niciun utilizator cu chei generate găsit.
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Destinatari selectați */}
+                    {forwardSelected.length > 0 && (
+                        <div className="space-y-1.5">
+                            <p className="text-xs font-medium uppercase tracking-wide text-mai-400 dark:text-mai-500">
+                                Destinatari ({forwardSelected.length})
+                            </p>
+                            <ul className="space-y-1">
+                                {forwardSelected.map((u) => (
+                                    <li key={u.id}
+                                        className="flex items-center justify-between rounded-lg
+                                            bg-mai-50 dark:bg-mai-700/40 px-3 py-2">
+                                        <span className="text-sm text-mai-800 dark:text-mai-200">
+                                            {u.fullName}
+                                            {u.department && (
+                                                <span className="ml-2 text-xs text-mai-400">
+                                                    {u.department}
+                                                </span>
+                                            )}
+                                        </span>
+                                        <button
+                                            type="button"
+                                            disabled={forwardSubmitting}
+                                            onClick={() => removeForwardRecipient(u.id)}
+                                            className="ml-2 rounded p-0.5 text-mai-400 hover:text-red-500
+                                                dark:hover:text-red-400 transition-colors"
+                                            title="Elimină destinatarul"
+                                        >
+                                            <X size={14} />
+                                        </button>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+
+                    {/* Notă securitate */}
+                    <div className="rounded-lg border border-mai-100 dark:border-mai-700
+                        bg-mai-50 dark:bg-mai-900 px-4 py-3">
+                        <p className="text-xs leading-relaxed text-mai-500 dark:text-mai-400">
+                            DEK-ul se despachetează și re-împachetează pe acest calculator.
+                            Serverul vede doar blocuri RSA-OAEP opace — nu accesează conținutul.
+                        </p>
+                    </div>
+
+                    {forwardSubmitting && (
+                        <div className="flex items-center gap-2 text-sm text-mai-600 dark:text-mai-300">
+                            <Loader2 size={15} className="animate-spin" />
+                            Se re-împachetează cheile și se trimite…
+                        </div>
+                    )}
+
+                    <div className="flex justify-end gap-2 pt-2">
+                        <Button
+                            variant="secondary"
+                            disabled={forwardSubmitting}
+                            onClick={() => setForwardTarget(null)}
+                        >
+                            Anulează
+                        </Button>
+                        <Button
+                            disabled={forwardSubmitting || forwardSelected.length === 0 || !keys}
+                            onClick={() => void handleForwardSubmit()}
+                        >
+                            {forwardSubmitting
+                                ? <Loader2 size={16} className="animate-spin" />
+                                : <Share2 size={16} />}
+                            Redirecționează
                         </Button>
                     </div>
                 </div>

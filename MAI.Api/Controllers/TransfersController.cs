@@ -15,28 +15,6 @@ using System.Text;
 
 namespace MAI.Api.Controllers
 {
-    /// <summary>
-    /// Transferuri securizate de fișiere între angajați.
-    ///
-    /// Serverul nu vede niciodată conținutul. Clientul criptează fișierul cu o
-    /// cheie AES-256-GCM aleatorie, împachetează cheia cu cheile publice RSA ale
-    /// destinatarului și ale expeditorului, semnează amprenta conținutului în
-    /// clar cu RSA-PSS, apoi trimite aici doar cifrotextul și plicul.
-    ///
-    /// Rolul controllerului este strict: autorizare, validare structurală,
-    /// stocarea octeților opaci și jurnalizare. Nicio operație criptografică
-    /// asupra conținutului nu se face pe server — dacă s-ar face, întreaga
-    /// garanție end-to-end ar dispărea.
-    ///
-    /// Cheile de obiect urmează structura:
-    ///   {department}/{yyyy}/{MM}/{transferId:N}.enc
-    /// Ex.: directia-it/2026/09/a1b2c3...enc
-    ///
-    /// Un singur bucket ("mai-secure"), prefixul de prim nivel este departamentul
-    /// expeditorului, normalizat Unicode → ASCII slug. Transferurile din
-    /// departamente diferite sunt izolate vizual și pot primi politici S3 diferite
-    /// fără să fie mutate.
-    /// </summary>
     [Authorize]
     [ApiController]
     [Route("api/[controller]")]
@@ -72,19 +50,15 @@ namespace MAI.Api.Controllers
             HttpContext.User.IsInRole(nameof(UserRole.Administrator))
             || HttpContext.User.FindFirst(ClaimTypes.Role)?.Value == ((int)UserRole.Administrator).ToString();
 
-        // Lungimile maxime acceptate pentru câmpurile base64 ale plicului.
-        // RSA-3072 produce blocuri de 384 de octeți → 512 caractere base64.
-        private const int MaxWrappedKeyChars = 600;
-
-        /// <summary>Motivul retragerii e text liber de la utilizator; se trunchiază.</summary>
+        private const int MaxWrappedKeyChars  = 600;
         private const int MaxRevokeReasonChars = 256;
         private const int MaxIvChars           = 32;
+        private const int MaxForwardRecipients = 20;
 
-        /// <summary>Durata implicită de valabilitate dacă expeditorul nu specifică alta.</summary>
         private static readonly TimeSpan DefaultExpiry = TimeSpan.FromDays(7);
 
         // ═════════════════════════════════════════════════════════════════════
-        // GET api/Transfers?search=&status=&direction=&sortBy=&sortDir=&page=&pageSize=
+        // GET api/Transfers
         // ═════════════════════════════════════════════════════════════════════
         [HttpGet]
         public async Task<IActionResult> GetAll(
@@ -100,25 +74,26 @@ namespace MAI.Api.Controllers
             var userId     = CurrentUserId;
             var pagination = new PaginationQuery { Page = page, PageSize = pageSize };
 
+            // Includ transferurile unde utilizatorul este expeditor, destinatar
+            // original sau destinatar adăugat ulterior prin forward.
             var query = _context.FileTransfers
                 .AsNoTracking()
                 .Include(t => t.Sender)
                 .Include(t => t.Recipient)
-                .Where(t => t.SenderId == userId || t.RecipientId == userId);
+                .Where(t => t.SenderId == userId
+                         || t.RecipientId == userId
+                         || t.Recipients.Any(r => r.UserId == userId));
 
             if (string.Equals(direction, "sent", StringComparison.OrdinalIgnoreCase))
                 query = query.Where(t => t.SenderId == userId);
             else if (string.Equals(direction, "received", StringComparison.OrdinalIgnoreCase))
-                query = query.Where(t => t.RecipientId == userId);
+                query = query.Where(t =>
+                    t.RecipientId == userId || t.Recipients.Any(r => r.UserId == userId));
 
             if (!string.IsNullOrWhiteSpace(status) &&
                 Enum.TryParse<TransferStatus>(status, ignoreCase: true, out var statusEnum))
-            {
                 query = query.Where(t => t.Status == statusEnum);
-            }
 
-            // Căutare server-side: ILike se traduce în ILIKE PostgreSQL, deci
-            // filtrarea rămâne în baza de date.
             if (!string.IsNullOrWhiteSpace(search))
             {
                 var term = $"%{search.Trim()}%";
@@ -133,8 +108,7 @@ namespace MAI.Api.Controllers
             }
 
             var total = await query.CountAsync(ct);
-
-            query = ApplySort(query, sortBy, sortDir);
+            query     = ApplySort(query, sortBy, sortDir);
 
             var raw = await query
                 .Skip(pagination.Skip)
@@ -178,15 +152,10 @@ namespace MAI.Api.Controllers
             return Ok(PagedResult<TransferDto>.Create(items, total, pagination));
         }
 
-        /// <summary>
-        /// Sortare pe coloană. Lista de coloane permise este fixă — nu se construiește
-        /// SQL din string-ul primit de la client.
-        /// </summary>
         private static IQueryable<FileTransfer> ApplySort(
             IQueryable<FileTransfer> query, string sortBy, string sortDir)
         {
             var asc = string.Equals(sortDir, "asc", StringComparison.OrdinalIgnoreCase);
-
             return sortBy?.ToLowerInvariant() switch
             {
                 "filename" => asc ? query.OrderBy(t => t.FileName)  : query.OrderByDescending(t => t.FileName),
@@ -197,32 +166,22 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // POST api/Transfers — încarcă cifrotextul plus plicul criptografic
+        // POST api/Transfers
         // ═════════════════════════════════════════════════════════════════════
-        /// <summary>
-        /// Primește cifrotextul deja criptat în browser. Corpul cererii nu este
-        /// citit niciodată în memorie: ASP.NET îl bufferizează pe disc temporar,
-        /// iar de acolo trece în depozit ca stream.
-        /// </summary>
         [HttpPost]
         [Consumes("multipart/form-data")]
-        [RequestSizeLimit(UploadLimits.MaxRequestBytes)]  // 50 MB + antet multipart; vezi UploadLimits
+        [RequestSizeLimit(UploadLimits.MaxRequestBytes)]
         public async Task<IActionResult> Upload(
             [FromForm] UploadTransferRequest request,
             CancellationToken ct)
         {
             var senderId = CurrentUserId;
 
-            // ── Validări structurale ─────────────────────────────────────────
-
             if (request.File is null || request.File.Length == 0)
                 return BadRequest(new { message = "Cifrotextul este obligatoriu." });
 
             if (request.File.Length > _storageOptions.MaxFileSizeBytes)
-                return BadRequest(new
-                {
-                    message = $"Fișierul depășește limita de {_storageOptions.MaxFileSizeMb} MB."
-                });
+                return BadRequest(new { message = $"Fișierul depășește limita de {_storageOptions.MaxFileSizeMb} MB." });
 
             if (!Guid.TryParse(request.RecipientId, out var recipientGuid))
                 return BadRequest(new { message = "recipientId invalid." });
@@ -233,8 +192,6 @@ namespace MAI.Api.Controllers
             if (!TryValidateEnvelope(request, out var envelopeError))
                 return BadRequest(new { message = envelopeError });
 
-            // ExpiresAt: clientul poate trimite o dată; dacă lipsește se aplică
-            // implicit 7 zile. Se impune că data să nu fie în trecut.
             DateTime expiresAt;
             if (request.ExpiresAt.HasValue)
             {
@@ -247,32 +204,20 @@ namespace MAI.Api.Controllers
                 expiresAt = DateTime.UtcNow.Add(DefaultExpiry);
             }
 
-            // ── Verificarea destinatarului ───────────────────────────────────
-
             var recipient = await _context.Users
                 .AsNoTracking()
                 .FirstOrDefaultAsync(u => u.Id == recipientGuid, ct);
 
             if (recipient is null)
                 return BadRequest(new { message = "Destinatarul nu a fost găsit." });
-
             if (!recipient.IsActive)
                 return BadRequest(new { message = "Destinatarul are contul dezactivat." });
-
-            // Fără cheie publică nu se poate împacheta nimic pentru el.
             if (string.IsNullOrEmpty(recipient.PublicKeyEncryption))
                 return BadRequest(new
                 {
                     message = $"Utilizatorul @{recipient.Username} nu și-a generat încă cheile. " +
                               "Nu i se pot trimite fișiere criptate."
                 });
-
-            // ── Expeditorul: chei + departament ─────────────────────────────
-            //
-            // Citim o proiecție minimă: PublicKeyEncryption (validare cheie) și
-            // Department (construcția cheii de obiect). A doua cerere SQL față de
-            // varianta anterioară care folosea .AnyAsync — prețul mic pentru a
-            // putea organiza depozitul pe departamente fără coloane suplimentare.
 
             var senderInfo = await _context.Users
                 .AsNoTracking()
@@ -281,26 +226,14 @@ namespace MAI.Api.Controllers
                 .FirstOrDefaultAsync(ct);
 
             if (senderInfo?.PublicKeyEncryption is null)
-                return BadRequest(new
-                {
-                    message = "Nu ai chei înregistrate. Generează-le înainte de a trimite fișiere."
-                });
+                return BadRequest(new { message = "Nu ai chei înregistrate. Generează-le înainte de a trimite fișiere." });
 
-            // Path.GetFileName elimină componentele de cale din numele trimis de
-            // client: un fileName de forma "../../appsettings.json" devine inofensiv.
             var safeName = Path.GetFileName(request.FileName ?? request.File.FileName);
             if (string.IsNullOrWhiteSpace(safeName))
                 return BadRequest(new { message = "Numele fișierului este invalid." });
-            if (safeName.Length > 260)
-                safeName = safeName[..260];
-
-            // ── Amprenta cifrotextului ───────────────────────────────────────
-            // Se calculează pe server, peste octeții primiți efectiv, și se compară
-            // cu cea declarată de client. Dacă nu coincid, ceva a alterat conținutul
-            // pe drum și nu se stochează nimic.
+            if (safeName.Length > 260) safeName = safeName[..260];
 
             await using var upload = request.File.OpenReadStream();
-
             var computedHash = await ComputeSha256HexAsync(upload, ct);
 
             if (!string.Equals(computedHash, request.CiphertextSha256, StringComparison.OrdinalIgnoreCase))
@@ -308,30 +241,17 @@ namespace MAI.Api.Controllers
                 _logger.LogWarning(
                     "Amprentă necorespunzătoare la upload de la {User}: declarat {Declared}, calculat {Computed}",
                     CurrentUsername, request.CiphertextSha256, computedHash);
-
-                return BadRequest(new
-                {
-                    message = "Amprenta SHA-256 a cifrotextului nu corespunde. " +
-                              "Fișierul a fost alterat în timpul transferului."
-                });
+                return BadRequest(new { message = "Amprenta SHA-256 a cifrotextului nu corespunde." });
             }
 
             if (!upload.CanSeek)
                 return StatusCode(500, new { message = "Stream de upload nerepozitionabil." });
-
             upload.Position = 0;
 
-            // ── Scriere în depozit, apoi în baza de date ─────────────────────
-
             var transferId = Guid.NewGuid();
-
-            // Cheia include departamentul expeditorului ca prefix de prim nivel.
-            // Format: {dept}/{yyyy}/{MM}/{transferId:N}.enc
-            // Ex.:    directia-it/2026/09/a1b2c3def4....enc
             var storageKey = BuildStorageKey(transferId, senderInfo.Department);
 
-            await _storage.PutAsync(
-                storageKey, upload, request.File.Length, "application/octet-stream", ct);
+            await _storage.PutAsync(storageKey, upload, request.File.Length, "application/octet-stream", ct);
 
             var transfer = new FileTransfer
             {
@@ -375,31 +295,22 @@ namespace MAI.Api.Controllers
             }
             catch (Exception ex)
             {
-                // Obiectul a ajuns în depozit dar rândul nu s-a salvat. Fără
-                // compensare ar rămâne acolo pentru totdeauna, invizibil și
-                // imposibil de șters din interfață.
-                _logger.LogError(ex,
-                    "Salvarea transferului a eșuat. Se retrage obiectul {Key} din depozit.", storageKey);
-
+                _logger.LogError(ex, "Salvarea transferului a eșuat. Se retrage obiectul {Key} din depozit.", storageKey);
                 try { await _storage.DeleteAsync(storageKey, CancellationToken.None); }
                 catch (Exception cleanupEx)
                 {
                     _logger.LogError(cleanupEx, "Retragerea obiectului {Key} a eșuat.", storageKey);
                 }
-
                 throw;
             }
 
-            // ── Notificare email ──────────────────────────────────────────────
-            // Eșecul emailului nu afectează răspunsul: transferul e deja salvat
-            // și cifrotextul e în depozit. Se loghează un warning, atât.
             _ = _email.SendTransferNotificationAsync(
                     toEmail:    recipient.Email,
                     toName:     recipient.FullName ?? recipient.Username,
                     senderName: CurrentUsername,
                     fileName:   safeName,
                     expiresAt:  transfer.ExpiresAt,
-                    ct:         CancellationToken.None)   // nu anulăm odată cu cererea HTTP
+                    ct:         CancellationToken.None)
                 .ContinueWith(t =>
                 {
                     if (t.IsFaulted)
@@ -418,17 +329,8 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // GET api/Transfers/{id}/envelope — plicul + modul de descărcare
+        // GET api/Transfers/{id}/envelope
         // ═════════════════════════════════════════════════════════════════════
-        /// <summary>
-        /// Returnează metadatele criptografice de care are nevoie clientul ca să
-        /// decripteze: IV-ul, cheia de fișier împachetată PENTRU EL (nu pentru
-        /// celălalt) și cheia publică de semnătură a expeditorului.
-        ///
-        /// Autorizarea se face aici. Dacă providerul suportă, tot aici se semnează
-        /// URL-ul temporar de descărcare directă din depozit — cine nu are dreptul
-        /// nu primește niciodată un URL semnat.
-        /// </summary>
         [HttpGet("{id:guid}/envelope")]
         public async Task<IActionResult> GetEnvelope(Guid id, CancellationToken ct)
         {
@@ -443,16 +345,21 @@ namespace MAI.Api.Controllers
                 return NotFound(new { message = "Transferul nu a fost găsit." });
 
             var isRecipient = transfer.RecipientId == userId;
-            var isSender    = transfer.SenderId == userId;
+            var isSender    = transfer.SenderId    == userId;
 
+            // Dacă nu e nici expeditor, nici destinatar original, verificăm
+            // dacă e destinatar adăugat prin forward.
+            TransferRecipient? forwardEntry = null;
             if (!isRecipient && !isSender)
-                return Forbid();
+            {
+                forwardEntry = await _context.TransferRecipients
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(r => r.TransferId == id && r.UserId == userId, ct);
 
-            // Verificat explicit, înaintea expirării și a cheilor. Fără el, un
-            // transfer retras ajungea la ramura „nu există cheie împachetată
-            // pentru contul dumneavoastră" (retragerea golește cheile) — un 409
-            // care îl trimite pe destinatar să caute o problemă de chei, nu să
-            // afle că expeditorul a retras documentul.
+                if (forwardEntry is null)
+                    return Forbid();
+            }
+
             if (transfer.Status == TransferStatus.Revoked)
                 return StatusCode(StatusCodes.Status410Gone, new
                 {
@@ -465,7 +372,6 @@ namespace MAI.Api.Controllers
                 return StatusCode(410, new { message = "Transferul a expirat și nu mai poate fi descărcat." });
 
             if (!transfer.IsEncrypted)
-            {
                 return Ok(new
                 {
                     id          = transfer.Id,
@@ -474,12 +380,13 @@ namespace MAI.Api.Controllers
                     downloadUrl = (string?)null,
                     message     = "Transfer necriptat, dinaintea migrării la criptare end-to-end.",
                 });
-            }
 
-            // Fiecare parte primește DOAR plicul deschis cu cheia ei.
-            var wrappedKeyForMe = isRecipient
-                ? transfer.EncryptedKeyForRecipient
-                : transfer.EncryptedKeyForSender;
+            // Fiecare parte primește cheia împachetată PENTRU EA, nu pentru celălalt.
+            var wrappedKeyForMe = forwardEntry is not null
+                ? forwardEntry.EncryptedKeyForUser
+                : isRecipient
+                    ? transfer.EncryptedKeyForRecipient
+                    : transfer.EncryptedKeyForSender;
 
             if (string.IsNullOrEmpty(wrappedKeyForMe))
                 return StatusCode(409, new
@@ -489,10 +396,8 @@ namespace MAI.Api.Controllers
 
             string? downloadUrl = null;
             if (_storageOptions.UsePresignedDownload && _storage.SupportsPresignedUrls)
-            {
                 downloadUrl = await _storage.TryCreatePresignedDownloadUrlAsync(
                     transfer.StorageKey, _storageOptions.PresignedUrlLifetime, ct);
-            }
 
             return Ok(new
             {
@@ -515,13 +420,8 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // GET api/Transfers/{id}/content — cifrotextul, prin API
+        // GET api/Transfers/{id}/content
         // ═════════════════════════════════════════════════════════════════════
-        /// <summary>
-        /// Variantă de rezervă pentru când URL-urile presemnate nu sunt disponibile
-        /// (provider local) sau sunt dezactivate. Octeții trec prin API, ceea ce
-        /// dublează traficul — de aceea nu e calea implicită.
-        /// </summary>
         [HttpGet("{id:guid}/content")]
         public async Task<IActionResult> GetContent(Guid id, CancellationToken ct)
         {
@@ -534,12 +434,17 @@ namespace MAI.Api.Controllers
             if (transfer is null)
                 return NotFound(new { message = "Transferul nu a fost găsit." });
 
-            if (transfer.SenderId != userId && transfer.RecipientId != userId)
+            // Verificăm accesul: expeditor, destinatar original sau forward.
+            var isForwarded = transfer.SenderId  != userId
+                           && transfer.RecipientId != userId
+                           && await _context.TransferRecipients
+                                  .AnyAsync(r => r.TransferId == id && r.UserId == userId, ct);
+
+            if (transfer.SenderId != userId && transfer.RecipientId != userId && !isForwarded)
                 return Forbid();
 
             if (transfer.Status == TransferStatus.Revoked)
-                return StatusCode(StatusCodes.Status410Gone,
-                    new { message = "Transferul a fost retras de expeditor." });
+                return StatusCode(StatusCodes.Status410Gone, new { message = "Transferul a fost retras de expeditor." });
 
             if (transfer.ExpiresAt.HasValue && transfer.ExpiresAt.Value < DateTime.UtcNow)
                 return StatusCode(410, new { message = "Transferul a expirat." });
@@ -554,53 +459,220 @@ namespace MAI.Api.Controllers
             }
             catch (FileNotFoundException)
             {
-                _logger.LogError(
-                    "Rând de transfer fără obiect în depozit: {Id} → {Key}", transfer.Id, transfer.StorageKey);
+                _logger.LogError("Rând de transfer fără obiect în depozit: {Id} → {Key}", transfer.Id, transfer.StorageKey);
                 return NotFound(new { message = "Conținutul nu mai există în depozit." });
             }
 
-            // Numele trimis e generic: fișierul real se salvează sub numele
-            // original abia după decriptare, în browser.
             return File(stream, "application/octet-stream", $"{transfer.Id}.enc");
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // PATCH api/Transfers/{id}/confirm — marchează preluarea
+        // POST api/Transfers/{id}/forward — redistribuie transferul
         // ═════════════════════════════════════════════════════════════════════
         /// <summary>
-        /// Apelat de client DUPĂ ce decriptarea și verificarea semnăturii au reușit.
-        /// Momentul contează: dacă statusul s-ar seta la emiterea URL-ului, un
-        /// transfer eșuat ar apărea în jurnal ca preluat cu succes.
+        /// Adaugă destinatari suplimentari la un transfer existent.
         ///
-        /// Trei reguli fac din confirmare o dovadă, nu doar un contor:
-        ///   • Rezultatul semnăturii e obligatoriu. O cerere fără el nu mai e
-        ///     înregistrată implicit ca „semnătură validă".
-        ///   • Prima confirmare rămâne. O descărcare repetată primește 200, dar nu
-        ///     rescrie rezultatul și nu adaugă alt rând în audit: altfel un
-        ///     „INVALIDĂ" consemnat putea fi înlocuit ulterior cu „VALIDĂ".
-        ///   • Transferurile retrase sau expirate nu se mai confirmă.
+        /// Serverul nu atinge conținutul: clientul decriptează DEK-ul cu cheia
+        /// lui privată, apoi îl re-împachetează cu cheia publică a fiecărui
+        /// destinatar nou și trimite aici rezultatele. Garanția E2EE rămâne
+        /// intactă — serverul primește doar niște blocuri RSA-OAEP opace.
+        ///
+        /// Cine poate face forward:
+        ///   • Expeditorul original (are DEK împachetat în EncryptedKeyForSender)
+        ///   • Destinatarul original
+        ///   • Orice destinatar adăugat anterior prin forward
+        /// Toți acești utilizatori au deja accesul la DEK (au sau pot obține
+        /// plicul) și orice restricție suplimentară ar fi circumventată de cel
+        /// care a descărcat deja fișierul în clar.
         /// </summary>
+        [HttpPost("{id:guid}/forward")]
+        public async Task<IActionResult> Forward(
+            Guid id,
+            [FromBody] ForwardTransferRequest? request,
+            CancellationToken ct)
+        {
+            if (request?.Recipients is not { Count: > 0 })
+                return BadRequest(new { message = "Lista destinatarilor nu poate fi goală." });
+
+            if (request.Recipients.Count > MaxForwardRecipients)
+                return BadRequest(new { message = $"Maxim {MaxForwardRecipients} destinatari per cerere." });
+
+            var userId = CurrentUserId;
+
+            // ── Transferul există și nu e retras/expirat ─────────────────────
+            var transfer = await _context.FileTransfers
+                .AsNoTracking()
+                .FirstOrDefaultAsync(t => t.Id == id, ct);
+
+            if (transfer is null)
+                return NotFound(new { message = "Transferul nu a fost găsit." });
+
+            if (transfer.Status == TransferStatus.Revoked)
+                return StatusCode(StatusCodes.Status410Gone,
+                    new { message = "Transferul a fost retras și nu mai poate fi redistribuit." });
+
+            if (transfer.ExpiresAt.HasValue && transfer.ExpiresAt.Value < DateTime.UtcNow)
+                return StatusCode(410,
+                    new { message = "Transferul a expirat și nu mai poate fi redistribuit." });
+
+            // ── Autorizare ────────────────────────────────────────────────────
+            var isSender          = transfer.SenderId    == userId;
+            var isOriginalRecipient = transfer.RecipientId == userId;
+            var isForwardRecipient = !isSender && !isOriginalRecipient
+                && await _context.TransferRecipients
+                       .AnyAsync(r => r.TransferId == id && r.UserId == userId, ct);
+
+            if (!isSender && !isOriginalRecipient && !isForwardRecipient)
+                return Forbid();
+
+            // ── Validarea fiecărui destinatar ─────────────────────────────────
+            // Colectăm toate ID-urile ca să facem un singur SELECT, nu N SELECT-uri.
+            var incomingIds = request.Recipients
+                .Select(r => r.UserId)
+                .Distinct()
+                .ToList();
+
+            if (incomingIds.Count != request.Recipients.Count)
+                return BadRequest(new { message = "Lista conține destinatari duplicați." });
+
+            // Nu poți face forward ție însuți.
+            if (incomingIds.Contains(userId))
+                return BadRequest(new { message = "Nu poți redirecționa un fișier către tine însuți." });
+
+            // Utilizatori valizi: activi și cu chei generate.
+            var validUsers = await _context.Users
+                .AsNoTracking()
+                .Where(u => incomingIds.Contains(u.Id) && u.IsActive && u.PublicKeyEncryption != null)
+                .Select(u => new { u.Id, u.Username, u.FullName, u.Email })
+                .ToListAsync(ct);
+
+            if (validUsers.Count != incomingIds.Count)
+            {
+                var missingIds = incomingIds.Except(validUsers.Select(u => u.Id)).ToList();
+                return BadRequest(new
+                {
+                    message = "Unul sau mai mulți destinatari nu există, sunt inactivi sau nu și-au generat cheile.",
+                    invalidIds = missingIds,
+                });
+            }
+
+            // Destinatari deja existenți (original sau forward): evităm duplicate.
+            var alreadyRecipient = incomingIds.Where(uid => uid == transfer.RecipientId).ToList();
+
+            var alreadyForwarded = await _context.TransferRecipients
+                .AsNoTracking()
+                .Where(r => r.TransferId == id && incomingIds.Contains(r.UserId))
+                .Select(r => r.UserId)
+                .ToListAsync(ct);
+
+            var allAlready = alreadyRecipient.Union(alreadyForwarded).ToList();
+
+            if (allAlready.Count > 0)
+                return Conflict(new
+                {
+                    message = "Unul sau mai mulți utilizatori sunt deja destinatari ai acestui transfer.",
+                    duplicateIds = allAlready,
+                });
+
+            // ── Validare plicuri criptografice ────────────────────────────────
+            foreach (var r in request.Recipients)
+            {
+                if (string.IsNullOrWhiteSpace(r.EncryptedKeyForUser))
+                    return BadRequest(new { message = $"Cheia pentru {r.UserId} lipsește." });
+
+                if (r.EncryptedKeyForUser.Length > MaxWrappedKeyChars)
+                    return BadRequest(new { message = $"Cheia pentru {r.UserId} depășește dimensiunea așteptată." });
+
+                Span<byte> probe = new byte[r.EncryptedKeyForUser.Length];
+                if (!Convert.TryFromBase64String(r.EncryptedKeyForUser, probe, out _))
+                    return BadRequest(new { message = $"Cheia pentru {r.UserId} nu este base64 valid." });
+            }
+
+            // ── Salvare ───────────────────────────────────────────────────────
+            var now      = DateTime.UtcNow;
+            var userMap  = validUsers.ToDictionary(u => u.Id);
+
+            var newRecipients = request.Recipients
+                .Select(r => new TransferRecipient
+                {
+                    TransferId          = id,
+                    UserId              = r.UserId,
+                    EncryptedKeyForUser = r.EncryptedKeyForUser,
+                    ForwardedById       = userId,
+                    SentAt              = now,
+                })
+                .ToList();
+
+            _context.TransferRecipients.AddRange(newRecipients);
+
+            _context.AuditLogs.Add(new AuditLog
+            {
+                UserId    = userId,
+                Username  = CurrentUsername,
+                Action    = AuditAction.FileUpload,   // refolosim FileUpload ca cel mai apropiat
+                Details   = $"Forward transfer '{transfer.FileName}' (id {transfer.Id}) " +
+                            $"catre {string.Join(", ", validUsers.Select(u => u.FullName ?? u.Username))}",
+                IpAddress = CallerIp,
+                Timestamp = now,
+            });
+
+            await _context.SaveChangesAsync(ct);
+
+            // ── Notificări email ──────────────────────────────────────────────
+            foreach (var user in validUsers)
+            {
+                _ = _email.SendTransferNotificationAsync(
+                        toEmail:    user.Email,
+                        toName:     user.FullName ?? user.Username,
+                        senderName: CurrentUsername,
+                        fileName:   transfer.FileName,
+                        expiresAt:  transfer.ExpiresAt,
+                        ct:         CancellationToken.None)
+                    .ContinueWith(t =>
+                    {
+                        if (t.IsFaulted)
+                            _logger.LogWarning(t.Exception,
+                                "Email forward pentru {Id} → {User} nu a putut fi trimis.",
+                                transfer.Id, user.Username);
+                    }, TaskScheduler.Default);
+            }
+
+            return Ok(new
+            {
+                message    = $"Transferul a fost redirecționat către {validUsers.Count} destinatar(i).",
+                recipients = validUsers.Select(u => new
+                {
+                    id       = u.Id,
+                    name     = u.FullName ?? u.Username,
+                }),
+            });
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
+        // PATCH api/Transfers/{id}/confirm
+        // ═════════════════════════════════════════════════════════════════════
         [HttpPatch("{id:guid}/confirm")]
         public async Task<IActionResult> Confirm(
             Guid id, [FromBody] ConfirmTransferDto? dto, CancellationToken ct)
         {
             if (dto?.SignatureValid is not bool signatureValid)
-            {
-                return BadRequest(new
-                {
-                    message = "Rezultatul verificării semnăturii (signatureValid) este obligatoriu.",
-                });
-            }
+                return BadRequest(new { message = "Rezultatul verificării semnăturii (signatureValid) este obligatoriu." });
 
             var userId   = CurrentUserId;
-            var transfer = await _context.FileTransfers
-                .FirstOrDefaultAsync(t => t.Id == id, ct);
+            var transfer = await _context.FileTransfers.FirstOrDefaultAsync(t => t.Id == id, ct);
 
             if (transfer is null) return NotFound(new { message = "Transferul nu a fost găsit." });
-            if (transfer.RecipientId != userId) return Forbid();
+
+            // Confirmarea o poate face destinatarul original sau un destinatar de forward.
+            var isOriginalRecipient = transfer.RecipientId == userId;
+            var isForwardRecipient  = !isOriginalRecipient
+                && await _context.TransferRecipients
+                       .AnyAsync(r => r.TransferId == id && r.UserId == userId, ct);
+
+            if (!isOriginalRecipient && !isForwardRecipient)
+                return Forbid();
 
             if (transfer.Status == TransferStatus.Downloaded)
-            {
                 return Ok(new
                 {
                     message          = "Primirea era deja confirmată.",
@@ -608,27 +680,18 @@ namespace MAI.Api.Controllers
                     downloadedAt     = transfer.DownloadedAt,
                     signatureValid   = transfer.RecipientSignatureValid,
                 });
-            }
 
             if (transfer.Status == TransferStatus.Revoked)
-            {
                 return StatusCode(StatusCodes.Status410Gone, new
                 {
                     message = "Transferul a fost retras de expeditor. Primirea nu se mai înregistrează.",
                 });
-            }
 
-            // Doar statusul Expired, pus de job, oprește confirmarea. Un transfer
-            // încă Pending, dar trecut de ExpiresAt, se confirmă: plicul s-a putut
-            // obține doar înainte de termen (GetEnvelope refuză după), deci
-            // descărcarea a început la timp și primirea e reală.
             if (transfer.Status != TransferStatus.Pending)
-            {
                 return StatusCode(StatusCodes.Status410Gone, new
                 {
                     message = "Transferul a expirat. Primirea nu se mai înregistrează.",
                 });
-            }
 
             transfer.Status                  = TransferStatus.Downloaded;
             transfer.DownloadedAt            = DateTime.UtcNow;
@@ -648,7 +711,6 @@ namespace MAI.Api.Controllers
             });
 
             await _context.SaveChangesAsync(ct);
-
             return Ok(new { message = "Transfer confirmat.", alreadyConfirmed = false });
         }
 
@@ -664,19 +726,16 @@ namespace MAI.Api.Controllers
 
             if (transfer is null)
                 return NotFound(new { message = "Transferul nu a fost găsit." });
-
             if (transfer.SenderId != userId)
                 return Forbid();
 
             if (transfer.Status == TransferStatus.Downloaded)
-            {
                 return Conflict(new
                 {
                     message = "Transferul a fost deja descărcat și nu mai poate fi retras. " +
                               "Fișierul se află pe dispozitivul destinatarului.",
                     downloadedAt = transfer.DownloadedAt,
                 });
-            }
 
             if (transfer.Status != TransferStatus.Pending)
                 return Conflict(new { message = "Transferul nu mai este în așteptare." });
@@ -689,9 +748,7 @@ namespace MAI.Api.Controllers
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex,
-                        "Retragere esuata: obiectul {Key} nu a putut fi sters.", transfer.StorageKey);
-
+                    _logger.LogError(ex, "Retragere esuata: obiectul {Key} nu a putut fi sters.", transfer.StorageKey);
                     _context.AuditLogs.Add(new AuditLog
                     {
                         UserId    = userId,
@@ -703,11 +760,9 @@ namespace MAI.Api.Controllers
                         Timestamp = DateTime.UtcNow,
                     });
                     await _context.SaveChangesAsync(ct);
-
                     return StatusCode(StatusCodes.Status502BadGateway, new
                     {
-                        message = "Fișierul nu a putut fi șters din depozit. " +
-                                  "Transferul NU a fost retras. Încercați din nou.",
+                        message = "Fișierul nu a putut fi șters din depozit. Transferul NU a fost retras. Încercați din nou.",
                     });
                 }
             }
@@ -715,7 +770,6 @@ namespace MAI.Api.Controllers
             transfer.Status        = TransferStatus.Revoked;
             transfer.RevokedAt     = DateTime.UtcNow;
             transfer.RevokedReason = Truncate(dto?.Reason, MaxRevokeReasonChars);
-
             transfer.EncryptedKeyForRecipient = null;
             transfer.EncryptedKeyForSender    = null;
             transfer.StorageKey               = string.Empty;
@@ -734,7 +788,6 @@ namespace MAI.Api.Controllers
             });
 
             await _context.SaveChangesAsync(ct);
-
             return Ok(new { message = "Transferul a fost retras. Fișierul nu mai poate fi descărcat." });
         }
 
@@ -748,20 +801,14 @@ namespace MAI.Api.Controllers
             var transfer = await _context.FileTransfers.FirstOrDefaultAsync(t => t.Id == id, ct);
 
             if (transfer is null) return NotFound(new { message = "Transferul nu a fost găsit." });
-
-            if (transfer.SenderId != userId && !IsAdministrator)
-                return Forbid();
+            if (transfer.SenderId != userId && !IsAdministrator) return Forbid();
 
             if (!string.IsNullOrEmpty(transfer.StorageKey))
             {
-                try
-                {
-                    await _storage.DeleteAsync(transfer.StorageKey, ct);
-                }
+                try { await _storage.DeleteAsync(transfer.StorageKey, ct); }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex,
-                        "Obiectul {Key} nu a putut fi șters din depozit.", transfer.StorageKey);
+                    _logger.LogError(ex, "Obiectul {Key} nu a putut fi șters din depozit.", transfer.StorageKey);
                 }
             }
 
@@ -777,7 +824,6 @@ namespace MAI.Api.Controllers
             });
 
             await _context.SaveChangesAsync(ct);
-
             return Ok(new { message = "Transferul a fost șters." });
         }
 
@@ -790,17 +836,6 @@ namespace MAI.Api.Controllers
                 ? null
                 : value.Trim() is var v && v.Length <= max ? v : value.Trim()[..max];
 
-        /// <summary>
-        /// Construiește cheia de obiect în depozit.
-        ///
-        /// Format: {dept-slug}/{yyyy}/{MM}/{transferId:N}.enc
-        /// Ex.:    directia-it/2026/09/a1b2c3d4e5f6....enc
-        ///
-        /// Cheia e stocată în coloana StorageKey a rândului FileTransfer și nu se
-        /// modifică după creare. Transferurile existente cu formatul vechi
-        /// (transfers/{yyyy}/{MM}/...) continuă să fie citite corect — storage-ul
-        /// folosește cheia din baza de date, nu o recalculează.
-        /// </summary>
         private static string BuildStorageKey(Guid transferId, string? senderDepartment)
         {
             var now  = DateTime.UtcNow;
@@ -808,42 +843,17 @@ namespace MAI.Api.Controllers
             return $"{dept}/{now:yyyy}/{now:MM}/{transferId:N}.enc";
         }
 
-        /// <summary>
-        /// Transformă un șir arbitrar (denumire departament din AD sau din UI) într-un
-        /// slug S3-safe, folosit ca prefix de prim nivel în cheile de obiect.
-        ///
-        /// Pași:
-        ///   1. Normalizare NFKD — separă literele de diacriticele lor combinate:
-        ///      „ș" → 's' + combining cedilla, „â" → 'a' + combining circumflex etc.
-        ///   2. Filtrare: reținem doar caracterele non-diacritice ASCII-alfanumerice;
-        ///      orice separator (spațiu, liniuță, underscore etc.) devine cratimă.
-        ///   3. Deduplicare cratime consecutive + eliminare de la margini.
-        ///   4. Trunchiere la 50 de caractere (cheile S3 au limita de 1024 bytes,
-        ///      dar un prefix prea lung e greu de citit în consolă).
-        ///   5. Fallback la "general" dacă rezultatul e gol.
-        ///
-        /// Exemple:
-        ///   "Direcția Generală de Poliție" → "directia-generala-de-politie"
-        ///   "IT & Securitate"              → "it-securitate"
-        ///   null / ""                      → "general"
-        /// </summary>
         private static string SanitizeDepartment(string? department)
         {
-            if (string.IsNullOrWhiteSpace(department))
-                return "general";
+            if (string.IsNullOrWhiteSpace(department)) return "general";
 
-            // NFKD: literele compuse sunt descompuse în baza + diacritic combinat.
             var nfkd = department.Normalize(NormalizationForm.FormD);
-
-            var sb         = new StringBuilder(nfkd.Length);
-            var prevWasSep = true; // suprimă cratima de la început
+            var sb   = new StringBuilder(nfkd.Length);
+            var prevWasSep = true;
 
             foreach (var ch in nfkd)
             {
-                // NonSpacingMark = diacriticele combinate (cedilla, circumflex etc.)
-                if (char.GetUnicodeCategory(ch) == UnicodeCategory.NonSpacingMark)
-                    continue;
-
+                if (char.GetUnicodeCategory(ch) == UnicodeCategory.NonSpacingMark) continue;
                 if (char.IsAsciiLetterOrDigit(ch))
                 {
                     sb.Append(char.ToLowerInvariant(ch));
@@ -851,133 +861,98 @@ namespace MAI.Api.Controllers
                 }
                 else if (!prevWasSep)
                 {
-                    // Orice non-alfanumeric (spațiu, &, /, -, _, punct …) → o singură cratimă.
                     sb.Append('-');
                     prevWasSep = true;
                 }
-                // Dacă prevWasSep e deja true (separator precedent) ignorăm caracterul.
             }
 
-            // Eliminăm cratima finală dacă ultimul caracter din string era separator.
-            if (sb.Length > 0 && sb[^1] == '-')
-                sb.Length--;
-
+            if (sb.Length > 0 && sb[^1] == '-') sb.Length--;
             var result = sb.ToString();
-
-            if (string.IsNullOrEmpty(result))
-                return "general";
-
-            // Trunchiere: max 50 de caractere, fără a lăsa o cratimă la sfârșit.
-            if (result.Length > 50)
-                result = result[..50].TrimEnd('-');
-
+            if (string.IsNullOrEmpty(result)) return "general";
+            if (result.Length > 50) result = result[..50].TrimEnd('-');
             return string.IsNullOrEmpty(result) ? "general" : result;
         }
 
         private static async Task<string> ComputeSha256HexAsync(Stream stream, CancellationToken ct)
         {
-            using var sha    = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-            var buffer       = new byte[81_920];
+            using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            var buffer    = new byte[81_920];
             int read;
-
             while ((read = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), ct)) > 0)
                 sha.AppendData(buffer, 0, read);
-
             return Convert.ToHexString(sha.GetHashAndReset()).ToLowerInvariant();
         }
 
         private static bool TryValidateEnvelope(UploadTransferRequest r, out string error)
         {
             error = string.Empty;
-
-            if (string.IsNullOrWhiteSpace(r.Iv) ||
-                string.IsNullOrWhiteSpace(r.EncryptedKeyForRecipient) ||
-                string.IsNullOrWhiteSpace(r.EncryptedKeyForSender) ||
-                string.IsNullOrWhiteSpace(r.Signature) ||
+            if (string.IsNullOrWhiteSpace(r.Iv) || string.IsNullOrWhiteSpace(r.EncryptedKeyForRecipient) ||
+                string.IsNullOrWhiteSpace(r.EncryptedKeyForSender) || string.IsNullOrWhiteSpace(r.Signature) ||
                 string.IsNullOrWhiteSpace(r.CiphertextSha256))
             {
-                error = "Plic criptografic incomplet.";
-                return false;
+                error = "Plic criptografic incomplet."; return false;
             }
-
-            if (r.Iv.Length > MaxIvChars ||
-                r.EncryptedKeyForRecipient.Length > MaxWrappedKeyChars ||
-                r.EncryptedKeyForSender.Length > MaxWrappedKeyChars ||
-                r.Signature.Length > MaxWrappedKeyChars)
+            if (r.Iv.Length > MaxIvChars || r.EncryptedKeyForRecipient.Length > MaxWrappedKeyChars ||
+                r.EncryptedKeyForSender.Length > MaxWrappedKeyChars || r.Signature.Length > MaxWrappedKeyChars)
             {
-                error = "Câmpurile plicului depășesc dimensiunile așteptate.";
-                return false;
+                error = "Câmpurile plicului depășesc dimensiunile așteptate."; return false;
             }
-
-            if (r.CiphertextSha256.Length != 64 ||
-                !r.CiphertextSha256.All(Uri.IsHexDigit))
+            if (r.CiphertextSha256.Length != 64 || !r.CiphertextSha256.All(Uri.IsHexDigit))
             {
-                error = "Amprenta SHA-256 trebuie să fie 64 de caractere hexazecimale.";
-                return false;
+                error = "Amprenta SHA-256 trebuie să fie 64 de caractere hexazecimale."; return false;
             }
-
             foreach (var (name, value) in new[]
             {
-                ("iv", r.Iv),
-                ("encryptedKeyForRecipient", r.EncryptedKeyForRecipient),
-                ("encryptedKeyForSender", r.EncryptedKeyForSender),
-                ("signature", r.Signature),
+                ("iv", r.Iv), ("encryptedKeyForRecipient", r.EncryptedKeyForRecipient),
+                ("encryptedKeyForSender", r.EncryptedKeyForSender), ("signature", r.Signature),
             })
             {
                 Span<byte> probe = new byte[value.Length];
                 if (!Convert.TryFromBase64String(value, probe, out _))
                 {
-                    error = $"Câmpul '{name}' nu este base64 valid.";
-                    return false;
+                    error = $"Câmpul '{name}' nu este base64 valid."; return false;
                 }
             }
-
             if (string.IsNullOrWhiteSpace(r.Suite) || r.Suite.Length > 128)
             {
-                error = "Suita criptografică lipsește sau este invalidă.";
-                return false;
+                error = "Suita criptografică lipsește sau este invalidă."; return false;
             }
-
             return true;
         }
     }
 
     // ═════════════════════════════════════════════════════════════════════════
-    // Modele
+    // Modele request / response
     // ═════════════════════════════════════════════════════════════════════════
 
     public class UploadTransferRequest
     {
-        /// <summary>Cifrotextul. Conținutul în clar nu ajunge niciodată aici.</summary>
         public IFormFile? File { get; set; }
-
         public string? RecipientId { get; set; }
-
-        /// <summary>Numele original al fișierului, trimis separat de numele blobului.</summary>
         public string? FileName { get; set; }
-
-        /// <summary>Dimensiunea conținutului în clar, informativă.</summary>
         public long PlaintextSize { get; set; }
-
-        /// <summary>
-        /// Dată de expirare aleasă de expeditor (UTC, opțional).
-        /// Dacă lipsește, se aplică implicit 7 zile de la creare.
-        /// </summary>
         public DateTime? ExpiresAt { get; set; }
-
-        /// <summary>
-        /// Categoria transferului pentru filtrare și prioritizare.
-        /// Valoarea implicită este General dacă clientul nu trimite altceva.
-        /// </summary>
         public TransferCategory Category { get; set; } = TransferCategory.General;
-
-        // ── Plicul criptografic ──────────────────────────────────────────────
         public string? Iv { get; set; }
         public string? EncryptedKeyForRecipient { get; set; }
         public string? EncryptedKeyForSender { get; set; }
         public string? Signature { get; set; }
         public string? CiphertextSha256 { get; set; }
         public string? Suite { get; set; }
+    }
+
+    public class ForwardTransferRequest
+    {
+        public List<ForwardRecipientInput> Recipients { get; set; } = [];
+    }
+
+    public class ForwardRecipientInput
+    {
+        /// <summary>Id-ul utilizatorului destinatar.</summary>
+        public Guid UserId { get; set; }
+
+        /// <summary>DEK-ul transferului împachetat cu cheia publică RSA-OAEP a acestui utilizator.</summary>
+        public string EncryptedKeyForUser { get; set; } = string.Empty;
     }
 
     public class ConfirmTransferDto
@@ -1005,28 +980,13 @@ namespace MAI.Api.Controllers
         public string RecipientDepartment { get; set; } = string.Empty;
         public string Status { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; }
-
-        // ── Dovada de primire ────────────────────────────────────────────────
-
         public DateTime? DownloadedAt { get; set; }
         public bool? SignatureValid { get; set; }
-
-        // ── Retragere ────────────────────────────────────────────────────────
-
         public DateTime? RevokedAt { get; set; }
         public string? RevokedReason { get; set; }
         public bool CanRevoke { get; set; }
-
-        // ── Expirare și categorie ────────────────────────────────────────────
-
         public DateTime? ExpiresAt { get; set; }
-
-        /// <summary>
-        /// Categoria transferului. Serialized ca număr de către ASP.NET;
-        /// frontul îl mapează la eticheta corespunzătoare.
-        /// </summary>
         public TransferCategory Category { get; set; }
-
         public bool IsMine { get; set; }
         public bool IsEncrypted { get; set; }
         public string? CryptoSuite { get; set; }

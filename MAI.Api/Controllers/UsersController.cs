@@ -183,6 +183,57 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
+        // GET api/Users/search?q= — autocomplete pentru forward / share
+        // ═════════════════════════════════════════════════════════════════════
+        /// <summary>
+        /// Caută utilizatori activi care și-au generat cheile (pot primi fișiere
+        /// criptate). Folosit de dialogul de forward pentru autocomplete.
+        ///
+        /// Returnează maxim 10 rezultate, exclude apelantul și include cheia
+        /// publică de criptare — browserul o folosește direct ca să împacheteze
+        /// DEK-ul fără un apel suplimentar.
+        ///
+        /// Cheia publică este publică prin definiție: scopul ei este să fie
+        /// distribuită. Nu există date private în răspuns.
+        /// </summary>
+        [HttpGet("search")]
+        public async Task<IActionResult> Search([FromQuery] string? q, CancellationToken ct)
+        {
+            var callerId = CallerId;
+
+            // Minim 1 caracter: fără asta, un apel accidental fără query ar returna
+            // o listă completă de utilizatori cu cheile lor publice.
+            if (string.IsNullOrWhiteSpace(q) || q.Trim().Length < 1)
+                return Ok(Array.Empty<object>());
+
+            var term = $"%{q.Trim()}%";
+
+            var results = await _context.Users
+                .AsNoTracking()
+                .Where(u => u.IsActive
+                         && u.Id != callerId
+                         && u.PublicKeyEncryption != null
+                         && (EF.Functions.ILike(u.Username, term)
+                          || (u.FullName   != null && EF.Functions.ILike(u.FullName,   term))
+                          || (u.Department != null && EF.Functions.ILike(u.Department, term))))
+                .OrderBy(u => u.FullName ?? u.Username)
+                .Take(10)
+                .Select(u => new
+                {
+                    id                  = u.Id,
+                    username            = u.Username,
+                    fullName            = u.FullName   ?? u.Username,
+                    department          = u.Department ?? string.Empty,
+                    // Cheia publică e necesară în browser ca să împacheteze DEK-ul
+                    // fără un al doilea round-trip. Cheile publice sunt publice.
+                    publicKeyEncryption = u.PublicKeyEncryption,
+                })
+                .ToListAsync(ct);
+
+            return Ok(results);
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
         // POST api/Users — creare cont, exclusiv Administrator
         // ═════════════════════════════════════════════════════════════════════
         /// <summary>
