@@ -39,7 +39,7 @@ namespace MAI.BusinessLogic.Storage
             {
                 ServiceURL            = _options.Endpoint,
                 // MinIO nu are DNS wildcard pentru bucket.host, deci path-style
-                // este obligatoriu: http://localhost:9000/sgdm-transfers/cheie
+                // este obligatoriu: http://localhost:9000/mai-secure/cheie
                 ForcePathStyle        = _options.ForcePathStyle,
                 AuthenticationRegion  = _options.Region,
                 UseHttp               = !_options.UseSsl,

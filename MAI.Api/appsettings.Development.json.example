@@ -1,4 +1,4 @@
-﻿{
+{
   "ConnectionStrings": {
     "DefaultConnection": "Host=localhost;Port=5432;Database=sgdm;Username=sgdm;Password=SCHIMBA_MA"
   },
@@ -12,16 +12,16 @@
   "Argon2": {
     "Pepper": "GENERATI_CU_openssl_rand_base64_32",
 
-    "//": "true acceptă parole în clar în baza de date. Doar în dezvoltare, doar",
-    "//_2": "cât timp mai există conturi nemigrate. Program.cs oprește pornirea",
-    "//_3": "dacă rămâne true în afara mediului Development.",
+    "//": "true accepta parole in clar in baza de date. Doar in dezvoltare, doar",
+    "//_2": "cat timp mai exista conturi nemigrate. Program.cs opreste pornirea",
+    "//_3": "daca ramane true in afara mediului Development.",
     "AllowLegacyPlaintext": false
   },
 
   "TwoFactor": {
-    "//": "Lăsat gol în dezvoltare: se derivă din Jwt:Key. În producție e obligatoriu",
-    "//_2": "și trebuie să fie un secret SEPARAT — o cheie derivată dintr-un secret",
-    "//_3": "partajat înseamnă că scurgerea unuia le compromite pe amândouă.",
+    "//": "Lasat gol in dezvoltare: se deriveaza din Jwt:Key. In productie e obligatoriu",
+    "//_2": "si trebuie sa fie un secret SEPARAT — o cheie derivata dintr-un secret",
+    "//_3": "partajat inseamna ca scurgerea unuia le compromite pe amandoua.",
     "EncryptionKey": ""
   },
 
@@ -30,7 +30,10 @@
     "Endpoint": "http://localhost:9000",
     "AccessKey": "sgdm-dev",
     "SecretKey": "SCHIMBA_MA_MINIM_8_CARACTERE",
-    "Bucket": "sgdm-transfers"
+
+    "//": "Bucketul creat de minio-init in docker-compose. Trebuie sa coincida cu",
+    "//_2": "valoarea STORAGE_BUCKET din .env (sau cu default-ul 'mai-secure').",
+    "Bucket": "mai-secure"
   },
 
   "Serilog": {
