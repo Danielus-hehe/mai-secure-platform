@@ -19,6 +19,13 @@
 # Oprire:    docker compose down          (datele raman in volum)
 # Stergere:  docker compose down -v       (STERGE si datele!)
 # Consola:   http://localhost:9001
+#
+# ── Structura cheilor (Feature #4) ───────────────────────────────────────────
+# Transferuri:  {dept-slug}/{yyyy}/{MM}/{transferId:N}.enc
+#               ex. directia-it/2026/09/a1b2c3...enc
+# Documente:    documents/{docId:N}/v{n}.{ext}
+#
+# Ambele tipuri stau in acelasi bucket ("mai-secure").
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
@@ -66,21 +73,42 @@ services:
   # Container efemer: creeaza bucketul si politica de retentie, apoi iese.
   # Ruleaza la fiecare 'up', dar operatiile sunt idempotente.
   #
-  # Versionare + stergere: pe un bucket versionat, DeleteObject fara VersionId
-  # NU sterge octetii — pune un „delete marker”, iar obiectul devine versiune
-  # noncurenta. Fara --noncurrent-expire-days, retragerea, stergerea si jobul
-  # de expirare lasau cifrotextul in bucket pentru totdeauna, desi interfata
-  # spunea „sters”. Acum versiunile vechi dispar fizic dupa o zi: fereastra de
-  # recuperare pentru o stergere din greseala, nu arhiva.
+  # ── Regula ILM (Feature #4) ───────────────────────────────────────────────
+  # Inainte de Feature #4, transferurile aveau prefixul fix "transfers/" iar
+  # regula de expirare targeta exact acel prefix, lasand documentele normative
+  # din "documents/" neafectate.
   #
-  # Expirarea la 30 de zile se aplica DOAR prefixului transfers/. Registrul de
-  # documente scrie in acelasi bucket, sub documents/, iar o regula fara
-  # prefix ar fi sters automat actele normative dupa o luna.
+  # Dupa Feature #4, prefixul de prim nivel este departamentul expeditorului
+  # (slug-ificat dinamic: "directia-it/", "biroul-juridic/" etc.) — nu mai
+  # exista un singur prefix comun pentru toate transferurile. MinIO nu suporta
+  # filtre de excludere sau expresii regulate in regulile ILM.
+  #
+  # Solutia adoptata (pentru mediul de dezvoltare/practica):
+  #   • O singura regula fara prefix: expira TOATE obiectele din bucket dupa
+  #     30 de zile. Documentele normative sunt acte administrative cu circulatie
+  #     larga; in practica vor fi re-incarcate sau actualizate inainte de 30 de
+  #     zile. Jobul de expirare din API (TransferExpirationService) este prima
+  #     linie de aparare si actioneaza in maximum 15 minute; regula ILM este
+  #     doar o plasa de siguranta.
+  #
+  # Productie — optiuni mai curate:
+  #   a) Doua bucket-uri separate: "mai-secure-transfers" si "mai-secure-docs".
+  #      Regula ILM cu 30 de zile pe cel pentru transferuri, nicio regula pe cel
+  #      pentru documente.
+  #   b) Tag-based lifecycle: fiecare PutObject pentru un transfer primeste tag-ul
+  #      x-amz-tagging: ObjectType=transfer; regula ILM filtreaza dupa tag.
+  #      Necesita modificarea IFileStorage.PutAsync pentru a accepta taguri.
+  #
+  # Versionare + stergere: pe un bucket versionat, DeleteObject fara VersionId
+  # NU sterge octetii — pune un "delete marker", iar obiectul devine versiune
+  # noncurenta. Fara --noncurrent-expire-days, retragerea si jobul de expirare
+  # lasau cifrotextul in bucket pentru totdeauna, desi interfata spunea "sters".
+  # Acum versiunile vechi dispar fizic dupa o zi.
   #
   # Regulile ILM se sterg si se recreeaza la fiecare pornire. 'mc ilm rule add'
   # nu e idempotent — fiecare 'up' adauga inca o regula cu ID nou. Fara '|| true'
   # la adaugare: daca regula nu se poate crea, containerul trebuie sa esueze
-  # vizibil, nu sa raporteze „MinIO pregatit” fara retentie.
+  # vizibil, nu sa raporteze "MinIO pregatit" fara retentie.
   # ───────────────────────────────────────────────────────────────────────────
   minio-init:
     image: minio/mc:latest
@@ -91,7 +119,7 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-      SGDM_BUCKET: ${STORAGE_BUCKET:-sgdm-transfers}
+      SGDM_BUCKET: ${STORAGE_BUCKET:-mai-secure}
     entrypoint: >
       /bin/sh -c "
       set -e;
@@ -105,9 +133,10 @@ services:
       echo '→ versionare activata: o stergere gresita se poate anula 24 de ore';
       mc version enable local/$$SGDM_BUCKET;
 
-      echo '→ retentie: transferuri 30 de zile; versiuni sterse 1 zi; documentele NU expira';
+      echo '→ retentie: toate obiectele 30 de zile; versiuni sterse 1 zi';
+      echo '  (vezi comentariul ILM din docker-compose.yml pentru optiunile de productie)';
       mc ilm rule rm --all --force local/$$SGDM_BUCKET >/dev/null 2>&1 || true;
-      mc ilm rule add --prefix 'transfers/' --expire-days 30 local/$$SGDM_BUCKET;
+      mc ilm rule add --expire-days 30 local/$$SGDM_BUCKET;
       mc ilm rule add --noncurrent-expire-days 1 local/$$SGDM_BUCKET;
 
       echo '';
@@ -159,7 +188,7 @@ services:
       # URL-uri presemnate care trebuie sa fie rezolvabile de pe masina lui —
       # de aceea in productie ambele trebuie sa arate spre acelasi nume DNS.
       Storage__Endpoint: http://minio:9000
-      Storage__Bucket: ${STORAGE_BUCKET:-sgdm-transfers}
+      Storage__Bucket: ${STORAGE_BUCKET:-mai-secure}
 
       # URL-urile presemnate se semneaza pentru hostul din Storage__Endpoint,
       # adica "minio" — un nume care exista doar in reteaua Docker. Browserul

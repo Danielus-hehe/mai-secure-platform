@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace MAI.BusinessLogic.Storage
 {
@@ -16,7 +16,20 @@ namespace MAI.BusinessLogic.Storage
         public string AccessKey { get; set; } = string.Empty;
         public string SecretKey { get; set; } = string.Empty;
 
-        public string Bucket { get; set; } = "sgdm-transfers";
+        /// <summary>
+        /// Bucketul principal al aplicației.
+        ///
+        /// Valoarea implicită "mai-secure" este utilizată atât în docker-compose cât
+        /// și în appsettings.json. Toate transferurile și documentele normative
+        /// coexistă în același bucket:
+        ///   • Transferuri:  {dept-slug}/{yyyy}/{MM}/{transferId:N}.enc
+        ///   • Documente:    documents/{docId:N}/v{n}.{ext}
+        ///
+        /// Mediu de producție — dacă volumul o cere sau politicile IAM o impun, se
+        /// pot folosi bucket-uri separate (ex. "mai-secure-transfers" și
+        /// "mai-secure-documents") cu configurații Storage distincte per controller.
+        /// </summary>
+        public string Bucket { get; set; } = "mai-secure";
 
         /// <summary>MinIO ignoră regiunea, dar SDK-ul AWS o cere.</summary>
         public string Region { get; set; } = "us-east-1";
@@ -33,7 +46,19 @@ namespace MAI.BusinessLogic.Storage
         /// </summary>
         public bool ForcePathStyle { get; set; } = true;
 
-        /// <summary>Prefixul sub care se organizează transferurile în bucket.</summary>
+        /// <summary>
+        /// [Legacy — nefolosit pentru construcția cheilor noi]
+        ///
+        /// Înainte de Feature #4, toate transferurile aveau prefixul fix "transfers/".
+        /// Acum prefixul de prim nivel este departamentul expeditorului (slug-ificat),
+        /// calculat dinamic în TransfersController.BuildStorageKey.
+        ///
+        /// Proprietatea rămâne în clasă și în appsettings.json ca referință pentru
+        /// consultanții care administrează instanțe vechi: bucket-urile create
+        /// înainte de Feature #4 au obiectele sub "transfers/{yyyy}/{MM}/".
+        /// Regulile ILM/lifecycle din MinIO care targetau "transfers/" nu se mai
+        /// potrivesc cu cheile noi — a se vedea comentariile din docker-compose.yml.
+        /// </summary>
         public string TransfersPrefix { get; set; } = "transfers";
 
         /// <summary>

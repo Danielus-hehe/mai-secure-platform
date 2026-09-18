@@ -8,8 +8,10 @@ using MAI.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
 using System.Security.Claims;
 using System.Security.Cryptography;
+using System.Text;
 
 namespace MAI.Api.Controllers
 {
@@ -25,6 +27,15 @@ namespace MAI.Api.Controllers
     /// stocarea octeților opaci și jurnalizare. Nicio operație criptografică
     /// asupra conținutului nu se face pe server — dacă s-ar face, întreaga
     /// garanție end-to-end ar dispărea.
+    ///
+    /// Cheile de obiect urmează structura:
+    ///   {department}/{yyyy}/{MM}/{transferId:N}.enc
+    /// Ex.: directia-it/2026/09/a1b2c3...enc
+    ///
+    /// Un singur bucket ("mai-secure"), prefixul de prim nivel este departamentul
+    /// expeditorului, normalizat Unicode → ASCII slug. Transferurile din
+    /// departamente diferite sunt izolate vizual și pot primi politici S3 diferite
+    /// fără să fie mutate.
     /// </summary>
     [Authorize]
     [ApiController]
@@ -236,7 +247,7 @@ namespace MAI.Api.Controllers
                 expiresAt = DateTime.UtcNow.Add(DefaultExpiry);
             }
 
-            // ── Verificarea părților ─────────────────────────────────────────
+            // ── Verificarea destinatarului ───────────────────────────────────
 
             var recipient = await _context.Users
                 .AsNoTracking()
@@ -248,9 +259,7 @@ namespace MAI.Api.Controllers
             if (!recipient.IsActive)
                 return BadRequest(new { message = "Destinatarul are contul dezactivat." });
 
-            // Fără cheie publică nu se poate împacheta nimic pentru el. Clientul ar
-            // fi trebuit să prindă asta mai devreme, dar serverul nu se bazează
-            // niciodată pe validarea făcută de client.
+            // Fără cheie publică nu se poate împacheta nimic pentru el.
             if (string.IsNullOrEmpty(recipient.PublicKeyEncryption))
                 return BadRequest(new
                 {
@@ -258,11 +267,20 @@ namespace MAI.Api.Controllers
                               "Nu i se pot trimite fișiere criptate."
                 });
 
-            var senderHasKeys = await _context.Users
-                .AsNoTracking()
-                .AnyAsync(u => u.Id == senderId && u.PublicKeyEncryption != null, ct);
+            // ── Expeditorul: chei + departament ─────────────────────────────
+            //
+            // Citim o proiecție minimă: PublicKeyEncryption (validare cheie) și
+            // Department (construcția cheii de obiect). A doua cerere SQL față de
+            // varianta anterioară care folosea .AnyAsync — prețul mic pentru a
+            // putea organiza depozitul pe departamente fără coloane suplimentare.
 
-            if (!senderHasKeys)
+            var senderInfo = await _context.Users
+                .AsNoTracking()
+                .Where(u => u.Id == senderId)
+                .Select(u => new { u.PublicKeyEncryption, u.Department })
+                .FirstOrDefaultAsync(ct);
+
+            if (senderInfo?.PublicKeyEncryption is null)
                 return BadRequest(new
                 {
                     message = "Nu ai chei înregistrate. Generează-le înainte de a trimite fișiere."
@@ -306,7 +324,11 @@ namespace MAI.Api.Controllers
             // ── Scriere în depozit, apoi în baza de date ─────────────────────
 
             var transferId = Guid.NewGuid();
-            var storageKey = BuildStorageKey(transferId);
+
+            // Cheia include departamentul expeditorului ca prefix de prim nivel.
+            // Format: {dept}/{yyyy}/{MM}/{transferId:N}.enc
+            // Ex.:    directia-it/2026/09/a1b2c3def4....enc
+            var storageKey = BuildStorageKey(transferId, senderInfo.Department);
 
             await _storage.PutAsync(
                 storageKey, upload, request.File.Length, "application/octet-stream", ct);
@@ -341,7 +363,8 @@ namespace MAI.Api.Controllers
                 Action    = AuditAction.FileUpload,
                 Details   = $"Fisier criptat trimis '{safeName}' ({request.File.Length} octeti) " +
                             $"catre {recipient.FullName ?? recipient.Username}, suita {request.Suite}, " +
-                            $"categorie {request.Category}, expira {expiresAt:yyyy-MM-dd}",
+                            $"categorie {request.Category}, expira {expiresAt:yyyy-MM-dd}, " +
+                            $"cheie depozit: {storageKey}",
                 IpAddress = CallerIp,
                 Timestamp = DateTime.UtcNow,
             });
@@ -767,10 +790,88 @@ namespace MAI.Api.Controllers
                 ? null
                 : value.Trim() is var v && v.Length <= max ? v : value.Trim()[..max];
 
-        private string BuildStorageKey(Guid transferId)
+        /// <summary>
+        /// Construiește cheia de obiect în depozit.
+        ///
+        /// Format: {dept-slug}/{yyyy}/{MM}/{transferId:N}.enc
+        /// Ex.:    directia-it/2026/09/a1b2c3d4e5f6....enc
+        ///
+        /// Cheia e stocată în coloana StorageKey a rândului FileTransfer și nu se
+        /// modifică după creare. Transferurile existente cu formatul vechi
+        /// (transfers/{yyyy}/{MM}/...) continuă să fie citite corect — storage-ul
+        /// folosește cheia din baza de date, nu o recalculează.
+        /// </summary>
+        private static string BuildStorageKey(Guid transferId, string? senderDepartment)
         {
-            var now = DateTime.UtcNow;
-            return $"{_storageOptions.TransfersPrefix}/{now:yyyy}/{now:MM}/{transferId:N}.enc";
+            var now  = DateTime.UtcNow;
+            var dept = SanitizeDepartment(senderDepartment);
+            return $"{dept}/{now:yyyy}/{now:MM}/{transferId:N}.enc";
+        }
+
+        /// <summary>
+        /// Transformă un șir arbitrar (denumire departament din AD sau din UI) într-un
+        /// slug S3-safe, folosit ca prefix de prim nivel în cheile de obiect.
+        ///
+        /// Pași:
+        ///   1. Normalizare NFKD — separă literele de diacriticele lor combinate:
+        ///      „ș" → 's' + combining cedilla, „â" → 'a' + combining circumflex etc.
+        ///   2. Filtrare: reținem doar caracterele non-diacritice ASCII-alfanumerice;
+        ///      orice separator (spațiu, liniuță, underscore etc.) devine cratimă.
+        ///   3. Deduplicare cratime consecutive + eliminare de la margini.
+        ///   4. Trunchiere la 50 de caractere (cheile S3 au limita de 1024 bytes,
+        ///      dar un prefix prea lung e greu de citit în consolă).
+        ///   5. Fallback la "general" dacă rezultatul e gol.
+        ///
+        /// Exemple:
+        ///   "Direcția Generală de Poliție" → "directia-generala-de-politie"
+        ///   "IT & Securitate"              → "it-securitate"
+        ///   null / ""                      → "general"
+        /// </summary>
+        private static string SanitizeDepartment(string? department)
+        {
+            if (string.IsNullOrWhiteSpace(department))
+                return "general";
+
+            // NFKD: literele compuse sunt descompuse în baza + diacritic combinat.
+            var nfkd = department.Normalize(NormalizationForm.FormD);
+
+            var sb         = new StringBuilder(nfkd.Length);
+            var prevWasSep = true; // suprimă cratima de la început
+
+            foreach (var ch in nfkd)
+            {
+                // NonSpacingMark = diacriticele combinate (cedilla, circumflex etc.)
+                if (char.GetUnicodeCategory(ch) == UnicodeCategory.NonSpacingMark)
+                    continue;
+
+                if (char.IsAsciiLetterOrDigit(ch))
+                {
+                    sb.Append(char.ToLowerInvariant(ch));
+                    prevWasSep = false;
+                }
+                else if (!prevWasSep)
+                {
+                    // Orice non-alfanumeric (spațiu, &, /, -, _, punct …) → o singură cratimă.
+                    sb.Append('-');
+                    prevWasSep = true;
+                }
+                // Dacă prevWasSep e deja true (separator precedent) ignorăm caracterul.
+            }
+
+            // Eliminăm cratima finală dacă ultimul caracter din string era separator.
+            if (sb.Length > 0 && sb[^1] == '-')
+                sb.Length--;
+
+            var result = sb.ToString();
+
+            if (string.IsNullOrEmpty(result))
+                return "general";
+
+            // Trunchiere: max 50 de caractere, fără a lăsa o cratimă la sfârșit.
+            if (result.Length > 50)
+                result = result[..50].TrimEnd('-');
+
+            return string.IsNullOrEmpty(result) ? "general" : result;
         }
 
         private static async Task<string> ComputeSha256HexAsync(Stream stream, CancellationToken ct)
