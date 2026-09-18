@@ -1,4 +1,5 @@
 using MAI.Api.BackgroundJobs;
+using MAI.Api.Configuration;
 using MAI.Api.Middleware;
 using MAI.Api.Options;
 using MAI.Api.Security;
@@ -37,6 +38,18 @@ Log.Logger = new LoggerConfiguration()
 
 try
 {
+    // ─── .env local (o singură sursă de configurare cu Docker Compose) ─────────
+    // Rulat înainte de CreateBuilder: provider-ul de variabile de mediu își face
+    // instantaneul la construire. În container nu face nimic (vezi DotEnvLoader).
+    var dotEnv = DotEnvLoader.LoadFromRepositoryRoot();
+    if (dotEnv.Path is not null)
+    {
+        // Doar numele cheilor, niciodată valorile.
+        Log.Information(
+            "Configurare locală încărcată din {DotEnvPath}: {Count} chei aplicate ({Keys})",
+            dotEnv.Path, dotEnv.Applied, string.Join(", ", dotEnv.Keys));
+    }
+
     var builder = WebApplication.CreateBuilder(args);
 
     // ─── Loguri structurate (Serilog, JSON pe consolă) ─────────────────────────
