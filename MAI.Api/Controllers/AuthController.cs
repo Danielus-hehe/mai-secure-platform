@@ -41,6 +41,7 @@ namespace MAI.Api.Controllers
         private readonly ISessionService _sessions;
         private readonly IAccountLockoutService _lockout;
         private readonly ILogger<AuthController> _logger;
+        private readonly IInvitationService _invitation;
 
         public AuthController(
             AppDbContext context,
@@ -53,7 +54,8 @@ namespace MAI.Api.Controllers
             ITokenService tokens,
             ISessionService sessions,
             IAccountLockoutService lockout,
-            ILogger<AuthController> logger)
+            ILogger<AuthController> logger,
+            IInvitationService invitation)
         {
             _context   = context;
             _hasher    = hasher;
@@ -64,8 +66,9 @@ namespace MAI.Api.Controllers
             _protector = protector;
             _tokens    = tokens;
             _sessions  = sessions;
-            _lockout   = lockout;
-            _logger    = logger;
+            _lockout    = lockout;
+            _logger     = logger;
+            _invitation = invitation;
         }
 
         private string Ip => HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
@@ -197,6 +200,19 @@ namespace MAI.Api.Controllers
                     return BadRequest(new { message = "Contul este dezactivat. Contactați administratorul." });
                 }
 
+                // Contul creat de administrator cu email, dar neactivat încă.
+                // Mesajul e specific — parola a fost oricum corectă la acest punct.
+                if (!user.EmailConfirmed)
+                {
+                    await WriteAuditAsync(user.Id, user.Username, AuditAction.Login,
+                        "Cont neactivat prin email", AuditResult.Failure);
+                    return BadRequest(new
+                    {
+                        message       = "Contul nu a fost activat. Verificați emailul pentru linkul de activare.",
+                        emailNotConfirmed = true,
+                    });
+                }
+
                 // Migrare transparentă plain text / parametri slabi → profilul potrivit rolului.
                 if (verification == PasswordVerificationResult.SuccessRehashNeeded)
                 {
@@ -305,11 +321,11 @@ namespace MAI.Api.Controllers
                 return Unauthorized(new { message = genericError });
             }
 
-            if (!user.IsActive || user.IsLockedOut)
+            if (!user.IsActive || user.IsLockedOut || !user.EmailConfirmed)
             {
                 _tokens.ClearChallenge(user);
                 await WriteAuditAsync(user.Id, user.Username, AuditAction.Login,
-                    "Verificare 2FA pe cont dezactivat sau blocat", AuditResult.Failure);
+                    "Verificare 2FA pe cont dezactivat, blocat sau neactivat", AuditResult.Failure);
                 return Unauthorized(new { message = genericError });
             }
 
@@ -502,11 +518,12 @@ namespace MAI.Api.Controllers
             // sesiunile, oricine ar putea deconecta pe oricine, oricând. Titularul
             // sesiunii și-a dovedit deja identitatea; o sesiune suspectă se închide
             // explicit, din lista de sesiuni sau prin dezactivarea contului.
-            if (!user.IsActive)
+            if (!user.IsActive || !user.EmailConfirmed)
             {
-                _sessions.Revoke(session, "cont dezactivat");
+                _sessions.Revoke(session, "cont dezactivat sau neactivat");
                 await WriteAuditAsync(user.Id, user.Username, AuditAction.Login,
-                    "Refresh pe cont dezactivat", AuditResult.Failure);
+                    !user.IsActive ? "Refresh pe cont dezactivat" : "Refresh pe cont neactivat",
+                    AuditResult.Failure);
                 return Unauthorized(new { message = genericError });
             }
 
@@ -697,6 +714,64 @@ namespace MAI.Api.Controllers
                 Timestamp = DateTime.UtcNow,
             });
         }
+
+        // ═════════════════════════════════════════════════════════════════════
+        // GET api/Auth/check-invitation?token=...
+        // Verifică tokenul și returnează username+email (fără a-l consuma).
+        // Apelat de frontend la mount-ul paginii /confirm-account.
+        // ═════════════════════════════════════════════════════════════════════
+        [AllowAnonymous]
+        [HttpGet("check-invitation")]
+        public async Task<IActionResult> CheckInvitation(
+            [FromQuery] string? token,
+            CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(token))
+                return BadRequest(new { error = "Token lipsă." });
+
+            var info = await _invitation.GetTokenInfoAsync(token, ct);
+            if (info is null)
+                return NotFound(new { error = "Token invalid sau expirat." });
+
+            return Ok(new { username = info.Username, email = info.Email });
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
+        // POST api/Auth/confirm-invitation
+        // Consumă tokenul, hashează parola cu Argon2id și activează contul.
+        // ═════════════════════════════════════════════════════════════════════
+        [AllowAnonymous]
+        [EnableRateLimiting(RateLimitPolicies.PasswordWrite)]
+        [HttpPost("confirm-invitation")]
+        public async Task<IActionResult> ConfirmInvitation(
+            [FromBody] ConfirmInvitationRequest req,
+            CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(req.Token))
+                return BadRequest(new { error = "Token lipsă." });
+
+            if (req.NewPassword != req.ConfirmPassword)
+                return BadRequest(new { error = "Parolele nu coincid." });
+
+            try
+            {
+                var result = await _invitation.ConfirmAsync(req.Token, req.NewPassword, ct);
+                if (!result.Success)
+                    return BadRequest(new { error = result.Error, errors = result.Errors });
+
+                return Ok(new { message = "Contul a fost activat. Vă puteți autentifica acum." });
+            }
+            catch (HashingCapacityExceededException ex)
+            {
+                return CapacityResponse(ex);
+            }
+        }
+
+        /// <summary>DTO pentru confirmarea invitației.</summary>
+        public sealed record ConfirmInvitationRequest(
+            string Token,
+            string NewPassword,
+            string ConfirmPassword);
 
         private async Task WriteAuditAsync(
             Guid? userId, string username, AuditAction action, string details,

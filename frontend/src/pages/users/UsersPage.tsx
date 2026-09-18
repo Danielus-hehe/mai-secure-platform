@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { UserPlus, Power, KeyRound, Loader2, Search, Unlock } from 'lucide-react';
+import { UserPlus, Power, KeyRound, Loader2, Search, Unlock, Mail} from 'lucide-react';
 import PageHeader    from '../../components/ui/PageHeader';
 import Badge         from '../../components/ui/Badge';
 import Button        from '../../components/ui/Button';
@@ -30,7 +30,7 @@ const ROLE_STR: Record<Role, number> = {
 interface ApiUser {
     id: string; fullName: string; username: string;
     email: string; role: number; department: string;
-    isActive: boolean; createdAt: string;
+    isActive: boolean; emailConfirmed: boolean; createdAt: string;
     isLockedOut: boolean; lockoutEndsAt: string | null;
     lastLoginAt: string | null;
 }
@@ -173,6 +173,18 @@ export default function UsersPage() {
 
     /* ── Dezactivare / Activare ──────────────────────────────────────── */
     const handleToggleActive = (u: AppUser) => {
+        async function handleResendInvitation(u: AppUser) {
+            if (!confirm(`Retrimiți invitația de activare la ${u.email || u.username}?`)) return;
+            try {
+                const { data } = await api.post<{ message: string }>(
+                    `/Users/${u.id}/resend-invitation`
+                );
+                toast.success(data.message ?? 'Invitație retrimisă.');
+            } catch {
+                toast.error('Eroare la retrimiterea invitației.');
+            }
+        }
+
         if (u.isActive) {
             setConfirmTarget(u);           // cere confirmare
         } else {
@@ -312,6 +324,9 @@ export default function UsersPage() {
                                                 <Badge tone={u.isActive ? 'green' : 'gray'}>
                                                     {u.isActive ? 'Activ' : 'Dezactivat'}
                                                 </Badge>
+                                                {!u.emailConfirmed && (
+                                                    <Badge tone="amber">Neactivat</Badge>
+                                                )}
                                                 {u.isLockedOut && (
                                                     <Badge tone="red">Blocat</Badge>
                                                 )}
@@ -324,6 +339,13 @@ export default function UsersPage() {
                                                         title="Deblochează contul"
                                                         onClick={() => void handleUnlock(u)}>
                                                     <Unlock size={14} />
+                                                </Button>
+                                            )}
+                                            {!u.emailConfirmed && u.email && (
+                                                <Button variant="ghost" className="px-2 py-1.5 text-amber-600 dark:text-amber-400"
+                                                        title="Retrimite email de activare"
+                                                        onClick={() => void handleResendInvitation(u)}>
+                                                    <Mail size={14} />
                                                 </Button>
                                             )}
                                             <Button variant="ghost" className="px-2 py-1.5"

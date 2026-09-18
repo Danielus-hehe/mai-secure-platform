@@ -21,6 +21,8 @@ import PasswordChangeGate from '../components/security/PasswordChangeGate';
  */
 import LoginPage from '../pages/auth/LoginPage';
 
+const ConfirmAccountPage = lazy(() => import('../pages/auth/ConfirmAccountPage'));
+
 const DashboardPage      = lazy(() => import('../pages/dashboard/DashboardPage'));
 const TransfersPage      = lazy(() => import('../pages/transfers/TransfersPage'));
 const DocumentsPage      = lazy(() => import('../pages/documents/DocumentsPage'));
@@ -36,6 +38,8 @@ export function AppRoutes() {
         <Routes>
             <Route path="/"      element={<Navigate to="/login" replace />} />
             <Route path="/login" element={<LoginPage />} />
+            {/* Activare cont — publică, nu necesită autentificare */}
+            <Route path="/confirm-account" element={<RouteBoundary><ConfirmAccountPage /></RouteBoundary>} />
 
             {/* Toate rutele protejate învelite în AppLayout (sidebar + topbar) */}
             <Route element={<ProtectedRoute />}>

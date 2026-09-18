@@ -12,6 +12,7 @@ namespace MAI.BusinessLogic.Dtos
         public string Department { get; set; } = string.Empty;
         public UserRole Role { get; set; }
         public bool IsActive { get; set; }
+        public bool EmailConfirmed { get; set; }
         public DateTime CreatedAt { get; set; }
 
         /// <summary>True dacă respectivul cont este blocat acum de prea multe încercări eșuate.</summary>
