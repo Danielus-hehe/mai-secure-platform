@@ -583,7 +583,7 @@ namespace MAI.Api.Controllers
                 if (r.EncryptedKeyForUser.Length > MaxWrappedKeyChars)
                     return BadRequest(new { message = $"Cheia pentru {r.UserId} depășește dimensiunea așteptată." });
 
-                Span<byte> probe = new byte[r.EncryptedKeyForUser.Length];
+                byte[] probe = new byte[r.EncryptedKeyForUser.Length];       
                 if (!Convert.TryFromBase64String(r.EncryptedKeyForUser, probe, out _))
                     return BadRequest(new { message = $"Cheia pentru {r.UserId} nu este base64 valid." });
             }
@@ -930,7 +930,7 @@ namespace MAI.Api.Controllers
         public IFormFile? File { get; set; }
         public string? RecipientId { get; set; }
         public string? FileName { get; set; }
-        public long PlaintextSize { get; set; }
+           public long PlaintextSize { get; set; }
         public DateTime? ExpiresAt { get; set; }
         public TransferCategory Category { get; set; } = TransferCategory.General;
         public string? Iv { get; set; }

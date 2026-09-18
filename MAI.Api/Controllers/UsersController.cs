@@ -37,6 +37,7 @@ namespace MAI.Api.Controllers
         private readonly PasswordPolicy _policy;
         private readonly Argon2Options _argon2;
         private readonly ISessionService _sessions;
+        private readonly IInvitationService _invitation;
         private readonly ILogger<UsersController> _logger;
 
         public UsersController(
@@ -45,14 +46,16 @@ namespace MAI.Api.Controllers
             PasswordPolicy policy,
             Argon2Options argon2,
             ISessionService sessions,
+            IInvitationService invitation,
             ILogger<UsersController> logger)
         {
             _context  = context;
             _hasher   = hasher;
             _policy   = policy;
             _argon2   = argon2;
-            _sessions = sessions;
-            _logger   = logger;
+            _sessions  = sessions;
+            _invitation = invitation;
+            _logger     = logger;
         }
 
         private string CallerUsername => HttpContext.User.Identity?.Name ?? "sistem";
@@ -144,8 +147,9 @@ namespace MAI.Api.Controllers
                     FullName      = u.FullName   ?? string.Empty,
                     Department    = u.Department ?? string.Empty,
                     Role          = u.Role,
-                    IsActive      = u.IsActive,
-                    CreatedAt     = u.CreatedAt,
+                    IsActive       = u.IsActive,
+                    EmailConfirmed = u.EmailConfirmed,
+                    CreatedAt      = u.CreatedAt,
                     IsLockedOut   = u.LockoutEndsAt.HasValue && u.LockoutEndsAt > DateTime.UtcNow,
                     LockoutEndsAt = u.LockoutEndsAt,
                     LastLoginAt   = u.LastLoginAt,
@@ -305,6 +309,11 @@ namespace MAI.Api.Controllers
                     Department         = dto.Department?.Trim() ?? string.Empty,
                     Role               = dto.Role,
                     IsActive           = true,
+                    // Dacă s-a furnizat email, contul pornește neconfirmat —
+                    // userul activează prin linkul din email și își setează parola.
+                    // Fără email, fluxul clasic: contul e direct confirmat, se
+                    // aplică doar schimbarea forțată de parolă.
+                    EmailConfirmed     = string.IsNullOrEmpty(email),
                     CreatedAt          = DateTime.UtcNow,
                     MustChangePassword = true,
                 };
@@ -327,12 +336,35 @@ namespace MAI.Api.Controllers
                         user.Username, user.Role, CallerUsername, CallerIp);
                 }
 
+                // Dacă emailul a fost furnizat, trimitem invitația asincron,
+                // fără să blocăm răspunsul HTTP. Un eșec SMTP nu anulează crearea.
+                if (!string.IsNullOrEmpty(email))
+                {
+                    _ = _invitation.SendInvitationAsync(user.Id, CancellationToken.None)
+                        .ContinueWith(t =>
+                        {
+                            if (t.IsFaulted)
+                                _logger.LogWarning(t.Exception,
+                                    "Invitația pentru {Username} nu a putut fi trimisă.", user.Username);
+                        }, TaskScheduler.Default);
+
+                    return Ok(new
+                    {
+                        message = $"Contul @{user.Username} a fost creat. " +
+                                  "Un email de activare a fost trimis la adresa furnizată.",
+                        id                 = user.Id,
+                        mustChangePassword = true,
+                        invitationSent     = true,
+                    });
+                }
+
                 return Ok(new
                 {
                     message = $"Contul @{user.Username} a fost creat. La prima autentificare, " +
                               "utilizatorul va fi obligat să-și aleagă o parolă proprie.",
                     id = user.Id,
                     mustChangePassword = true,
+                    invitationSent     = false,
                 });
             }
             catch (DbUpdateException ex) when (ex.InnerException is DbException { SqlState: UniqueViolation })
@@ -348,6 +380,39 @@ namespace MAI.Api.Controllers
                 return StatusCode(StatusCodes.Status503ServiceUnavailable,
                     new { message = ex.Message, retryAfter = 5 });
             }
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
+        // POST api/Users/{id}/resend-invitation
+        // ═════════════════════════════════════════════════════════════════════
+        /// <summary>
+        /// Retrimite emailul de invitație (regenerează tokenul).
+        /// Util când utilizatorul a pierdut emailul inițial sau linkul a expirat.
+        /// </summary>
+        [Authorize(Roles = nameof(UserRole.Administrator))]
+        [EnableRateLimiting(RateLimitPolicies.PasswordWrite)]
+        [HttpPost("{id:guid}/resend-invitation")]
+        public async Task<IActionResult> ResendInvitation(Guid id, CancellationToken ct)
+        {
+            var user = await _context.Users.FindAsync([id], ct);
+            if (user is null) return NotFound(new { message = "Utilizatorul nu a fost găsit." });
+
+            if (user.EmailConfirmed)
+                return BadRequest(new { message = "Contul este deja activat." });
+
+            if (string.IsNullOrWhiteSpace(user.Email))
+                return BadRequest(new { message = "Utilizatorul nu are adresă de email. Adăugați mai întâi o adresă." });
+
+            if (!user.IsActive)
+                return BadRequest(new { message = "Contul este dezactivat. Activați-l înainte de a retrimite invitația." });
+
+            await _invitation.SendInvitationAsync(id, ct);
+
+            AddAudit(id, AuditAction.UserUpdated,
+                $"Invitație retrimisă pentru @{user.Username}");
+            await _context.SaveChangesAsync(ct);
+
+            return Ok(new { message = $"Invitația a fost retrimisă la {user.Email}." });
         }
 
         // ═════════════════════════════════════════════════════════════════════

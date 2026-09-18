@@ -31,6 +31,19 @@
             CancellationToken ct = default);
 
         /// <summary>
+        /// Trimite emailul de activare cont cu linkul de invitație.
+        /// </summary>
+        /// <param name="toEmail">Adresa destinatarului.</param>
+        /// <param name="toName">Numele complet (pentru salut).</param>
+        /// <param name="invitationLink">URL-ul complet cu tokenul de activare.</param>
+        /// <param name="ct">Token de anulare.</param>
+        Task<bool> SendInvitationEmailAsync(
+            string toEmail,
+            string toName,
+            string invitationLink,
+            CancellationToken ct = default);
+
+        /// <summary>
         /// Verifică dacă serviciul este configurat și gata de utilizare.
         /// Returnează false dacă lipsesc credențialele SMTP — utile pentru
         /// health check și pentru a sări notificările în locuri neeceritabile.

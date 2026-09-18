@@ -485,6 +485,9 @@ try
     builder.Services.AddSingleton(smtpOptions);
     builder.Services.AddSingleton<IEmailService, SmtpEmailService>();
 
+    // Invitație cont nou — Scoped (are nevoie de AppDbContext, care e Scoped).
+    builder.Services.AddScoped<IInvitationService, InvitationService>();
+
     var app = builder.Build();
 
     // Raport de pornire — util ca să vezi ce buget de memorie ai setat.

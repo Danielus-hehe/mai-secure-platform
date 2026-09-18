@@ -61,6 +61,26 @@ namespace MAI.Domain.Entities
         /// </summary>
         public bool MustChangePassword { get; set; }
 
+        // ── Invitație / confirmare email ──────────────────────────────────────
+        //
+        // La crearea contului de admin, dacă utilizatorul are email, contul
+        // pornește cu EmailConfirmed=false și se trimite un link de activare.
+        // Tokenul e stocat ca SHA-256 (hex) — nu în clar — ca și refresh token-ul.
+        // Login-ul este blocat până la confirmare.
+
+        /// <summary>SHA-256 (hex) al tokenului de invitație. Null după activare.</summary>
+        public string? InvitationToken { get; set; }
+
+        /// <summary>Expirul tokenului de invitație (72 h). Null după activare.</summary>
+        public DateTime? InvitationTokenExpiry { get; set; }
+
+        /// <summary>
+        /// True dacă utilizatorul și-a confirmat adresa de email prin link.
+        /// Conturile fără email pornesc cu true (fluxul clasic MustChangePassword).
+        /// Login-ul este refuzat cât timp e false.
+        /// </summary>
+        public bool EmailConfirmed { get; set; } = true;
+
         /// <summary>
         /// Intervalul TOTP (Unix time / 30 s) al ultimului cod acceptat. Un cod
         /// dintr-un interval egal sau mai vechi e respins: același cod nu poate
