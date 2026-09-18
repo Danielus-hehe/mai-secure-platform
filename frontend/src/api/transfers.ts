@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Stratul de acces la API pentru transferuri.
  *
  * Totul trece prin clientul `api` din client.ts, care atașează tokenul și îl
@@ -22,14 +22,8 @@ export interface PagedResult<T> {
     hasNext: boolean;
 }
 
-/** Statusurile returnate de backend (TransferStatus.ToString()). */
 export type TransferStatus = 'Pending' | 'Downloaded' | 'Expired' | 'Revoked';
 
-/**
- * Categoria unui transfer — oglindește enum-ul TransferCategory din backend.
- * Folosim const object în loc de enum: erasableSyntaxOnly interzice enum-urile
- * care emit cod JavaScript la runtime.
- */
 export const TransferCategory = {
     Critical:  0,
     Important: 1,
@@ -37,7 +31,6 @@ export const TransferCategory = {
     Normal:    3,
 } as const;
 
-/** Tipul numeric al categoriei: 0 | 1 | 2 | 3. */
 export type TransferCategory = typeof TransferCategory[keyof typeof TransferCategory];
 
 export const CATEGORY_LABELS: Record<TransferCategory, string> = {
@@ -61,38 +54,13 @@ export interface TransferListItem {
     recipientDepartment: string;
     status: TransferStatus;
     createdAt: string;
-
-    // ── Dovada de primire ────────────────────────────────────────────────────
-
-    /** Cand a descarcat destinatarul. null = inca nu. */
     downloadedAt: string | null;
-
-    /**
-     * Ce a raportat browserul destinatarului la verificarea semnaturii.
-     * null pentru transferurile necriptate sau nedescarcate inca — stare
-     * diferita de false, care inseamna „descarcat, dar semnatura nu s-a verificat".
-     */
     signatureValid: boolean | null;
-
-    // ── Retragere ────────────────────────────────────────────────────────────
-
     revokedAt: string | null;
     revokedReason: string | null;
-
-    /**
-     * Daca utilizatorul curent poate retrage acest transfer chiar acum.
-     * Calculat server-side: butonul din interfata si verificarea din endpoint nu
-     * trebuie sa poata diverge.
-     */
     canRevoke: boolean;
-
-    // ── Expirare și categorie ────────────────────────────────────────────────
-
     expiresAt: string | null;
-
-    /** Categoria transferului (0=Critical … 3=Normal). */
     category: TransferCategory;
-
     isMine: boolean;
     isEncrypted: boolean;
     cryptoSuite: string | null;
@@ -107,6 +75,16 @@ export interface Recipient {
     publicKeySigning: string;
 }
 
+/** Rezultat al căutării pentru dialogul de forward (autocomplete). */
+export interface UserSearchResult {
+    id: string;
+    username: string;
+    fullName: string;
+    department: string;
+    /** Cheia publică RSA-OAEP (SPKI, base64) — necesară pentru împachetarea DEK în browser. */
+    publicKeyEncryption: string;
+}
+
 export interface TransferEnvelopeResponse {
     id: string;
     fileName: string;
@@ -114,7 +92,6 @@ export interface TransferEnvelopeResponse {
     ciphertextSize: number;
     isEncrypted: boolean;
     iv: string;
-    /** Cheia de fișier împachetată pentru contul curent — nu pentru celălalt. */
     wrappedKeyForMe: string;
     signature: string;
     ciphertextSha256: string;
@@ -122,7 +99,6 @@ export interface TransferEnvelopeResponse {
     senderId: string;
     senderName: string;
     senderPublicKeySigning: string | null;
-    /** URL temporar către depozit. Null → se folosește ruta /content prin API. */
     downloadUrl: string | null;
     expiresAt: string | null;
 }
@@ -143,10 +119,16 @@ export interface UploadInput {
     plaintextSize: number;
     ciphertext: Blob;
     envelope: TransferCryptoEnvelope;
-    /** Categoria selectată de expeditor. Implicit: General. */
     category: TransferCategory;
-    /** Data de expirare aleasă (ISO 8601). Dacă lipsește, backend aplică 7 zile. */
     expiresAt?: string;
+}
+
+/** Un destinatar la care se redirecționează transferul. */
+export interface ForwardRecipientInput {
+    /** UUID al destinatarului. */
+    userId: string;
+    /** DEK-ul transferului împachetat cu cheia publică RSA-OAEP a lui userId. */
+    encryptedKeyForUser: string;
 }
 
 // ── Operații ─────────────────────────────────────────────────────────────────
@@ -157,13 +139,13 @@ export async function listTransfers(
 ): Promise<PagedResult<TransferListItem>> {
     const { data } = await api.get<PagedResult<TransferListItem>>('/Transfers', {
         params: {
-            search: params.search || undefined,
-            status: params.status || undefined,
+            search:    params.search    || undefined,
+            status:    params.status    || undefined,
             direction: params.direction || undefined,
-            sortBy: params.sortBy ?? 'createdAt',
-            sortDir: params.sortDir ?? 'desc',
-            page: params.page ?? 1,
-            pageSize: params.pageSize ?? 25,
+            sortBy:    params.sortBy    ?? 'createdAt',
+            sortDir:   params.sortDir   ?? 'desc',
+            page:      params.page      ?? 1,
+            pageSize:  params.pageSize  ?? 25,
         },
         signal,
     });
@@ -176,13 +158,27 @@ export async function listRecipients(): Promise<Recipient[]> {
     return data;
 }
 
+/**
+ * Caută utilizatori activi cu chei generate, pentru autocomplete-ul de forward.
+ * Returnează maxim 10 rezultate; include cheia publică de criptare.
+ */
+export async function searchUsers(
+    q: string,
+    signal?: AbortSignal
+): Promise<UserSearchResult[]> {
+    if (!q.trim()) return [];
+    const { data } = await api.get<UserSearchResult[]>('/Users/search', {
+        params: { q: q.trim() },
+        signal,
+    });
+    return data;
+}
+
 export async function uploadTransfer(
     input: UploadInput,
     onProgress?: (percent: number) => void
 ): Promise<{ id: string; sha256: string; expiresAt: string }> {
     const form = new FormData();
-
-    // Numele blobului nu contează: numele real merge separat, în FileName.
     form.append('File', input.ciphertext, 'ciphertext.enc');
     form.append('RecipientId', input.recipientId);
     form.append('FileName', input.fileName);
@@ -193,12 +189,8 @@ export async function uploadTransfer(
     form.append('Signature', input.envelope.signature);
     form.append('CiphertextSha256', input.envelope.ciphertextSha256);
     form.append('Suite', input.envelope.suite);
-
-    // Câmpuri noi: categorie și expirare
     form.append('Category', String(input.category));
-    if (input.expiresAt) {
-        form.append('ExpiresAt', input.expiresAt);
-    }
+    if (input.expiresAt) form.append('ExpiresAt', input.expiresAt);
 
     const { data } = await api.post('/Transfers', form, {
         timeout: 300_000,
@@ -207,7 +199,21 @@ export async function uploadTransfer(
             onProgress(Math.round((event.loaded / event.total) * 100));
         },
     });
+    return data;
+}
 
+/**
+ * Redirecționează un transfer către destinatari suplimentari.
+ *
+ * `recipients` conține, pentru fiecare destinatar nou, DEK-ul deja împachetat
+ * cu cheia lui publică RSA-OAEP — browserul face împachetarea, serverul nu
+ * participă la niciun pas criptografic.
+ */
+export async function forwardTransfer(
+    id: string,
+    recipients: ForwardRecipientInput[]
+): Promise<{ message: string; recipients: { id: string; name: string }[] }> {
+    const { data } = await api.post(`/Transfers/${id}/forward`, { recipients });
     return data;
 }
 
@@ -216,24 +222,16 @@ export async function getEnvelope(id: string): Promise<TransferEnvelopeResponse>
     return data;
 }
 
-/**
- * Aduce cifrotextul. Preferă URL-ul presemnat: octeții vin direct din depozit,
- * fără să treacă prin API. Dacă providerul nu suportă (filesystem local) sau
- * funcția e dezactivată din configurare, cade pe ruta /content.
- */
 export async function fetchCiphertext(
     envelope: TransferEnvelopeResponse,
     onProgress?: (percent: number) => void
 ): Promise<ArrayBuffer> {
     if (envelope.downloadUrl) {
         const response = await fetch(envelope.downloadUrl);
-        if (!response.ok) {
-            throw new Error(`Depozitul a răspuns cu ${response.status}.`);
-        }
+        if (!response.ok) throw new Error(`Depozitul a răspuns cu ${response.status}.`);
         onProgress?.(100);
         return response.arrayBuffer();
     }
-
     const { data } = await api.get<ArrayBuffer>(`/Transfers/${envelope.id}/content`, {
         responseType: 'arraybuffer',
         timeout: 300_000,
@@ -245,14 +243,10 @@ export async function fetchCiphertext(
     return data;
 }
 
-/** Se apelează DUPĂ decriptare reușită, cu rezultatul verificării semnăturii. */
 export async function confirmTransfer(id: string, signatureValid: boolean): Promise<void> {
     await api.patch(`/Transfers/${id}/confirm`, { signatureValid });
 }
 
-/**
- * Retrage un transfer inainte ca destinatarul sa il descarce.
- */
 export async function revokeTransfer(id: string, reason?: string): Promise<{ message: string }> {
     const { data } = await api.post<{ message: string }>(
         `/Transfers/${id}/revoke`,

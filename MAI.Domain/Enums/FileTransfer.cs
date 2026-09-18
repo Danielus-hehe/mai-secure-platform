@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using MAI.Domain.Enums;
 
 namespace MAI.Domain.Entities
@@ -12,6 +13,14 @@ namespace MAI.Domain.Entities
         public User? Recipient { get; set; }
 
         /// <summary>
+        /// Destinatarii suplimentari adăugați prin forward.
+        ///
+        /// Destinatarul original este în RecipientId / EncryptedKeyForRecipient.
+        /// Acesta este lista de destinatari adăugați ulterior prin POST /forward.
+        /// </summary>
+        public ICollection<TransferRecipient> Recipients { get; set; } = [];
+
+        /// <summary>
         /// Numele original al fișierului.
         ///
         /// LIMITARE conștientă, de menționat în raport: numele NU este criptat.
@@ -23,7 +32,7 @@ namespace MAI.Domain.Entities
         public string FileName { get; set; } = string.Empty;
 
         /// <summary>
-        /// Cheia obiectului în depozit, ex. "transfers/2026/09/{guid}.enc".
+        /// Cheia obiectului în depozit, ex. "directia-it/2026/09/{guid}.enc".
         ///
         /// Cheie, NU cale de sistem. Coloana veche EncryptedStoragePath conținea
         /// o cale absolută, care era pasată direct la File.ReadAllBytes: orice
