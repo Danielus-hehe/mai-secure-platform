@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -721,6 +721,11 @@ namespace MAI.Api.Controllers
         // Apelat de frontend la mount-ul paginii /confirm-account.
         // ═════════════════════════════════════════════════════════════════════
         [AllowAnonymous]
+        // Anonim și răspunde diferit pentru token valid/invalid: fără limită,
+        // ar fi un oracol nelimitat pentru ghicirea tokenurilor. Tokenul are
+        // 256 de biți, deci ghicirea e oricum impracticabilă, dar un endpoint
+        // anonim fără limită rămâne o țintă gratuită pentru încărcarea serverului.
+        [EnableRateLimiting(RateLimitPolicies.Login)]
         [HttpGet("check-invitation")]
         public async Task<IActionResult> CheckInvitation(
             [FromQuery] string? token,

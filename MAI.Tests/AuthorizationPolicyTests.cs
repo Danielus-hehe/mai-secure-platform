@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using MAI.Api.Controllers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -107,6 +107,11 @@ public class AuthorizationPolicyTests
             "AuthController.Logout",
             "HealthController.Get",
             "HealthController.Live",
+            // Activarea contului din linkul primit pe email: utilizatorul nu are
+            // încă parolă, deci nu se poate autentifica. Ambele sunt limitate
+            // (Login, respectiv PasswordWrite) și acceptă doar un token de 256 biți.
+            "AuthController.CheckInvitation",
+            "AuthController.ConfirmInvitation",
         };
 
         var anonime = Controllers()
