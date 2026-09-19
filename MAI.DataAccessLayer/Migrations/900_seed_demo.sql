@@ -54,6 +54,8 @@ DECLARE
     v_id            uuid;
     v_sender        uuid;
     v_recipient     uuid;
+    v_recipient2    uuid;
+    v_tid           uuid;
     v_created       timestamptz;
     v_status        int;
     v_i             int;
@@ -88,9 +90,13 @@ BEGIN
     DELETE FROM "AuditLogs"
      WHERE "Username" LIKE '%.demo';
 
+    -- Destinatarii demo întâi (FK Restrict pe UserId), apoi transferurile demo;
+    -- rândurile lor din TransferRecipients se șterg în cascadă.
+    DELETE FROM "TransferRecipients"
+     WHERE "UserId" IN (SELECT "Id" FROM "Users" WHERE "Username" LIKE '%.demo');
+
     DELETE FROM "FileTransfers"
-     WHERE "SenderId"    IN (SELECT "Id" FROM "Users" WHERE "Username" LIKE '%.demo')
-        OR "RecipientId" IN (SELECT "Id" FROM "Users" WHERE "Username" LIKE '%.demo');
+     WHERE "SenderId" IN (SELECT "Id" FROM "Users" WHERE "Username" LIKE '%.demo');
 
     DELETE FROM "DocumentVersions"
      WHERE "DocumentId" IN (
@@ -175,15 +181,16 @@ BEGIN
             ELSE 1
         END;
 
+        v_tid := gen_random_uuid();
+
         INSERT INTO "FileTransfers" (
-            "Id", "SenderId", "RecipientId", "FileName", "StorageKey",
+            "Id", "SenderId", "FileName", "StorageKey",
             "FileSize", "CiphertextSize", "ChecksumSHA256",
-            "Status", "CreatedAt", "DownloadedAt", "ExpiresAt",
-            "IsEncrypted", "RevokedAt", "RevokedReason", "RecipientSignatureValid"
+            "Status", "CreatedAt", "ExpiresAt",
+            "IsEncrypted", "RevokedAt", "RevokedReason", "Category", "AllowForward"
         ) VALUES (
-            gen_random_uuid(),
+            v_tid,
             v_sender,
-            v_recipient,
             v_fisiere[1 + (v_i % 10)],
             -- Gol pentru stările terminale: obiectul nu mai există în depozit,
             -- iar o cheie care arată către nimic ar produce 404 la descărcare.
@@ -195,15 +202,42 @@ BEGIN
             encode(sha256(('demo-' || v_i)::bytea), 'hex'),
             v_status,
             v_created,
-            CASE WHEN v_status = 1 THEN v_created + interval '3 hours' END,
             v_created + interval '7 days',
             false,
             CASE WHEN v_status = 3 THEN v_created + interval '20 minutes' END,
             CASE WHEN v_status = 3 THEN 'Versiune gresita a documentului' END,
-            -- Dovada de primire: majoritatea validă, una invalidă ca să apară în
-            -- alerte și în filtrul ATENȚIE al jurnalului.
-            CASE WHEN v_status = 1 THEN (v_i <> 8) END
+            v_i % 4,          -- toate cele patru categorii
+            v_i % 3 = 0       -- o parte permit redistribuirea
         );
+
+        -- Destinatarul direct. Dovada de primire: majoritatea validă, una
+        -- invalidă ca să apară în alerte și în filtrul ATENȚIE al jurnalului.
+        INSERT INTO "TransferRecipients" (
+            "TransferId", "UserId", "EncryptedKeyForUser", "ForwardedById",
+            "SentAt", "DownloadedAt", "SignatureValid"
+        ) VALUES (
+            v_tid, v_recipient, '', NULL, v_created,
+            CASE WHEN v_status IN (0, 1) AND (v_status = 1 OR v_i % 5 = 0)
+                 THEN v_created + interval '3 hours' END,
+            CASE WHEN v_status IN (0, 1) AND (v_status = 1 OR v_i % 5 = 0)
+                 THEN (v_i <> 8) END
+        );
+
+        -- Al doilea destinatar la fiecare al cincilea transfer: la cele în
+        -- așteptare, primul a confirmat și al doilea nu — exact cazul pe care
+        -- dovada de primire per destinatar trebuie să-l arate.
+        v_recipient2 := v_user_ids[1 + ((v_i + 9) % 15)];
+
+        IF v_i % 5 = 0 AND v_recipient2 NOT IN (v_sender, v_recipient) THEN
+            INSERT INTO "TransferRecipients" (
+                "TransferId", "UserId", "EncryptedKeyForUser", "ForwardedById",
+                "SentAt", "DownloadedAt", "SignatureValid"
+            ) VALUES (
+                v_tid, v_recipient2, '', NULL, v_created,
+                CASE WHEN v_status = 1 THEN v_created + interval '5 hours' END,
+                CASE WHEN v_status = 1 THEN true END
+            );
+        END IF;
     END LOOP;
 
     -- ── 3. Documente cu versiuni ───────────────────────────────────────────
@@ -344,8 +378,8 @@ END $$;
 -- Rulează blocul de curățenie de la începutul scriptului, sau pe scurt:
 --
 --   DELETE FROM "AuditLogs" WHERE "Username" LIKE '%.demo';
---   DELETE FROM "FileTransfers" WHERE "SenderId" IN (SELECT "Id" FROM "Users" WHERE "Username" LIKE '%.demo')
---                                  OR "RecipientId" IN (SELECT "Id" FROM "Users" WHERE "Username" LIKE '%.demo');
+--   DELETE FROM "TransferRecipients" WHERE "UserId" IN (SELECT "Id" FROM "Users" WHERE "Username" LIKE '%.demo');
+--   DELETE FROM "FileTransfers" WHERE "SenderId" IN (SELECT "Id" FROM "Users" WHERE "Username" LIKE '%.demo');
 --   DELETE FROM "DocumentVersions" WHERE "DocumentId" IN (SELECT "Id" FROM "Documents" WHERE "CreatedById" IN (SELECT "Id" FROM "Users" WHERE "Username" LIKE '%.demo'));
 --   DELETE FROM "Documents" WHERE "CreatedById" IN (SELECT "Id" FROM "Users" WHERE "Username" LIKE '%.demo');
 --   DELETE FROM "Users" WHERE "Username" LIKE '%.demo';

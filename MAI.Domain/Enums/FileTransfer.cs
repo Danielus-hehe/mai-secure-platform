@@ -9,14 +9,16 @@ namespace MAI.Domain.Entities
         public Guid Id { get; set; } = Guid.NewGuid();
         public Guid SenderId { get; set; }
         public User? Sender { get; set; }
-        public Guid RecipientId { get; set; }
-        public User? Recipient { get; set; }
 
         /// <summary>
-        /// Destinatarii suplimentari adăugați prin forward.
+        /// Destinatarii transferului: cei aleși la trimitere (ForwardedById null)
+        /// și cei adăugați prin forward. Fiecare are cheia de fișier împachetată
+        /// pentru el și propria dovadă de primire.
         ///
-        /// Destinatarul original este în RecipientId / EncryptedKeyForRecipient.
-        /// Acesta este lista de destinatari adăugați ulterior prin POST /forward.
+        /// Înainte, destinatarul original stătea pe coloanele RecipientId /
+        /// EncryptedKeyForRecipient / DownloadedAt ale acestui rând. Migrarea
+        /// PerRecipientReceipts l-a mutat aici și a eliminat coloanele: două
+        /// locuri pentru același fapt ajung inevitabil să se contrazică.
         /// </summary>
         public ICollection<TransferRecipient> Recipients { get; set; } = [];
 
@@ -60,27 +62,6 @@ namespace MAI.Domain.Entities
         public TransferStatus Status { get; set; } = TransferStatus.Pending;
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-        /// <summary>
-        /// Momentul în care destinatarul a descărcat și decriptat fișierul.
-        /// Este dovada de primire pe care o vede expeditorul.
-        /// </summary>
-        public DateTime? DownloadedAt { get; set; }
-
-        /// <summary>
-        /// Rezultatul verificării semnăturii, raportat de browserul destinatarului
-        /// la confirmare.
-        ///
-        /// Null pentru transferurile necriptate sau neconfirmate încă. Contează
-        /// pentru dovada de primire: „a fost descărcat" și „a fost descărcat, iar
-        /// semnătura expeditorului s-a verificat" sunt afirmații diferite, iar
-        /// expeditorul are dreptul să o vadă pe a doua.
-        ///
-        /// Server-side rămâne o afirmație a clientului, nu o verificare proprie —
-        /// serverul nu poate verifica singur semnătura fără textul în clar, pe
-        /// care prin construcție nu îl are.
-        /// </summary>
-        public bool? RecipientSignatureValid { get; set; }
-
         /// <summary>Momentul retragerii de către expeditor. Null dacă nu a fost retras.</summary>
         public DateTime? RevokedAt { get; set; }
 
@@ -89,8 +70,9 @@ namespace MAI.Domain.Entities
 
         /// <summary>
         /// După acest moment transferul nu mai poate fi descărcat, iar obiectul
-        /// din depozit se șterge (lifecycle policy pe bucket). Reduce fereastra
-        /// în care un document sensibil stă degeaba pe server.
+        /// din depozit se șterge (TransferExpirationService). Reduce fereastra
+        /// în care un document sensibil stă degeaba pe server. Limita superioară
+        /// vine din Transfers:MaxExpiryDays.
         /// </summary>
         public DateTime? ExpiresAt { get; set; }
 
@@ -100,6 +82,33 @@ namespace MAI.Domain.Entities
         /// </summary>
         public TransferCategory Category { get; set; } = TransferCategory.General;
 
+        /// <summary>
+        /// Politica de redistribuire, aleasă de expeditor la trimitere.
+        ///
+        /// False: doar expeditorul poate adăuga destinatari. True: și
+        /// destinatarii pot redirecționa fișierul către colegi.
+        ///
+        /// Limitare de consemnat în raport: e o regulă a canalului oficial, nu o
+        /// garanție criptografică. Un destinatar care a descărcat fișierul în clar
+        /// îl poate trimite pe alt canal. Ce garantează regula este că în SGDM
+        /// orice redistribuire trece prin expeditor sau lasă urmă în jurnal
+        /// (AuditAction.TransferForwarded) și în lista de destinatari.
+        /// </summary>
+        public bool AllowForward { get; set; }
+
+        /// <summary>
+        /// Ștergere logică. Rândul și destinatarii lui rămân — cu dovezile de
+        /// primire — dar transferul dispare din liste, cifrotextul se șterge din
+        /// depozit și cheile împachetate se golesc.
+        ///
+        /// Ștergerea fizică (DELETE) distrugea tocmai dovada că un document a
+        /// fost primit, și ștergea în cascadă rândurile TransferRecipients.
+        /// </summary>
+        public DateTime? DeletedAt { get; set; }
+
+        /// <summary>Cine a șters transferul (expeditorul sau un administrator).</summary>
+        public Guid? DeletedById { get; set; }
+
         // ── Plicul criptografic ──────────────────────────────────────────────
         // Serverul stochează aceste valori dar nu le poate folosi: cheile de fișier
         // sunt împachetate cu chei publice RSA ale căror perechi private nu ajung
@@ -108,12 +117,10 @@ namespace MAI.Domain.Entities
         /// <summary>IV-ul AES-GCM folosit la criptarea conținutului (base64, 12 octeți).</summary>
         public string? EncryptionIv { get; set; }
 
-        /// <summary>Cheia de fișier (DEK) împachetată cu cheia publică a destinatarului.</summary>
-        public string? EncryptedKeyForRecipient { get; set; }
-
         /// <summary>
-        /// Aceeași DEK, împachetată și cu cheia publică a expeditorului — altfel
-        /// expeditorul nu și-ar mai putea deschide propriile fișiere trimise.
+        /// DEK-ul împachetat cu cheia publică a expeditorului — altfel expeditorul
+        /// nu și-ar mai putea deschide propriile fișiere trimise. Cheile
+        /// destinatarilor stau pe TransferRecipient.EncryptedKeyForUser.
         /// </summary>
         public string? EncryptedKeyForSender { get; set; }
 

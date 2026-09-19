@@ -1,4 +1,4 @@
-using MAI.Api.BackgroundJobs;
+﻿using MAI.Api.BackgroundJobs;
 using MAI.Api.Configuration;
 using MAI.Api.Middleware;
 using MAI.Api.Options;
@@ -8,6 +8,7 @@ using MAI.BusinessLogic.Interfaces;
 using MAI.BusinessLogic.Security;
 using MAI.BusinessLogic.Services;
 using MAI.BusinessLogic.Storage;
+using MAI.BusinessLogic.Transfers;
 using MAI.DataAccessLayer;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http.Features;
@@ -467,6 +468,14 @@ try
     builder.Configuration.GetSection("Intranet").Bind(intranetOptions);
     intranetOptions.Validate();
     builder.Services.AddSingleton(intranetOptions);
+
+    // ─── Politica transferurilor ───────────────────────────────────────────────
+    // Valabilitatea implicită/maximă și numărul maxim de destinatari. Din .env:
+    // TRANSFER_DEFAULT_EXPIRY_DAYS, TRANSFER_MAX_EXPIRY_DAYS, TRANSFER_MAX_RECIPIENTS.
+    var transferPolicy = new TransferPolicyOptions();
+    builder.Configuration.GetSection("Transfers").Bind(transferPolicy);
+    transferPolicy.Validate();
+    builder.Services.AddSingleton(transferPolicy);
 
     var expirationOptions = new TransferExpirationOptions();
     builder.Configuration.GetSection("TransferExpiration").Bind(expirationOptions);

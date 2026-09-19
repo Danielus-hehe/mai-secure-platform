@@ -216,6 +216,13 @@ services:
       Smtp__Username: ${SMTP_USERNAME:-}
       MAI_SMTP_PASSWORD: ${MAI_SMTP_PASSWORD:-}
 
+      # Politica transferurilor: valabilitate implicita / maxima (zile) si
+      # numarul maxim de destinatari. Frontend-ul le citeste din
+      # GET /api/Transfers/policy, deci se schimba doar aici (in .env).
+      Transfers__DefaultExpiryDays: ${TRANSFER_DEFAULT_EXPIRY_DAYS:-7}
+      Transfers__MaxExpiryDays: ${TRANSFER_MAX_EXPIRY_DAYS:-30}
+      Transfers__MaxRecipients: ${TRANSFER_MAX_RECIPIENTS:-20}
+
       # In spatele unui reverse proxy: fara asta, toti utilizatorii ajung in
       # aceeasi galeata de rate limit, fiindca RemoteIpAddress e IP-ul proxy-ului.
       RateLimit__BehindReverseProxy: "false"

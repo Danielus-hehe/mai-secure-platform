@@ -15,14 +15,9 @@ namespace MAI.DataAccessLayer.Configurations
                 .HasForeignKey(f => f.SenderId)
                 .OnDelete(DeleteBehavior.Restrict);
 
-            builder.HasOne(f => f.Recipient)
-                .WithMany()
-                .HasForeignKey(f => f.RecipientId)
-                .OnDelete(DeleteBehavior.Restrict);
-
-            // Destinatarii suplimentari (forward). Relația inversă e configurată
-            // în TransferRecipientConfiguration (HasOne.WithMany).
-            // Nu duplicăm HasMany aici ca să nu creăm relații ambigue în EF.
+            // Destinatarii (direcți și prin forward) sunt configurați în
+            // TransferRecipientConfiguration (HasOne.WithMany). Nu duplicăm
+            // HasMany aici ca să nu creăm relații ambigue în EF.
 
             // ── Limite de lungime ────────────────────────────────────────────
             // Fără ele, Npgsql creează 'text' nemărginit: un client poate trimite
@@ -43,18 +38,18 @@ namespace MAI.DataAccessLayer.Configurations
                 .HasMaxLength(32);       // 12 octeți în base64 = 16 caractere
 
             // RSA-3072 produce blocuri de 384 de octeți → 512 caractere base64.
-            builder.Property(f => f.EncryptedKeyForRecipient).HasMaxLength(600);
             builder.Property(f => f.EncryptedKeyForSender).HasMaxLength(600);
             builder.Property(f => f.SenderSignature).HasMaxLength(600);
             builder.Property(f => f.CryptoSuite).HasMaxLength(128);
 
-            // ── Indexuri ─────────────────────────────────────────────────────
-            // Lista de transferuri filtrează mereu pe destinatar sau expeditor și
-            // sortează pe dată. Fără indexuri compuse, PostgreSQL face sequential
-            // scan pe toată tabela la fiecare pagină.
+            // AllowForward: implicit false în entitate — redistribuirea e o
+            // permisiune pe care expeditorul o acordă explicit. Default-ul din
+            // coloană (FALSE) e pus de migrare, nu aici: HasDefaultValue pe un
+            // bool l-ar face „generat de bază” și EF ar omite valoarea la INSERT.
 
-            builder.HasIndex(f => new { f.RecipientId, f.CreatedAt })
-                .HasDatabaseName("IX_FileTransfers_Recipient_CreatedAt");
+            // ── Indexuri ─────────────────────────────────────────────────────
+            // Lista de transferuri filtrează pe expeditor (aici) sau pe destinatar
+            // (IX_TransferRecipients_UserId) și sortează pe dată.
 
             builder.HasIndex(f => new { f.SenderId, f.CreatedAt })
                 .HasDatabaseName("IX_FileTransfers_Sender_CreatedAt");
@@ -68,9 +63,9 @@ namespace MAI.DataAccessLayer.Configurations
 
             // StorageKey trebuie să fie unic: două rânduri care indică același
             // obiect ar însemna că ștergerea unuia rupe celălalt transfer.
-            // Filtrul e obligatoriu: transferurile dinaintea migrării au StorageKey
-            // gol, iar un index unic nefiltrat le-ar considera duplicate între ele
-            // și ar face imposibilă crearea indexului pe o bază existentă.
+            // Filtrul e obligatoriu: transferurile terminate (expirate, retrase,
+            // șterse) au StorageKey gol, iar un index unic nefiltrat le-ar
+            // considera duplicate între ele.
             builder.HasIndex(f => f.StorageKey)
                 .IsUnique()
                 .HasFilter("\"StorageKey\" <> ''")

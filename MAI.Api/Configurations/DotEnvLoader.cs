@@ -50,6 +50,9 @@ namespace MAI.Api.Configuration
                 ["SMTP_USE_SSL"]         = new[] { "Smtp__UseSsl" },
                 ["SMTP_FROM"]            = new[] { "Smtp__From" },
                 ["SMTP_USERNAME"]        = new[] { "Smtp__Username" },
+                ["TRANSFER_DEFAULT_EXPIRY_DAYS"] = new[] { "Transfers__DefaultExpiryDays" },
+                ["TRANSFER_MAX_EXPIRY_DAYS"]     = new[] { "Transfers__MaxExpiryDays" },
+                ["TRANSFER_MAX_RECIPIENTS"]      = new[] { "Transfers__MaxRecipients" },
             };
 
         /// <summary>Rezultatul încărcării, pentru mesajul din log (fără valori).</summary>

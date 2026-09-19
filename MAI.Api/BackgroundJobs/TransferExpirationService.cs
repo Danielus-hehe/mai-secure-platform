@@ -120,40 +120,60 @@ namespace MAI.Api.BackgroundJobs
                 var db      = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 var storage = scope.ServiceProvider.GetRequiredService<IFileStorage>();
 
+                // Doar transferurile care mai au ceva de făcut:
+                //   • Pending    → devin Expired, obiectul se șterge;
+                //   • Downloaded → rămân Downloaded (e dovada că toți l-au primit),
+                //                  dar obiectul se șterge — o singură dată, cât
+                //                  StorageKey mai e nevid.
+                // Revoked, Expired și cele șterse logic nu mai au obiect în depozit
+                // și nu se ating. Selecția veche („Status <> Expired”) suprascria
+                // Revoked și Downloaded cu Expired, pierzând exact informația pe
+                // care un supervizor o caută în jurnal.
+                //
+                // Cu purjarea dezactivată, Downloaded nu se selectează deloc: nu e
+                // nimic de făcut pentru ele, iar altfel ar fi consemnate în jurnal
+                // la fiecare trecere.
+                var purge = _options.PurgeObjects;
+
                 var batch = await db.FileTransfers
+                    .Include(t => t.Recipients)
                     .Where(t => t.ExpiresAt != null
                              && t.ExpiresAt < cutoff
-                             && t.Status != TransferStatus.Expired)
+                             && t.DeletedAt == null
+                             && (t.Status == TransferStatus.Pending
+                                 || (purge && t.Status == TransferStatus.Downloaded && t.StorageKey != "")))
                     .OrderBy(t => t.ExpiresAt)
+                    .ThenBy(t => t.Id)
                     .Take(_options.BatchSize)
+                    .AsSplitQuery()
                     .ToListAsync(ct);
 
                 if (batch.Count == 0)
                     break;
 
-                var purgedInBatch = 0;
-                var failedInBatch = 0;
+                var purgedInBatch  = 0;
+                var failedInBatch  = 0;
+                var expiredInBatch = 0;
 
                 foreach (var transfer in batch)
                 {
-                    var purged = false;
+                    var hadObject = !string.IsNullOrEmpty(transfer.StorageKey);
 
-                    if (_options.PurgeObjects && !string.IsNullOrEmpty(transfer.StorageKey))
+                    if (purge && hadObject)
                     {
                         try
                         {
                             await storage.DeleteAsync(transfer.StorageKey, ct);
-                            purged = true;
                             purgedInBatch++;
                         }
                         catch (Exception ex)
                         {
                             failedInBatch++;
 
-                            // Nu marcam Expired. Randul ramane in coada si se
-                            // reincearca la urmatoarea trecere. Utilizatorul nu e
-                            // afectat: accesul e deja refuzat de controller pe baza
-                            // lui ExpiresAt, indiferent de valoarea lui Status.
+                            // Nu atingem rândul. Rămâne în coadă și se reîncearcă la
+                            // următoarea trecere. Utilizatorul nu e afectat: accesul
+                            // e deja refuzat de controller pe baza lui ExpiresAt,
+                            // indiferent de valoarea lui Status.
                             _logger.LogError(ex,
                                 "Stergerea obiectului {Key} (transfer {Id}) a esuat. Se reincearca la urmatoarea trecere.",
                                 transfer.StorageKey, transfer.Id);
@@ -161,25 +181,40 @@ namespace MAI.Api.BackgroundJobs
                             continue;
                         }
                     }
-                    else
+
+                    var wasPending = transfer.Status == TransferStatus.Pending;
+                    var notDownloaded = transfer.Recipients.Count(r => r.DownloadedAt == null);
+
+                    if (wasPending)
                     {
-                        // Fara obiect de sters (transfer vechi, fara StorageKey) sau
-                        // purjare dezactivata: doar marcam.
-                        purged = !_options.PurgeObjects || string.IsNullOrEmpty(transfer.StorageKey);
+                        transfer.Status = TransferStatus.Expired;
+                        expiredInBatch++;
                     }
 
-                    transfer.Status = TransferStatus.Expired;
+                    // Invariantul „StorageKey nevid ⇔ obiectul există”: cheile se
+                    // golesc doar dacă obiectul chiar a fost șters. Cu purjarea
+                    // dezactivată, obiectul rămâne până la regula ILM a bucketului.
+                    if (purge)
+                    {
+                        transfer.StorageKey            = string.Empty;
+                        transfer.EncryptedKeyForSender = null;
+                        foreach (var r in transfer.Recipients)
+                            r.EncryptedKeyForUser = string.Empty;
+                    }
 
                     db.AuditLogs.Add(new AuditLog
                     {
                         UserId    = null,
                         Username  = "sistem",
                         Action    = AuditAction.TransferExpired,
-                        Details   = purged && _options.PurgeObjects && !string.IsNullOrEmpty(transfer.StorageKey)
-                            ? $"Transfer expirat '{transfer.FileName}' (id {transfer.Id}); " +
-                              $"cifrotext sters din depozit ({transfer.CiphertextSize} octeti)"
-                            : $"Transfer expirat '{transfer.FileName}' (id {transfer.Id}); " +
-                              "fara obiect de sters in depozit",
+                        Details   = (wasPending
+                                        ? $"Transfer expirat '{transfer.FileName}' (id {transfer.Id}); " +
+                                          $"{notDownloaded} din {transfer.Recipients.Count} destinatari nu l-au descarcat"
+                                        : $"Termen atins pentru transferul descarcat de toti '{transfer.FileName}' " +
+                                          $"(id {transfer.Id}); starea Downloaded se pastreaza") +
+                                    (purge && hadObject
+                                        ? $"; cifrotext sters din depozit ({transfer.CiphertextSize} octeti)"
+                                        : "; fara obiect sters din depozit"),
                         IpAddress = "sistem",
                         Timestamp = DateTime.UtcNow,
                     });
@@ -187,15 +222,15 @@ namespace MAI.Api.BackgroundJobs
 
                 await db.SaveChangesAsync(ct);
 
-                var markedInBatch = batch.Count - failedInBatch;
+                var processedInBatch = batch.Count - failedInBatch;
 
-                totalExpired += markedInBatch;
+                totalExpired += expiredInBatch;
                 totalPurged  += purgedInBatch;
                 totalFailed  += failedInBatch;
 
                 _logger.LogInformation(
-                    "Job expirare: lot procesat — {Marked} marcate, {Purged} obiecte sterse, {Failed} esecuri.",
-                    markedInBatch, purgedInBatch, failedInBatch);
+                    "Job expirare: lot procesat — {Expired} expirate, {Purged} obiecte sterse, {Failed} esecuri.",
+                    expiredInBatch, purgedInBatch, failedInBatch);
 
                 // Lotul a fost mai mic decat maximul: nu mai are ce urma.
                 if (batch.Count < _options.BatchSize)
@@ -203,7 +238,7 @@ namespace MAI.Api.BackgroundJobs
 
                 // Toate randurile din lot au esuat la stergere: fara pauza am intra
                 // intr-o bucla stransa pe acelasi lot pana la urmatorul interval.
-                if (markedInBatch == 0)
+                if (processedInBatch == 0)
                     break;
             }
 

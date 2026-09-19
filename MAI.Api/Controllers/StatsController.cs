@@ -3,6 +3,7 @@ using System.Security.Claims;
 using MAI.Api.BackgroundJobs;
 using MAI.BusinessLogic.Interfaces;
 using MAI.BusinessLogic.Storage;
+using MAI.BusinessLogic.Transfers;
 using MAI.DataAccessLayer;
 using MAI.Domain.Entities;
 using MAI.Domain.Enums;
@@ -66,17 +67,22 @@ namespace MAI.Api.Controllers
 
             var mine = _context.FileTransfers
                 .AsNoTracking()
-                .Where(t => t.SenderId == userId || t.RecipientId == userId);
+                .Where(t => t.DeletedAt == null)
+                .Where(t => t.SenderId == userId || t.Recipients.Any(r => r.UserId == userId));
 
             var myTransfersTotal = await mine.CountAsync(ct);
 
-            // Fișierele care îl așteaptă pe utilizator: primite, nedescărcate și
-            // încă în termen. Unul trecut de termen, dar nemarcat încă de job, nu
-            // mai poate fi descărcat, deci nu se numără.
-            var awaitingMyDownload = await _context.FileTransfers.CountAsync(t =>
-                t.RecipientId == userId &&
-                t.Status == TransferStatus.Pending &&
-                (t.ExpiresAt == null || t.ExpiresAt > now), ct);
+            // Fișierele care îl așteaptă pe utilizator: rândul LUI de destinatar
+            // e neconfirmat, iar transferul e activ și în termen. Starea
+            // agregată nu ajunge: un transfer rămâne Pending cât timp ORICE
+            // destinatar nu l-a descărcat, deci ar fi numărat și la cei care
+            // l-au descărcat deja.
+            var awaitingMyDownload = await _context.TransferRecipients.CountAsync(r =>
+                r.UserId == userId &&
+                r.DownloadedAt == null &&
+                r.Transfer!.DeletedAt == null &&
+                r.Transfer.Status == TransferStatus.Pending &&
+                (r.Transfer.ExpiresAt == null || r.Transfer.ExpiresAt > now), ct);
 
             var activeUsers    = await _context.Users.CountAsync(u => u.IsActive, ct);
             var totalDocuments = await _context.Documents.CountAsync(ct);
@@ -96,10 +102,11 @@ namespace MAI.Api.Controllers
                 : null;
 
             var recent = await mine
-                .Include(t => t.Sender)
-                .Include(t => t.Recipient)
                 .OrderByDescending(t => t.CreatedAt)
                 .Take(5)
+                .Include(t => t.Sender)
+                .Include(t => t.Recipients).ThenInclude(r => r.User)
+                .AsSplitQuery()
                 .ToListAsync(ct);
 
             var recentTransfers = recent.Select(t => new
@@ -109,14 +116,11 @@ namespace MAI.Api.Controllers
                 fileSize      = t.FileSize,
                 direction     = t.SenderId == userId ? "sent" : "received",
                 senderName    = DisplayName(t.Sender),
-                recipientName = DisplayName(t.Recipient),
+                recipientName = RecipientsLabel(t.Recipients),
                 // Aceeași regulă ca lista de transferuri: un transfer în așteptare
                 // trecut de termen apare ca expirat, chiar dacă jobul nu l-a
                 // marcat încă.
-                status        = t.Status == TransferStatus.Pending
-                                && t.ExpiresAt.HasValue && t.ExpiresAt.Value < now
-                                    ? nameof(TransferStatus.Expired)
-                                    : t.Status.ToString(),
+                status        = TransferRules.EffectiveStatus(t, now).ToString(),
                 createdAt     = t.CreatedAt,
             }).ToList();
 
@@ -136,6 +140,23 @@ namespace MAI.Api.Controllers
             user is null
                 ? "—"
                 : string.IsNullOrWhiteSpace(user.FullName) ? user.Username : user.FullName;
+
+        /// <summary>„Ion Popescu”, „Ion Popescu, Ana Rusu” sau „Ion Popescu +3”.</summary>
+        private static string RecipientsLabel(IEnumerable<TransferRecipient> recipients)
+        {
+            var names = recipients
+                .OrderBy(r => r.SentAt)
+                .Select(r => DisplayName(r.User))
+                .ToList();
+
+            return names.Count switch
+            {
+                0 => "—",
+                1 => names[0],
+                2 => $"{names[0]}, {names[1]}",
+                _ => $"{names[0]} +{names.Count - 1}",
+            };
+        }
 
         // ═════════════════════════════════════════════════════════════════════
         // GET api/Stats/alerts — semnale de securitate (SefDirectie + Administrator)
@@ -393,25 +414,31 @@ namespace MAI.Api.Controllers
             var expiredTransfers    = await _context.FileTransfers.CountAsync(t => t.Status == TransferStatus.Expired, ct);
             var encryptedTransfers  = await _context.FileTransfers.CountAsync(t => t.IsEncrypted, ct);
 
-            // Coada jobului de expirare: randuri trecute de ExpiresAt dar inca
-            // nemarcate. Daca numarul creste de la o reincarcare la alta, jobul nu
-            // tine pasul sau a murit.
+            var deletedTransfers    = await _context.FileTransfers.CountAsync(t => t.DeletedAt != null, ct);
+
+            // Coada jobului de expirare: exact selectia jobului (vezi
+            // TransferExpirationService). Daca numarul creste de la o reincarcare
+            // la alta, jobul nu tine pasul sau a murit.
             var awaitingPurge = await _context.FileTransfers
                 .CountAsync(t => t.ExpiresAt != null
                               && t.ExpiresAt < now
-                              && t.Status != TransferStatus.Expired, ct);
+                              && t.DeletedAt == null
+                              && (t.Status == TransferStatus.Pending
+                                  || (t.Status == TransferStatus.Downloaded && t.StorageKey != "")), ct);
 
             var expiringNext24h = await _context.FileTransfers
                 .CountAsync(t => t.ExpiresAt != null
                               && t.ExpiresAt >= now
                               && t.ExpiresAt < next24h
-                              && t.Status != TransferStatus.Expired, ct);
+                              && t.DeletedAt == null
+                              && t.Status == TransferStatus.Pending, ct);
 
             // Contabilitatea se face pe cifrotext, nu pe dimensiunea in clar:
             // octetii care ocupa efectiv spatiu in bucket sunt cei criptati.
-            // Transferurile deja expirate nu mai au obiect in depozit, deci nu intra.
+            // Intra doar randurile care mai au obiect in depozit (StorageKey
+            // nevid): expirate, retrase si sterse il au golit.
             var storedCiphertextBytes = await _context.FileTransfers
-                .Where(t => t.Status != TransferStatus.Expired)
+                .Where(t => t.StorageKey != "" && t.Status != TransferStatus.Expired)
                 .SumAsync(t => (long?)t.CiphertextSize, ct) ?? 0;
 
             var totalCiphertextBytes = await _context.FileTransfers
@@ -545,6 +572,7 @@ namespace MAI.Api.Controllers
                     pending         = pendingTransfers,
                     downloaded      = downloadedTransfers,
                     expired         = expiredTransfers,
+                    deleted         = deletedTransfers,
                     encrypted       = encryptedTransfers,
                     // Procentul de transferuri care trec efectiv prin plicul E2E.
                     // Inlocuieste "Integritate sistem: 100%", care era o constanta.

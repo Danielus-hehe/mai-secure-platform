@@ -16,11 +16,16 @@
  *
  *   3. La trimiterea unui fisier:
  *      - se genereaza o cheie AES-256-GCM aleatorie (DEK), unica pe transfer
- *      - fisierul se cripteaza cu DEK
- *      - DEK se impacheteaza de doua ori: cu cheia publica a destinatarului
+ *      - fisierul se cripteaza O SINGURA DATA cu DEK, oricati destinatari ar fi
+ *      - DEK se impacheteaza separat cu cheia publica a fiecarui destinatar
  *        SI cu a expeditorului (altfel expeditorul nu si-ar mai putea citi
  *        propriile fisiere trimise)
  *      - SHA-256 al continutului in clar se semneaza cu RSA-PSS
+ *
+ *   3b. La redirectionare (forward): DEK se despacheteaza cu cheia privata
+ *      proprie si se re-impacheteaza pentru destinatarii noi. Cifrotextul si
+ *      semnatura raman neatinse — destinatarul nou verifica semnatura
+ *      EXPEDITORULUI ORIGINAL, nu a celui care a facut forward.
  *
  *   4. La primire: se despacheteaza DEK cu cheia privata proprie, se decripteaza,
  *      se recalculeaza SHA-256 si se verifica semnatura.
@@ -107,14 +112,25 @@ export interface UnlockedKeys {
     signingKey: CryptoKey;     // RSA-PSS private
 }
 
-/** Metadatele criptografice ale unui transfer. */
+/** Metadatele criptografice comune ale unui transfer. */
 export interface TransferCryptoEnvelope {
     iv: string;                      // base64
-    encryptedKeyForRecipient: string;// base64
     encryptedKeyForSender: string;   // base64
     signature: string;               // base64
     ciphertextSha256: string;        // hex
     suite: string;
+}
+
+/** Cheia publica a unui destinatar, asa cum vine de la /Keys/recipients. */
+export interface RecipientPublicKey {
+    userId: string;
+    publicKeyEncryption: string;     // SPKI, base64
+}
+
+/** DEK-ul impachetat pentru un anumit destinatar. */
+export interface WrappedKeyForUser {
+    userId: string;
+    encryptedKeyForUser: string;     // base64
 }
 
 // ── Generarea si descuierea cheilor ──────────────────────────────────────────
@@ -344,23 +360,44 @@ export async function keyFingerprint(spkiBase64: string): Promise<string> {
 export interface EncryptedFile {
     ciphertext: Blob;
     envelope: TransferCryptoEnvelope;
+    /** DEK-ul impachetat cate o data pentru fiecare destinatar. */
+    recipientKeys: WrappedKeyForUser[];
     plaintextSha256: string;
 }
 
+/** Impacheteaza un DEK brut cu cheia publica RSA-OAEP a fiecarui destinatar. */
+async function wrapForRecipients(
+    rawDek: ArrayBuffer,
+    recipients: RecipientPublicKey[]
+): Promise<WrappedKeyForUser[]> {
+    return Promise.all(
+        recipients.map(async (r) => {
+            const publicKey = await importEncryptionPublicKey(r.publicKeyEncryption);
+            const wrapped = await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, publicKey, rawDek);
+            return { userId: r.userId, encryptedKeyForUser: toBase64(wrapped) };
+        })
+    );
+}
+
 /**
- * Cripteaza un fisier pentru un destinatar.
+ * Cripteaza un fisier pentru unul sau mai multi destinatari.
  *
  * DEK-ul este aleatoriu si unic per transfer: doua fisiere identice trimise de
  * doua ori produc cifrotexte complet diferite, iar compromiterea unei chei de
- * fisier nu spune nimic despre celelalte.
+ * fisier nu spune nimic despre celelalte. Cifrotextul e unul singur; doar DEK-ul
+ * se impacheteaza de N+1 ori (destinatari + expeditor).
  */
-export async function encryptFileForRecipient(
+export async function encryptFileForRecipients(
     file: File,
-    recipientEncryptionPublicKey: CryptoKey,
+    recipients: RecipientPublicKey[],
     senderEncryptionPublicKey: CryptoKey,
     senderSigningKey: CryptoKey
 ): Promise<EncryptedFile> {
     assertSecureContext();
+
+    if (recipients.length === 0) {
+        throw new Error('Alegeți cel puțin un destinatar.');
+    }
 
     const plaintext = await file.arrayBuffer();
     const plaintextSha256 = await sha256Hex(plaintext);
@@ -381,8 +418,8 @@ export async function encryptFileForRecipient(
 
     const rawDek = await crypto.subtle.exportKey('raw', dek);
 
-    const [forRecipient, forSender] = await Promise.all([
-        crypto.subtle.encrypt({ name: 'RSA-OAEP' }, recipientEncryptionPublicKey, rawDek),
+    const [recipientKeys, forSender] = await Promise.all([
+        wrapForRecipients(rawDek, recipients),
         crypto.subtle.encrypt({ name: 'RSA-OAEP' }, senderEncryptionPublicKey, rawDek),
     ]);
 
@@ -397,15 +434,42 @@ export async function encryptFileForRecipient(
     return {
         ciphertext: new Blob([ciphertext], { type: 'application/octet-stream' }),
         plaintextSha256,
+        recipientKeys,
         envelope: {
             iv: toBase64(iv),
-            encryptedKeyForRecipient: toBase64(forRecipient),
             encryptedKeyForSender: toBase64(forSender),
             signature: toBase64(signature),
             ciphertextSha256: await sha256Hex(ciphertext),
             suite: CRYPTO_SUITE,
         },
     };
+}
+
+/**
+ * Re-impacheteaza DEK-ul unui transfer pentru destinatari noi (forward).
+ *
+ * DEK-ul brut exista doar in memoria acestei functii. Serverul primeste numai
+ * blocurile RSA-OAEP rezultate, deci nu afla nici acum cheia de fisier.
+ */
+export async function rewrapFileKey(
+    wrappedKeyForMe: string,
+    myDecryptionKey: CryptoKey,
+    recipients: RecipientPublicKey[]
+): Promise<WrappedKeyForUser[]> {
+    assertSecureContext();
+
+    let rawDek: ArrayBuffer;
+    try {
+        rawDek = await crypto.subtle.decrypt(
+            { name: 'RSA-OAEP' },
+            myDecryptionKey,
+            fromBase64(wrappedKeyForMe) as BufferSource
+        );
+    } catch {
+        throw new Error('Cheia de fișier nu a putut fi despachetată cu cheia dumneavoastră privată.');
+    }
+
+    return wrapForRecipients(rawDek, recipients);
 }
 
 export interface DecryptedFile {
@@ -426,7 +490,7 @@ export interface DecryptedFile {
  */
 export async function decryptTransfer(
     ciphertext: ArrayBuffer,
-    envelope: TransferCryptoEnvelope,
+    envelope: Pick<TransferCryptoEnvelope, 'iv' | 'signature'>,
     wrappedKeyForMe: string,
     myDecryptionKey: CryptoKey,
     senderSigningPublicKey: CryptoKey
