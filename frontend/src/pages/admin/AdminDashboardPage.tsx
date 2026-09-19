@@ -14,6 +14,8 @@ import {
 import PageHeader from '../../components/ui/PageHeader';
 import Button     from '../../components/ui/Button';
 import Modal      from '../../components/ui/Modal';
+import OrgUnitSelect from '../../components/org/OrgUnitSelect';
+import { listOrgUnits, type OrgUnit } from '../../api/orgUnits';
 import Input      from '../../components/ui/Input';
 import { useToast } from '../../context/ToastContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -38,11 +40,11 @@ const CHART_COLORS_DARK = ['#4d7fbd', '#e8c15a', '#7fa8d6', '#d4a935', '#b3cde9'
 
 interface CreateForm {
     fullName: string; username: string; password: string;
-    email: string; department: string; role: Role;
+    email: string; orgUnitId: string; role: Role;
 }
 const EMPTY: CreateForm = {
     fullName: '', username: '', password: '',
-    email: '', department: '', role: 'UTILIZATOR',
+    email: '', orgUnitId: '', role: 'UTILIZATOR',
 };
 
 /** Card de metrica. `hint` apare sub valoare si explica de ce conteaza cifra. */
@@ -126,6 +128,18 @@ export default function AdminDashboardPage() {
     const [creating, setCreating] = useState(false);
     const [showPass, setShowPass] = useState(false);
     const [form, setForm]         = useState<CreateForm>(EMPTY);
+    const [orgUnits, setOrgUnits] = useState<OrgUnit[]>([]);
+
+    // Subdiviziunile se încarcă la deschiderea formularului, nu la fiecare
+    // vizită a panoului: cele mai multe vizite nu creează conturi.
+    useEffect(() => {
+        if (!open) return;
+        let cancelled = false;
+        listOrgUnits()
+            .then(list => { if (!cancelled) setOrgUnits(list.filter(u => u.isActive)); })
+            .catch(() => { /* formularul rămâne utilizabil, fără încadrare */ });
+        return () => { cancelled = true; };
+    }, [open]);
 
     const loadStats = useCallback(async (signal?: AbortSignal) => {
         setLoadingStats(true);
@@ -179,7 +193,7 @@ export default function AdminDashboardPage() {
                 username:   form.username,
                 password:   form.password,
                 email:      form.email,
-                department: form.department,
+                orgUnitId:  form.orgUnitId || null,
                 role:       ROLE_TO_NUM[form.role],
             });
 
@@ -525,8 +539,18 @@ export default function AdminDashboardPage() {
                     </div>
                     <Input id="email" label="Adresă e-mail" type="email" value={form.email} onChange={set('email')}
                            placeholder="ex: ion.popescu@mai.gov.md" />
-                    <Input id="department" label="Direcție / Departament" value={form.department} onChange={set('department')}
-                           placeholder="ex: Direcția IT" />
+                    <div>
+                        <label htmlFor="admin-create-org-unit" className="block text-sm font-medium text-mai-800 dark:text-mai-200 mb-1.5">
+                            Subdiviziune
+                        </label>
+                        <OrgUnitSelect
+                            id="admin-create-org-unit"
+                            units={orgUnits}
+                            value={form.orgUnitId}
+                            onChange={v => setForm(prev => ({ ...prev, orgUnitId: v }))}
+                            emptyLabel="— neîncadrat —"
+                        />
+                    </div>
                     <div>
                         <label className="block text-sm font-medium text-mai-800 dark:text-mai-200 mb-1.5">Rol</label>
                         <select value={form.role} onChange={set('role')}

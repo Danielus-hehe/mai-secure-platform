@@ -380,6 +380,10 @@ namespace MAI.Api.Controllers
             "UPLOAD"         => "Încărcare",
             "DOWNLOAD"       => "Descărcare",
             "MODIFICARE_DOC" => "Modificare document",
+            "TRANSFER"       => "Transfer (retragere, expirare, redirecționare)",
+            "SECURITATE"     => "Securitate cont (parolă, sesiuni)",
+            "STRUCTURA"      => "Structură organizatorică",
+            "DOC_INTERN"     => "Document intern",
             "ADMIN"          => "Administrare",
             _                => action,
         };
@@ -394,6 +398,14 @@ namespace MAI.Api.Controllers
             AuditAction.DocumentNewVersion => "MODIFICARE_DOC",
             AuditAction.UserCreated        => "ADMIN",
             AuditAction.UserUpdated        => "ADMIN",
+            AuditAction.FileDeleted or AuditAction.TransferExpired or
+            AuditAction.TransferRevoked or AuditAction.TransferForwarded      => "TRANSFER",
+            AuditAction.SessionRevoked or AuditAction.PasswordResetRequested or
+            AuditAction.PasswordResetCompleted                                => "SECURITATE",
+            AuditAction.OrgStructureChanged                                   => "STRUCTURA",
+            AuditAction.InternalDocumentCreated or AuditAction.InternalDocumentPublished or
+            AuditAction.InternalDocumentOpened or AuditAction.InternalDocumentAcknowledged or
+            AuditAction.InternalDocumentRepealed                              => "DOC_INTERN",
             _                              => "ADMIN",
         };
 
@@ -405,6 +417,14 @@ namespace MAI.Api.Controllers
             "DOWNLOAD"       => [AuditAction.FileDownload],
             "MODIFICARE_DOC" => [AuditAction.DocumentCreate, AuditAction.DocumentNewVersion],
             "ADMIN"          => [AuditAction.UserCreated, AuditAction.UserUpdated],
+            "TRANSFER"       => [AuditAction.FileDeleted, AuditAction.TransferExpired,
+                                 AuditAction.TransferRevoked, AuditAction.TransferForwarded],
+            "SECURITATE"     => [AuditAction.SessionRevoked, AuditAction.PasswordResetRequested,
+                                 AuditAction.PasswordResetCompleted],
+            "STRUCTURA"      => [AuditAction.OrgStructureChanged],
+            "DOC_INTERN"     => [AuditAction.InternalDocumentCreated, AuditAction.InternalDocumentPublished,
+                                 AuditAction.InternalDocumentOpened, AuditAction.InternalDocumentAcknowledged,
+                                 AuditAction.InternalDocumentRepealed],
             _                => null,
         };
     }

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { UserPlus, Power, KeyRound, Loader2, Search, Unlock, Mail} from 'lucide-react';
+import { UserPlus, Power, KeyRound, Loader2, Search, Unlock, Mail, Building2, Crown } from 'lucide-react';
 import PageHeader    from '../../components/ui/PageHeader';
 import Badge         from '../../components/ui/Badge';
 import Button        from '../../components/ui/Button';
@@ -13,6 +13,10 @@ import { useToast }  from '../../context/ToastContext';
 import api from '../../api/client';
 import { apiErrorMessage } from '../../api/errors';
 import type { Role, User } from '../../types';
+import OrgUnitSelect from '../../components/org/OrgUnitSelect';
+import ResetPasswordModal, { type ResetTarget } from '../../components/users/ResetPasswordModal';
+import ChangeOrgUnitModal from '../../components/users/ChangeOrgUnitModal';
+import { listOrgUnits, type OrgUnit } from '../../api/orgUnits';
 
 // Backend UserRole enum: Utilizator=1, SefDirectie=2, Administrator=3
 const ROLE_NUM: Record<number, Role> = {
@@ -30,6 +34,7 @@ const ROLE_STR: Record<Role, number> = {
 interface ApiUser {
     id: string; fullName: string; username: string;
     email: string; role: number; department: string;
+    orgUnitId: string | null; ledOrgUnitId: string | null; ledOrgUnitName: string | null;
     isActive: boolean; emailConfirmed: boolean; createdAt: string;
     isLockedOut: boolean; lockoutEndsAt: string | null;
     lastLoginAt: string | null;
@@ -47,6 +52,9 @@ interface PagedUsers {
 }
 
 type AppUser = User & {
+    orgUnitId: string | null;
+    ledOrgUnitId: string | null;
+    ledOrgUnitName: string | null;
     emailConfirmed: boolean;
     isLockedOut: boolean;
     lockoutEndsAt: string | null;
@@ -61,11 +69,11 @@ const toUser = (u: ApiUser): AppUser => ({
 
 interface CreateForm {
     fullName: string; username: string; password: string;
-    email: string; department: string; role: Role;
+    email: string; orgUnitId: string; role: Role;
 }
 const EMPTY_FORM: CreateForm = {
     fullName: '', username: '', password: '',
-    email: '', department: '', role: 'UTILIZATOR',
+    email: '', orgUnitId: '', role: 'UTILIZATOR',
 };
 
 export default function UsersPage() {
@@ -84,6 +92,18 @@ export default function UsersPage() {
     const [createLoading, setCreateLoading] = useState(false);
     const [confirmTarget, setConfirmTarget] = useState<AppUser | null>(null);
     const [form, setForm] = useState<CreateForm>(EMPTY_FORM);
+
+    // Structura organizatorică: pentru formular, filtru și încadrare.
+    const [orgUnits,      setOrgUnits]      = useState<OrgUnit[]>([]);
+    const [unitFilter,    setUnitFilter]    = useState('');
+    const [resetTarget,   setResetTarget]   = useState<ResetTarget | null>(null);
+    const [unitTarget,    setUnitTarget]    = useState<AppUser | null>(null);
+
+    useEffect(() => {
+        listOrgUnits()
+            .then(setOrgUnits)
+            .catch(() => toast.error('Structura organizatorică nu a putut fi încărcată.'));
+    }, [toast]);
 
     // Căutarea pleacă abia după ce utilizatorul se oprește din tastat.
     useEffect(() => {
@@ -111,6 +131,7 @@ export default function UsersPage() {
             const { data } = await api.get<PagedUsers>('/Users', {
                 params: {
                     search: search || undefined,
+                    orgUnitId: unitFilter || undefined,
                     page,
                     pageSize,
                 },
@@ -126,7 +147,7 @@ export default function UsersPage() {
         } finally {
             if (!controller.signal.aborted) setLoading(false);
         }
-    }, [search, page, pageSize, toast]);
+    }, [search, unitFilter, page, pageSize, toast]);
 
     useEffect(() => {
         void fetchUsers();
@@ -143,7 +164,7 @@ export default function UsersPage() {
                 username:   form.username,
                 password:   form.password,
                 email:      form.email,
-                department: form.department,
+                orgUnitId:  form.orgUnitId || null,
                 role:       ROLE_STR[form.role],
             });
 
@@ -242,7 +263,8 @@ export default function UsersPage() {
                 }
             />
 
-            {/* Căutare server-side */}
+            {/* Căutare server-side + filtru pe subdiviziune (cu subunități) */}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             <div className="relative w-full sm:max-w-md">
                 <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-mai-300 dark:text-mai-500" />
                 <input
@@ -252,6 +274,15 @@ export default function UsersPage() {
                     className="w-full rounded-lg border border-mai-200 dark:border-mai-600 bg-white dark:bg-mai-800 dark:text-mai-200 py-2 pl-9 pr-3 text-sm
                                dark:focus:border-mai-400 focus:border-mai-500 focus:outline-none focus:ring-2 focus:ring-mai-500/20"
                 />
+            </div>
+                <div className="w-full sm:max-w-xs">
+                    <OrgUnitSelect
+                        units={orgUnits}
+                        value={unitFilter}
+                        onChange={(v) => { setUnitFilter(v); setPage(1); }}
+                        emptyLabel="Toate subdiviziunile"
+                    />
+                </div>
             </div>
 
             <div className="bg-white dark:bg-mai-800 rounded-xl shadow-card dark:shadow-none border border-mai-100/50 dark:border-mai-700 overflow-hidden">
@@ -281,7 +312,7 @@ export default function UsersPage() {
                                 <thead>
                                 <tr className="bg-mai-50 dark:bg-mai-900 text-left text-xs uppercase tracking-wide text-mai-500">
                                     <th className="px-5 py-3 font-semibold">Utilizator</th>
-                                    <th className="px-5 py-3 font-semibold">Direcție</th>
+                                    <th className="px-5 py-3 font-semibold">Subdiviziune</th>
                                     <th className="px-5 py-3 font-semibold">Rol</th>
                                     <th className="px-5 py-3 font-semibold">Creat la</th>
                                     <th className="px-5 py-3 font-semibold">Status</th>
@@ -297,8 +328,13 @@ export default function UsersPage() {
                                             <p className="text-xs text-mai-400 dark:text-mai-500">@{u.username}</p>
                                         </td>
 
-                                        <td className="px-5 py-3.5 text-mai-500 dark:text-mai-300 whitespace-nowrap">
-                                            {u.department || '—'}
+                                        <td className="px-5 py-3.5 text-mai-500 dark:text-mai-300">
+                                            <p className="whitespace-nowrap">{u.department || '—'}</p>
+                                            {u.ledOrgUnitName && (
+                                                <p className="mt-0.5 inline-flex items-center gap-1 text-[11px] font-medium text-gold-600">
+                                                    <Crown size={11} /> Șef: {u.ledOrgUnitName}
+                                                </p>
+                                            )}
                                         </td>
 
                                         {/* Dropdown rol — schimbă direct în DB */}
@@ -351,10 +387,16 @@ export default function UsersPage() {
                                                 </Button>
                                             )}
                                             <Button variant="ghost" className="px-2 py-1.5"
-                                                    title="Resetare parolă (din contul de administrator)"
-                                                    onClick={() => toast.info(
-                                                        `Resetarea parolei pentru @${u.username} se face din secțiunea de administrare.`
-                                                    )}>
+                                                    title="Schimbă subdiviziunea"
+                                                    onClick={() => setUnitTarget(u)}>
+                                                <Building2 size={14} />
+                                            </Button>
+                                            <Button variant="ghost" className="px-2 py-1.5"
+                                                    title={u.email ? 'Resetare parolă (link pe email)' : 'Resetare parolă (parolă temporară)'}
+                                                    onClick={() => setResetTarget({
+                                                        id: u.id, username: u.username, fullName: u.fullName,
+                                                        email: u.email ?? '', isActive: u.isActive,
+                                                    })}>
                                                 <KeyRound size={14} />
                                             </Button>
                                             <Button
@@ -410,10 +452,23 @@ export default function UsersPage() {
                            onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
                            placeholder="ex: ion.popescu@mai.gov.md" />
 
-                    <Input id="department" label="Direcție / Departament"
-                           value={form.department}
-                           onChange={e => setForm(f => ({ ...f, department: e.target.value }))}
-                           placeholder="ex: Direcția TIC" />
+                    <div>
+                        <label htmlFor="create-org-unit" className="block text-sm font-medium text-mai-800 dark:text-mai-200 mb-1.5">
+                            Subdiviziune
+                        </label>
+                        <OrgUnitSelect
+                            id="create-org-unit"
+                            units={orgUnits.filter(o => o.isActive)}
+                            value={form.orgUnitId}
+                            onChange={v => setForm(f => ({ ...f, orgUnitId: v }))}
+                            emptyLabel="— neîncadrat —"
+                        />
+                        {orgUnits.length === 0 && (
+                            <p className="mt-1 text-xs text-mai-400">
+                                Nu există încă subdiviziuni. Le creați din „Structura organizatorică”.
+                            </p>
+                        )}
+                    </div>
 
                     <div>
                         <label className="block text-sm font-medium text-mai-800 dark:text-mai-200 mb-1.5">Rol</label>
@@ -448,6 +503,23 @@ export default function UsersPage() {
                     </Button>
                 </div>
             </Modal>
+
+            {resetTarget && (
+                <ResetPasswordModal
+                    target={resetTarget}
+                    onClose={() => setResetTarget(null)}
+                    onDone={() => { setResetTarget(null); void fetchUsers(); }}
+                />
+            )}
+
+            {unitTarget && (
+                <ChangeOrgUnitModal
+                    user={unitTarget}
+                    units={orgUnits}
+                    onClose={() => setUnitTarget(null)}
+                    onDone={() => { setUnitTarget(null); void fetchUsers(); }}
+                />
+            )}
 
             {/* ─── Confirmare dezactivare ─── */}
             <ConfirmDialog

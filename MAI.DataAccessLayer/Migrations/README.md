@@ -51,6 +51,33 @@ deci îl poți rula pe o bază parțial actualizată fără să se repete nimic.
 | `20260911090000_AddTotpReplayProtection` | Un cod TOTP nu mai poate fi folosit de două ori |
 | `20260918120000_AddCategoryRecipientsInvitation` | Categoria transferului, `TransferRecipients` (forward), invitația de activare (`EmailConfirmed`, `InvitationToken`) |
 | `20260919120000_PerRecipientReceiptsAndSoftDelete` | Dovada de primire per destinatar (`TransferRecipients.DownloadedAt/SignatureValid`), eliminarea destinatarului unic de pe `FileTransfers`, `AllowForward`, ștergere logică (`DeletedAt`, `DeletedById`), repararea stărilor suprascrise de jobul de expirare |
+| `20260920120000_OrgStructureInternalDocsPasswordReset` | `OrgUnits` (Direcție/Secție/Serviciu, cu șef), `Users.OrgUnitId` în locul lui `Department` (convertit automat), `Users.PasswordResetToken*`, documente interne cu destinatari și confirmare „Luat la cunoștință” |
+
+---
+
+## `OrgStructureInternalDocsPasswordReset` — ce se întâmplă cu datele existente
+
+Coloana text `Users.Department` dispare. Înainte, migrarea:
+
+1. creează câte o subdiviziune de nivel **Direcție** pentru fiecare denumire
+   distinctă din `Department` (fără diferență de majuscule; grafia păstrată e
+   cea mai frecventă);
+2. încadrează fiecare cont în subdiviziunea corespunzătoare;
+3. numește ca **șef** cel mai vechi cont activ cu rolul `SefDirectie` din fiecare
+   subdiviziune.
+
+Secțiile și serviciile nu se pot deduce din text liber: se construiesc după
+migrare, din pagina **Structura organizatorică** (doar administrator).
+
+Verificare după aplicare:
+
+```sql
+SELECT o."Name", o."Type", h."Username" AS sef,
+       (SELECT count(*) FROM "Users" u WHERE u."OrgUnitId" = o."Id") AS membri
+  FROM "OrgUnits" o
+  LEFT JOIN "Users" h ON h."Id" = o."HeadUserId"
+ ORDER BY o."Name";
+```
 
 ---
 

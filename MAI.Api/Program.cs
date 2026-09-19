@@ -521,6 +521,13 @@ try
     // Invitație cont nou — Scoped (are nevoie de AppDbContext, care e Scoped).
     builder.Services.AddScoped<IInvitationService, InvitationService>();
 
+    // Resetarea parolei prin link trimis pe email (inițiată de administrator).
+    var passwordResetOptions = new PasswordResetOptions();
+    builder.Configuration.GetSection("PasswordReset").Bind(passwordResetOptions);
+    passwordResetOptions.Validate();
+    builder.Services.AddSingleton(passwordResetOptions);
+    builder.Services.AddScoped<IPasswordResetService, PasswordResetService>();
+
     // Trimiterea în fundal a invitației la crearea contului. Singleton, dar
     // fiecare trimitere își creează propriul scope (deci propriul AppDbContext):
     // scope-ul cererii HTTP se închide la răspuns și nu poate fi folosit după.

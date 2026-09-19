@@ -1,4 +1,5 @@
 using MAI.Api.Security;
+using MAI.Api.Services;
 using MAI.BusinessLogic.Dtos;
 using MAI.BusinessLogic.Interfaces;
 using MAI.BusinessLogic.Storage;
@@ -9,10 +10,8 @@ using MAI.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Globalization;
 using System.Security.Claims;
 using System.Security.Cryptography;
-using System.Text;
 
 namespace MAI.Api.Controllers
 {
@@ -91,6 +90,7 @@ namespace MAI.Api.Controllers
             [FromQuery] string? status,
             [FromQuery] string? direction,
             [FromQuery] TransferCategory? category,
+            [FromQuery] Guid? orgUnitId,
             [FromQuery] string sortBy = "createdAt",
             [FromQuery] string sortDir = "desc",
             [FromQuery] int page = 1,
@@ -115,6 +115,19 @@ namespace MAI.Api.Controllers
 
             if (category.HasValue && TransferRules.IsValidCategory(category.Value))
                 query = query.Where(t => t.Category == category.Value);
+
+            // Filtru pe subdiviziune (cu subunități): transferurile în care
+            // cealaltă parte — expeditorul sau un destinatar — lucrează acolo.
+            // Se aplică doar peste transferurile utilizatorului, deci nu dă acces
+            // la nimic nou; e doar o sortare a propriei corespondențe.
+            if (orgUnitId.HasValue)
+            {
+                var tree  = await OrgStructure.LoadTreeAsync(_context, ct);
+                var units = tree.Subtree(orgUnitId.Value).Select(u => u.Id).ToList();
+                query = query.Where(t =>
+                    (t.SenderId != userId && t.Sender!.OrgUnitId != null && units.Contains(t.Sender.OrgUnitId.Value)) ||
+                    t.Recipients.Any(r => r.UserId != userId && r.User!.OrgUnitId != null && units.Contains(r.User.OrgUnitId.Value)));
+            }
 
             // Filtrul pe stare folosește aceeași regulă ca afișarea: un transfer
             // în așteptare trecut de termen e „Expirat”, nu „În așteptare”.
@@ -155,8 +168,8 @@ namespace MAI.Api.Controllers
             var raw = await ApplySort(query, sortBy, sortDir)
                 .Skip(pagination.Skip)
                 .Take(pagination.PageSize)
-                .Include(t => t.Sender)
-                .Include(t => t.Recipients).ThenInclude(r => r.User)
+                .Include(t => t.Sender).ThenInclude(u => u!.OrgUnit)
+                .Include(t => t.Recipients).ThenInclude(r => r.User).ThenInclude(u => u!.OrgUnit)
                 .Include(t => t.Recipients).ThenInclude(r => r.ForwardedBy)
                 .AsSplitQuery()
                 .ToListAsync(ct);
@@ -205,7 +218,7 @@ namespace MAI.Api.Controllers
                     {
                         UserId          = r.UserId,
                         Name            = DisplayName(r.User),
-                        Department      = r.User?.Department ?? string.Empty,
+                        Department      = r.User?.OrgUnit?.Name ?? string.Empty,
                         SentAt          = r.SentAt,
                         ForwardedById   = r.ForwardedById,
                         ForwardedByName = r.ForwardedById.HasValue ? DisplayName(r.ForwardedBy) : null,
@@ -225,7 +238,7 @@ namespace MAI.Api.Controllers
                 Sha256           = t.ChecksumSHA256,
                 SenderId         = t.SenderId,
                 SenderName       = DisplayName(t.Sender),
-                SenderDepartment = t.Sender?.Department ?? string.Empty,
+                SenderDepartment = t.Sender?.OrgUnit?.Name ?? string.Empty,
                 Status           = effective.ToString(),
                 CreatedAt        = t.CreatedAt,
                 ExpiresAt        = t.ExpiresAt,
@@ -320,7 +333,7 @@ namespace MAI.Api.Controllers
             var senderInfo = await _context.Users
                 .AsNoTracking()
                 .Where(u => u.Id == senderId)
-                .Select(u => new { u.PublicKeyEncryption, u.Department })
+                .Select(u => new { u.PublicKeyEncryption })
                 .FirstOrDefaultAsync(ct);
 
             if (senderInfo?.PublicKeyEncryption is null)
@@ -347,7 +360,7 @@ namespace MAI.Api.Controllers
             upload.Position = 0;
 
             var transferId = Guid.NewGuid();
-            var storageKey = BuildStorageKey(transferId, senderInfo.Department);
+            var storageKey = BuildStorageKey(transferId);
 
             await _storage.PutAsync(storageKey, upload, request.File.Length, "application/octet-stream", ct);
 
@@ -1047,41 +1060,20 @@ namespace MAI.Api.Controllers
             return v.Length <= max ? v : v[..max];
         }
 
-        private static string BuildStorageKey(Guid transferId, string? senderDepartment)
+        /// <summary>
+        /// „transfers/{yyyy}/{MM}/{id}.enc”.
+        ///
+        /// Prefixul era slug-ul departamentului expeditorului. Două probleme:
+        /// Department nu mai există (a devenit OrgUnit, iar o reorganizare ar fi
+        /// schimbat prefixul transferurilor noi), iar fără un prefix comun regula
+        /// de expirare din MinIO (ILM) nu putea ținti doar transferurile — ștergea
+        /// după 30 de zile tot bucketul, inclusiv documentele normative și interne.
+        /// Transferurile vechi își păstrează cheile; jobul de expirare le curăță.
+        /// </summary>
+        private static string BuildStorageKey(Guid transferId)
         {
-            var now  = DateTime.UtcNow;
-            var dept = SanitizeDepartment(senderDepartment);
-            return $"{dept}/{now:yyyy}/{now:MM}/{transferId:N}.enc";
-        }
-
-        private static string SanitizeDepartment(string? department)
-        {
-            if (string.IsNullOrWhiteSpace(department)) return "general";
-
-            var nfkd = department.Normalize(NormalizationForm.FormD);
-            var sb   = new StringBuilder(nfkd.Length);
-            var prevWasSep = true;
-
-            foreach (var ch in nfkd)
-            {
-                if (char.GetUnicodeCategory(ch) == UnicodeCategory.NonSpacingMark) continue;
-                if (char.IsAsciiLetterOrDigit(ch))
-                {
-                    sb.Append(char.ToLowerInvariant(ch));
-                    prevWasSep = false;
-                }
-                else if (!prevWasSep)
-                {
-                    sb.Append('-');
-                    prevWasSep = true;
-                }
-            }
-
-            if (sb.Length > 0 && sb[^1] == '-') sb.Length--;
-            var result = sb.ToString();
-            if (string.IsNullOrEmpty(result)) return "general";
-            if (result.Length > 50) result = result[..50].TrimEnd('-');
-            return string.IsNullOrEmpty(result) ? "general" : result;
+            var now = DateTime.UtcNow;
+            return $"transfers/{now:yyyy}/{now:MM}/{transferId:N}.enc";
         }
 
         private static async Task<string> ComputeSha256HexAsync(Stream stream, CancellationToken ct)

@@ -35,5 +35,20 @@ namespace MAI.Domain.Enums
         /// primit” — exact întrebarea pe care o pune un control intern.
         /// </summary>
         TransferForwarded = 12,
+
+        /// <summary>Administratorul a trimis un link de resetare a parolei.</summary>
+        PasswordResetRequested = 13,
+
+        /// <summary>Utilizatorul și-a stabilit parola nouă din linkul de resetare.</summary>
+        PasswordResetCompleted = 14,
+
+        /// <summary>Structura organizatorică s-a schimbat (subdiviziune, șef, încadrare).</summary>
+        OrgStructureChanged = 15,
+
+        InternalDocumentCreated = 16,
+        InternalDocumentPublished = 17,
+        InternalDocumentOpened = 18,
+        InternalDocumentAcknowledged = 19,
+        InternalDocumentRepealed = 20,
     }
 }

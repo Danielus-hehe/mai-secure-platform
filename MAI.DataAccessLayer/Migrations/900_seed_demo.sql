@@ -56,6 +56,7 @@ DECLARE
     v_recipient     uuid;
     v_recipient2    uuid;
     v_tid           uuid;
+    v_unit_ids      uuid[];
     v_created       timestamptz;
     v_status        int;
     v_i             int;
@@ -109,7 +110,40 @@ BEGIN
     DELETE FROM "UserSessions"
      WHERE "UserId" IN (SELECT "Id" FROM "Users" WHERE "Username" LIKE '%.demo');
 
+    DELETE FROM "InternalDocumentRecipients"
+     WHERE "UserId" IN (SELECT "Id" FROM "Users" WHERE "Username" LIKE '%.demo');
+
+    DELETE FROM "InternalDocuments"
+     WHERE "AuthorId" IN (SELECT "Id" FROM "Users" WHERE "Username" LIKE '%.demo');
+
+    UPDATE "OrgUnits" SET "HeadUserId" = NULL WHERE "Code" LIKE 'DEMO-%';
+
     DELETE FROM "Users" WHERE "Username" LIKE '%.demo';
+
+    -- De jos în sus: cheia străină ParentId e RESTRICT, verificată pe rând.
+    DELETE FROM "OrgUnits" WHERE "Code" LIKE 'DEMO-%' AND "Type" = 3;
+    DELETE FROM "OrgUnits" WHERE "Code" LIKE 'DEMO-%' AND "Type" = 2;
+    DELETE FROM "OrgUnits" WHERE "Code" LIKE 'DEMO-%';
+
+    -- ── 0. Structura organizatorică demo ───────────────────────────────────
+    -- Cinci direcții (Code DEMO-1…5, după care le recunoaște curățenia de mai
+    -- sus), iar prima are o secție și un serviciu, ca distribuția „cu
+    -- subunități” să aibă ce demonstra.
+    v_unit_ids := ARRAY[]::uuid[];
+    FOR v_i IN 1..5 LOOP
+        v_id := gen_random_uuid();
+        INSERT INTO "OrgUnits" ("Id", "Name", "Code", "Type", "ParentId", "IsActive", "CreatedAt")
+        VALUES (v_id, v_directii[v_i] || ' (demo)', 'DEMO-' || v_i, 1, NULL, TRUE, v_now);
+        v_unit_ids := array_append(v_unit_ids, v_id);
+    END LOOP;
+
+    v_id := gen_random_uuid();
+    INSERT INTO "OrgUnits" ("Id", "Name", "Code", "Type", "ParentId", "IsActive", "CreatedAt")
+    VALUES (v_id, 'Sectia investigatii (demo)', 'DEMO-S1', 2, v_unit_ids[1], TRUE, v_now);
+    v_unit_ids := array_append(v_unit_ids, v_id);   -- [6]
+
+    INSERT INTO "OrgUnits" ("Id", "Name", "Code", "Type", "ParentId", "IsActive", "CreatedAt")
+    VALUES (gen_random_uuid(), 'Serviciul analiza (demo)', 'DEMO-V1', 3, v_id, TRUE, v_now);
 
     -- ── 1. Utilizatori ─────────────────────────────────────────────────────
     -- 15 conturi: 1 administrator, 2 șefi de direcție, 12 utilizatori.
@@ -121,7 +155,7 @@ BEGIN
         v_id := gen_random_uuid();
 
         INSERT INTO "Users" (
-            "Id", "Username", "Email", "PasswordHash", "FullName", "Department",
+            "Id", "Username", "Email", "PasswordHash", "FullName", "OrgUnitId",
             "Role", "IsActive", "CreatedAt",
             "FailedLoginAttempts", "TwoFactorEnabled", "TwoFactorChallengeAttempts",
             "LastLoginAt"
@@ -131,7 +165,7 @@ BEGIN
             lower(v_prenume[v_i]) || '.' || lower(v_nume[v_i]) || '@mai.demo',
             v_hash,
             v_prenume[v_i] || ' ' || v_nume[v_i],
-            v_directii[1 + (v_i % 5)],
+            v_unit_ids[1 + (v_i % 5)],
             CASE WHEN v_i = 1 THEN 3 WHEN v_i IN (2,3) THEN 2 ELSE 1 END,
             -- Doi utilizatori dezactivați, ca filtrul „doar activi” din pagina de
             -- utilizatori să aibă ce filtra.
@@ -152,6 +186,15 @@ BEGIN
     v_admin := v_user_ids[1];
     v_sef1  := v_user_ids[2];
     v_sef2  := v_user_ids[3];
+
+    -- Șefii: cei doi șefi de direcție conduc direcțiile lor; un utilizator
+    -- obișnuit conduce secția — șeful e dat de unitatea condusă, nu de rol.
+    UPDATE "OrgUnits" SET "HeadUserId" = v_user_ids[2]
+     WHERE "Id" = (SELECT "OrgUnitId" FROM "Users" WHERE "Id" = v_user_ids[2]);
+    UPDATE "OrgUnits" SET "HeadUserId" = v_user_ids[3]
+     WHERE "Id" = (SELECT "OrgUnitId" FROM "Users" WHERE "Id" = v_user_ids[3]);
+    UPDATE "Users" SET "OrgUnitId" = v_unit_ids[6] WHERE "Id" = v_user_ids[6];
+    UPDATE "OrgUnits" SET "HeadUserId" = v_user_ids[6] WHERE "Id" = v_unit_ids[6];
 
     -- Un cont blocat chiar acum, pentru alerta corespunzătoare.
     UPDATE "Users"

@@ -42,6 +42,7 @@ namespace MAI.Api.Controllers
         private readonly IAccountLockoutService _lockout;
         private readonly ILogger<AuthController> _logger;
         private readonly IInvitationService _invitation;
+        private readonly IPasswordResetService _passwordReset;
 
         public AuthController(
             AppDbContext context,
@@ -55,7 +56,8 @@ namespace MAI.Api.Controllers
             ISessionService sessions,
             IAccountLockoutService lockout,
             ILogger<AuthController> logger,
-            IInvitationService invitation)
+            IInvitationService invitation,
+            IPasswordResetService passwordReset)
         {
             _context   = context;
             _hasher    = hasher;
@@ -69,6 +71,7 @@ namespace MAI.Api.Controllers
             _lockout    = lockout;
             _logger     = logger;
             _invitation = invitation;
+            _passwordReset = passwordReset;
         }
 
         private string Ip => HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
@@ -256,6 +259,7 @@ namespace MAI.Api.Controllers
 
                 user.LastLoginAt = DateTime.UtcNow;
 
+                await LoadOrgUnitAsync(user, ct);
                 var issued = _tokens.IssueTokens(user);
 
                 // Sesiune nouă pentru acest dispozitiv. Autentificarea pe telefon
@@ -440,6 +444,7 @@ namespace MAI.Api.Controllers
 
             user.LastLoginAt = DateTime.UtcNow;
 
+            await LoadOrgUnitAsync(user, ct);
             var issued   = _tokens.IssueTokens(user);
             var response = issued.Response;
 
@@ -530,6 +535,7 @@ namespace MAI.Api.Controllers
             // Rotație în cadrul aceleiași sesiuni: tokenul vechi devine invalid,
             // dar rândul rămâne. Altfel utilizatorul ar vedea o „sesiune nouă” la
             // fiecare cincisprezece minute, iar lista ar deveni inutilizabilă.
+            await LoadOrgUnitAsync(user, ct);
             var issued = _tokens.IssueTokens(user);
             _sessions.Rotate(session, issued.RefreshTokenHash, issued.RefreshTokenExpiresAt);
 
@@ -777,6 +783,92 @@ namespace MAI.Api.Controllers
             string Token,
             string NewPassword,
             string ConfirmPassword);
+
+        // ═════════════════════════════════════════════════════════════════════
+        // GET api/Auth/check-password-reset?token=...
+        // ═════════════════════════════════════════════════════════════════════
+        /// <summary>
+        /// Verifică linkul de resetare fără să-l consume. Pagina îl apelează la
+        /// deschidere, ca să arate pentru ce cont se schimbă parola și dacă
+        /// cheile E2EE se vor regenera.
+        /// </summary>
+        [AllowAnonymous]
+        [EnableRateLimiting(RateLimitPolicies.Login)]
+        [HttpGet("check-password-reset")]
+        public async Task<IActionResult> CheckPasswordReset([FromQuery] string? token, CancellationToken ct)
+        {
+            var info = await _passwordReset.GetTokenInfoAsync(token ?? string.Empty, ct);
+            if (info is null)
+                return NotFound(new { message = "Linkul de resetare nu este valid, a expirat sau a fost deja folosit." });
+
+            return Ok(new
+            {
+                username  = info.Username,
+                fullName  = info.FullName,
+                hasKeys   = info.HasKeys,
+                expiresAt = info.ExpiresAt,
+            });
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
+        // POST api/Auth/reset-password
+        // ═════════════════════════════════════════════════════════════════════
+        /// <summary>
+        /// Stabilește parola nouă din linkul primit pe email. Închide toate
+        /// sesiunile, regenerează obligatoriu cheile E2EE la următoarea
+        /// autentificare și trimite titularului confirmarea schimbării.
+        /// </summary>
+        [AllowAnonymous]
+        [EnableRateLimiting(RateLimitPolicies.PasswordWrite)]
+        [HttpPost("reset-password")]
+        public async Task<IActionResult> ResetPasswordWithToken(
+            [FromBody] ResetPasswordWithTokenRequest? req, CancellationToken ct)
+        {
+            if (req is null || string.IsNullOrWhiteSpace(req.Token))
+                return BadRequest(new { message = "Linkul de resetare este incomplet." });
+
+            if (req.NewPassword != req.ConfirmPassword)
+                return BadRequest(new { message = "Parolele nu coincid." });
+
+            try
+            {
+                var result = await _passwordReset.CompleteAsync(req.Token, req.NewPassword ?? string.Empty, ct);
+                if (!result.Success)
+                {
+                    await WriteAuditAsync(result.UserId, result.Username ?? "necunoscut", AuditAction.PasswordResetCompleted,
+                        $"Resetare parola esuata: {result.Error}", AuditResult.Failure);
+                    return BadRequest(new { message = result.Error, errors = result.Errors });
+                }
+
+                await WriteAuditAsync(result.UserId, result.Username!, AuditAction.PasswordResetCompleted,
+                    $"Parola stabilita din linkul de resetare, {result.SessionsClosed} sesiuni inchise" +
+                    (result.KeysCleared ? ", chei E2EE regenerate la urmatoarea autentificare" : string.Empty),
+                    AuditResult.Warning);
+
+                return Ok(new
+                {
+                    message     = "Parola a fost schimbată. Vă puteți autentifica acum cu parola nouă.",
+                    keysCleared = result.KeysCleared,
+                });
+            }
+            catch (HashingCapacityExceededException ex)
+            {
+                return CapacityResponse(ex);
+            }
+        }
+
+        public sealed record ResetPasswordWithTokenRequest(string Token, string? NewPassword, string? ConfirmPassword);
+
+        /// <summary>
+        /// Numele subdiviziunii intră în răspunsul de autentificare („department”).
+        /// Contul e citit fără Include în fluxurile de login, așa că îl încărcăm aici,
+        /// o singură dată, înainte de emiterea tokenurilor.
+        /// </summary>
+        private async Task LoadOrgUnitAsync(User user, CancellationToken ct)
+        {
+            if (user.OrgUnitId is not null && user.OrgUnit is null)
+                await _context.Entry(user).Reference(u => u.OrgUnit).LoadAsync(ct);
+        }
 
         private async Task WriteAuditAsync(
             Guid? userId, string username, AuditAction action, string details,

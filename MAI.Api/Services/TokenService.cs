@@ -1,4 +1,4 @@
-using System.IdentityModel.Tokens.Jwt;
+﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
@@ -50,7 +50,7 @@ namespace MAI.Api.Services
                 Id                    = user.Id,
                 Username              = user.Username,
                 FullName              = user.FullName ?? user.Username,
-                Department            = user.Department ?? string.Empty,
+                Department            = user.OrgUnit?.Name ?? string.Empty,
                 Role                  = user.Role,
                 AccessToken           = accessToken,
                 Token                 = accessToken,   // compatibilitate cu frontend-ul existent

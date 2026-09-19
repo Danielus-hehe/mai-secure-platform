@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# SGDM — infrastructura locala
+# SGDM - infrastructura locala
 #
 # Ridica un MinIO auto-gazduit (S3-compatible) in care API-ul .NET pune
 # cifrotextul transferurilor. Serverul nu poate citi continutul: fisierele
@@ -8,10 +8,10 @@
 #
 # Doua moduri de lucru (detalii in docs/DEPLOYMENT.md):
 #
-#   Dezvoltare — doar stocarea in Docker, API-ul cu 'dotnet run':
+#   Dezvoltare - doar stocarea in Docker, API-ul cu 'dotnet run':
 #     docker compose up -d minio minio-init
 #
-#   Tot in Docker — MinIO + API construit din Dockerfile:
+#   Tot in Docker - MinIO + API construit din Dockerfile:
 #     docker compose up -d --build
 #     (.env trebuie completat cu secrete reale: in afara mediului Development,
 #      API-ul refuza sa porneasca daca vreunul a ramas pe valoarea-sablon)
@@ -56,7 +56,7 @@ services:
       MINIO_REGION_NAME: us-east-1
 
     ports:
-      - "9000:9000"   # API S3 — aici vorbeste .NET si browserul
+      - "9000:9000"   # API S3 - aici vorbeste .NET si browserul
       - "9001:9001"   # Consola web de administrare
 
     volumes:
@@ -73,40 +73,26 @@ services:
   # Container efemer: creeaza bucketul si politica de retentie, apoi iese.
   # Ruleaza la fiecare 'up', dar operatiile sunt idempotente.
   #
-  # ── Regula ILM (Feature #4) ───────────────────────────────────────────────
-  # Inainte de Feature #4, transferurile aveau prefixul fix "transfers/" iar
-  # regula de expirare targeta exact acel prefix, lasand documentele normative
-  # din "documents/" neafectate.
+  # ── Regula ILM ────────────────────────────────────────────────────────────
+  # Expirarea automata (30 de zile) se aplica DOAR sub prefixul "transfers/".
   #
-  # Dupa Feature #4, prefixul de prim nivel este departamentul expeditorului
-  # (slug-ificat dinamic: "directia-it/", "biroul-juridic/" etc.) — nu mai
-  # exista un singur prefix comun pentru toate transferurile. MinIO nu suporta
-  # filtre de excludere sau expresii regulate in regulile ILM.
-  #
-  # Solutia adoptata (pentru mediul de dezvoltare/practica):
-  #   • O singura regula fara prefix: expira TOATE obiectele din bucket dupa
-  #     30 de zile. Documentele normative sunt acte administrative cu circulatie
-  #     larga; in practica vor fi re-incarcate sau actualizate inainte de 30 de
-  #     zile. Jobul de expirare din API (TransferExpirationService) este prima
-  #     linie de aparare si actioneaza in maximum 15 minute; regula ILM este
-  #     doar o plasa de siguranta.
-  #
-  # Productie — optiuni mai curate:
-  #   a) Doua bucket-uri separate: "mai-secure-transfers" si "mai-secure-docs".
-  #      Regula ILM cu 30 de zile pe cel pentru transferuri, nicio regula pe cel
-  #      pentru documente.
-  #   b) Tag-based lifecycle: fiecare PutObject pentru un transfer primeste tag-ul
-  #      x-amz-tagging: ObjectType=transfer; regula ILM filtreaza dupa tag.
-  #      Necesita modificarea IFileStorage.PutAsync pentru a accepta taguri.
+  # Istoric: cheile transferurilor au avut o vreme ca prefix departamentul
+  # expeditorului ("directia-it/…"), deci nu exista un prefix comun, iar regula
+  # expira TOT bucketul dupa 30 de zile - inclusiv documentele normative
+  # ("documents/") si cele interne ("internal/"), care trebuie pastrate. Acum
+  # transferurile noi se scriu sub "transfers/{yyyy}/{MM}/", iar regula le
+  # tinteste doar pe ele. Transferurile vechi, cu prefix de departament, sunt
+  # curatate de jobul de expirare din API (TransferExpirationService), care
+  # ramane oricum prima linie de aparare (actioneaza in maximum 15 minute).
   #
   # Versionare + stergere: pe un bucket versionat, DeleteObject fara VersionId
-  # NU sterge octetii — pune un "delete marker", iar obiectul devine versiune
+  # NU sterge octetii - pune un "delete marker", iar obiectul devine versiune
   # noncurenta. Fara --noncurrent-expire-days, retragerea si jobul de expirare
   # lasau cifrotextul in bucket pentru totdeauna, desi interfata spunea "sters".
   # Acum versiunile vechi dispar fizic dupa o zi.
   #
   # Regulile ILM se sterg si se recreeaza la fiecare pornire. 'mc ilm rule add'
-  # nu e idempotent — fiecare 'up' adauga inca o regula cu ID nou. Fara '|| true'
+  # nu e idempotent - fiecare 'up' adauga inca o regula cu ID nou. Fara '|| true'
   # la adaugare: daca regula nu se poate crea, containerul trebuie sa esueze
   # vizibil, nu sa raporteze "MinIO pregatit" fara retentie.
   # ───────────────────────────────────────────────────────────────────────────
@@ -133,10 +119,9 @@ services:
       echo '→ versionare activata: o stergere gresita se poate anula 24 de ore';
       mc version enable local/$$SGDM_BUCKET;
 
-      echo '→ retentie: toate obiectele 30 de zile; versiuni sterse 1 zi';
-      echo '  (vezi comentariul ILM din docker-compose.yml pentru optiunile de productie)';
+      echo '→ retentie: transfers/ 30 de zile; versiuni sterse 1 zi; documents/ si internal/ fara expirare';
       mc ilm rule rm --all --force local/$$SGDM_BUCKET >/dev/null 2>&1 || true;
-      mc ilm rule add --expire-days 30 local/$$SGDM_BUCKET;
+      mc ilm rule add --prefix 'transfers/' --expire-days 30 local/$$SGDM_BUCKET;
       mc ilm rule add --noncurrent-expire-days 1 local/$$SGDM_BUCKET;
 
       echo '';
@@ -149,7 +134,7 @@ services:
   #
   # Toate secretele vin din .env, niciunul din appsettings.json. Fisierul de
   # configurare versionat contine doar valori-sablon, iar Program.cs opreste
-  # pornirea daca vreuna a ramas neinlocuita — un server care ruleaza cu cheia
+  # pornirea daca vreuna a ramas neinlocuita - un server care ruleaza cu cheia
   # "YOUR_JWT_SECRET_KEY_HERE" e mai rau decat unul care nu porneste, pentru ca
   # primul pare ca functioneaza.
   # ───────────────────────────────────────────────────────────────────────────
@@ -179,19 +164,19 @@ services:
       # containerul insusi.
       ConnectionStrings__DefaultConnection: ${DB_CONNECTION_STRING}
 
-      # Secrete — generate cu:  openssl rand -base64 48
+      # Secrete - generate cu:  openssl rand -base64 48
       MAI_JWT_KEY: ${MAI_JWT_KEY}
       MAI_ARGON2_PEPPER: ${MAI_ARGON2_PEPPER}
       MAI_TWOFACTOR_KEY: ${MAI_TWOFACTOR_KEY}
 
       # Endpointul MinIO vazut DIN container. Browserul, in schimb, primeste
-      # URL-uri presemnate care trebuie sa fie rezolvabile de pe masina lui —
+      # URL-uri presemnate care trebuie sa fie rezolvabile de pe masina lui -
       # de aceea in productie ambele trebuie sa arate spre acelasi nume DNS.
       Storage__Endpoint: http://minio:9000
       Storage__Bucket: ${STORAGE_BUCKET:-mai-secure}
 
       # URL-urile presemnate se semneaza pentru hostul din Storage__Endpoint,
-      # adica "minio" — un nume care exista doar in reteaua Docker. Browserul
+      # adica "minio" - un nume care exista doar in reteaua Docker. Browserul
       # nu il poate rezolva, deci descarcarea directa ar esua. In acest mod,
       # cifrotextul trece prin API (/api/Transfers/{id}/content). Pentru URL-uri
       # presemnate in productie, MinIO trebuie expus sub un nume DNS comun,
@@ -222,6 +207,9 @@ services:
       Transfers__DefaultExpiryDays: ${TRANSFER_DEFAULT_EXPIRY_DAYS:-7}
       Transfers__MaxExpiryDays: ${TRANSFER_MAX_EXPIRY_DAYS:-30}
       Transfers__MaxRecipients: ${TRANSFER_MAX_RECIPIENTS:-20}
+
+      # Valabilitatea linkului de resetare a parolei trimis pe email (minute).
+      PasswordReset__TokenMinutes: ${PASSWORD_RESET_TOKEN_MINUTES:-120}
 
       # In spatele unui reverse proxy: fara asta, toti utilizatorii ajung in
       # aceeasi galeata de rate limit, fiindca RemoteIpAddress e IP-ul proxy-ului.
@@ -256,7 +244,7 @@ volumes:
     driver: local
 
 # ─────────────────────────────────────────────────────────────────────────────
-# OPTIONAL — PostgreSQL local, daca vrei sa demonstrezi ca NIMIC nu iese din
+# OPTIONAL - PostgreSQL local, daca vrei sa demonstrezi ca NIMIC nu iese din
 # intranet (fara Supabase). Decomenteaza si schimba connection string-ul din
 # appsettings.json in:
 #   Host=localhost;Port=5432;Database=sgdm;Username=sgdm;Password=...

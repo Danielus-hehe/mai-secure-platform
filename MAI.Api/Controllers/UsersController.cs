@@ -1,7 +1,8 @@
-using MAI.Api.Security;
+﻿using MAI.Api.Security;
 using MAI.Api.Services;
 using MAI.BusinessLogic.Dtos;
 using MAI.BusinessLogic.Interfaces;
+using MAI.BusinessLogic.Organization;
 using MAI.BusinessLogic.Security;
 using MAI.DataAccessLayer;
 using MAI.Domain.Entities;
@@ -40,6 +41,7 @@ namespace MAI.Api.Controllers
         private readonly IInvitationService _invitation;
         private readonly IInvitationDispatcher _invitationDispatcher;
         private readonly IEmailService _email;
+        private readonly IPasswordResetService _passwordReset;
         private readonly ILogger<UsersController> _logger;
 
         public UsersController(
@@ -51,6 +53,7 @@ namespace MAI.Api.Controllers
             IInvitationService invitation,
             IInvitationDispatcher invitationDispatcher,
             IEmailService email,
+            IPasswordResetService passwordReset,
             ILogger<UsersController> logger)
         {
             _context              = context;
@@ -61,6 +64,7 @@ namespace MAI.Api.Controllers
             _invitation           = invitation;
             _invitationDispatcher = invitationDispatcher;
             _email                = email;
+            _passwordReset        = passwordReset;
             _logger               = logger;
         }
 
@@ -115,6 +119,7 @@ namespace MAI.Api.Controllers
             [FromQuery] string? search,
             [FromQuery] UserRole? role,
             [FromQuery] bool? isActive,
+            [FromQuery] Guid? orgUnitId,
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 25,
             CancellationToken ct = default)
@@ -130,7 +135,16 @@ namespace MAI.Api.Controllers
                     EF.Functions.ILike(u.Username, term) ||
                     EF.Functions.ILike(u.Email, term) ||
                     (u.FullName != null && EF.Functions.ILike(u.FullName, term)) ||
-                    (u.Department != null && EF.Functions.ILike(u.Department, term)));
+                    (u.OrgUnit != null && EF.Functions.ILike(u.OrgUnit.Name, term)));
+            }
+
+            // Filtru pe subdiviziune, cu tot cu subunitățile ei: „cine lucrează
+            // în Direcția X” include și secțiile direcției.
+            if (orgUnitId.HasValue)
+            {
+                var tree  = await OrgStructure.LoadTreeAsync(_context, ct);
+                var units = tree.Subtree(orgUnitId.Value).Select(u => u.Id).ToList();
+                query = query.Where(u => u.OrgUnitId != null && units.Contains(u.OrgUnitId.Value));
             }
 
             if (role.HasValue)
@@ -151,7 +165,11 @@ namespace MAI.Api.Controllers
                     Username      = u.Username,
                     Email         = u.Email,
                     FullName      = u.FullName   ?? string.Empty,
-                    Department    = u.Department ?? string.Empty,
+                    Department    = u.OrgUnit != null ? u.OrgUnit.Name : string.Empty,
+                    OrgUnitId     = u.OrgUnitId,
+                    LedOrgUnitId   = _context.OrgUnits.Where(o => o.HeadUserId == u.Id).Select(o => (Guid?)o.Id).FirstOrDefault(),
+                    LedOrgUnitName = _context.OrgUnits.Where(o => o.HeadUserId == u.Id).Select(o => o.Name).FirstOrDefault(),
+                    HasEmail      = u.Email != "",
                     Role          = u.Role,
                     IsActive       = u.IsActive,
                     EmailConfirmed = u.EmailConfirmed,
@@ -185,7 +203,8 @@ namespace MAI.Api.Controllers
                     id         = u.Id,
                     username   = u.Username,
                     fullName   = u.FullName ?? u.Username,
-                    department = u.Department ?? string.Empty,
+                    department = u.OrgUnit != null ? u.OrgUnit.Name : string.Empty,
+                    orgUnitId  = u.OrgUnitId,
                 })
                 .ToListAsync(ct);
 
@@ -225,7 +244,7 @@ namespace MAI.Api.Controllers
                          && u.PublicKeyEncryption != null
                          && (EF.Functions.ILike(u.Username, term)
                           || (u.FullName   != null && EF.Functions.ILike(u.FullName,   term))
-                          || (u.Department != null && EF.Functions.ILike(u.Department, term))))
+                          || (u.OrgUnit != null && EF.Functions.ILike(u.OrgUnit.Name, term))))
                 .OrderBy(u => u.FullName ?? u.Username)
                 .Take(10)
                 .Select(u => new
@@ -233,7 +252,7 @@ namespace MAI.Api.Controllers
                     id                  = u.Id,
                     username            = u.Username,
                     fullName            = u.FullName   ?? u.Username,
-                    department          = u.Department ?? string.Empty,
+                    department          = u.OrgUnit != null ? u.OrgUnit.Name : string.Empty,
                     // Cheia publică e necesară în browser ca să împacheteze DEK-ul
                     // fără un al doilea round-trip. Cheile publice sunt publice.
                     publicKeyEncryption = u.PublicKeyEncryption,
@@ -287,6 +306,10 @@ namespace MAI.Api.Controllers
             if (!validation.IsValid)
                 return BadRequest(new { message = validation.Message, errors = validation.Errors });
 
+            if (dto.OrgUnitId.HasValue &&
+                !await _context.OrgUnits.AnyAsync(o => o.Id == dto.OrgUnitId && o.IsActive, ct))
+                return BadRequest(new { message = "Subdiviziunea aleasă nu există sau este desființată." });
+
             // Aceeași regulă ca indexurile unice din baza de date: fără diferență
             // între majuscule și minuscule. Verificarea de aici dă un mesaj clar;
             // indexul rămâne garanția, pentru două cereri simultane.
@@ -319,7 +342,7 @@ namespace MAI.Api.Controllers
                     Email              = email,
                     PasswordHash       = await _hasher.HashPasswordAsync(dto.Password, ProfileFor(dto.Role), ct),
                     FullName           = dto.FullName?.Trim()   ?? string.Empty,
-                    Department         = dto.Department?.Trim() ?? string.Empty,
+                    OrgUnitId          = dto.OrgUnitId,
                     Role               = dto.Role,
                     IsActive           = true,
                     // Cu invitație: contul pornește neconfirmat, userul îl activează
@@ -500,18 +523,12 @@ namespace MAI.Api.Controllers
             // Costul se spune explicit: fișierele primite anterior nu mai pot fi
             // deschise de acest cont. Expeditorii le pot redeschide din „Trimise”
             // (au propria copie a cheii de fișier) și le pot retrimite.
-            var hadKeys = user.HasKeys;
-            if (hadKeys)
-            {
-                user.PublicKeyEncryption     = null;
-                user.PublicKeySigning        = null;
-                user.EncryptedPrivateBundle  = null;
-                user.KeyDerivationSalt       = null;
-                user.KeyDerivationIterations = null;
-                user.KeyWrapIv               = null;
-                user.CryptoSuite             = null;
-                user.KeysCreatedAt           = null;
-            }
+            var hadKeys = user.ClearEncryptionKeys();
+
+            // O resetare cu parolă temporară anulează orice link de resetare
+            // trimis anterior: altfel linkul vechi ar mai putea schimba parola.
+            user.PasswordResetToken       = null;
+            user.PasswordResetTokenExpiry = null;
 
             AddAudit(user.Id, AuditAction.UserUpdated,
                 $"Parola resetata administrativ pentru @{user.Username}, {closed} sesiuni inchise" +
@@ -536,6 +553,117 @@ namespace MAI.Api.Controllers
                 sessionsClosed     = closed,
                 keysInvalidated    = hadKeys,
                 mustChangePassword = true,
+            });
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
+        // POST api/Users/{id}/send-password-reset
+        // ═════════════════════════════════════════════════════════════════════
+        /// <summary>
+        /// Trimite titularului un link de resetare a parolei. Varianta preferată
+        /// față de parola temporară: administratorul nu află parola nouă, iar
+        /// titularul nu mai trece prin schimbarea forțată la primul login.
+        /// </summary>
+        [Authorize(Roles = nameof(UserRole.Administrator))]
+        [EnableRateLimiting(RateLimitPolicies.PasswordWrite)]
+        [HttpPost("{id:guid}/send-password-reset")]
+        public async Task<IActionResult> SendPasswordReset(Guid id, CancellationToken ct)
+        {
+            var result = await _passwordReset.RequestAsync(id, ct);
+
+            switch (result.Status)
+            {
+                case PasswordResetRequestStatus.UserNotFound:
+                    return NotFound(new { message = "Utilizatorul nu a fost găsit." });
+                case PasswordResetRequestStatus.NoEmail:
+                    return BadRequest(new
+                    {
+                        message = $"Contul @{result.Username} nu are adresă de email. " +
+                                  "Folosiți resetarea cu parolă temporară.",
+                    });
+                case PasswordResetRequestStatus.Inactive:
+                    return BadRequest(new { message = "Contul este dezactivat. Activați-l înainte de resetare." });
+                case PasswordResetRequestStatus.SmtpNotConfigured:
+                    return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+                    {
+                        message = "Serverul SMTP nu este configurat, deci linkul nu poate fi trimis. " +
+                                  "Folosiți resetarea cu parolă temporară.",
+                    });
+            }
+
+            var sent = result.Status == PasswordResetRequestStatus.Sent;
+
+            AddAudit(id, AuditAction.PasswordResetRequested,
+                sent
+                    ? $"Link de resetare a parolei trimis pentru @{result.Username} la {result.Email}, " +
+                      $"valabil pana la {result.ExpiresAt:yyyy-MM-dd HH:mm} UTC"
+                    : $"Trimiterea linkului de resetare pentru @{result.Username} a esuat (SMTP)",
+                sent ? AuditResult.Success : AuditResult.Failure);
+            await _context.SaveChangesAsync(ct);
+
+            if (!sent)
+                return StatusCode(StatusCodes.Status502BadGateway, new
+                {
+                    message = "Serverul SMTP nu a acceptat emailul. Linkul NU a fost trimis; încercați din nou.",
+                });
+
+            return Ok(new
+            {
+                message   = $"Linkul de resetare a fost trimis la {result.Email}. Parola actuală rămâne " +
+                            "valabilă până când utilizatorul o stabilește pe cea nouă.",
+                expiresAt = result.ExpiresAt,
+            });
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
+        // PATCH api/Users/{id}/org-unit
+        // ═════════════════════════════════════════════════════════════════════
+        /// <summary>
+        /// Încadrează utilizatorul într-o subdiviziune (sau îl scoate din structură).
+        ///
+        /// Dacă persoana conduce o subdiviziune și e mutată în alta, funcția de
+        /// șef se eliberează: un șef încadrat în afara unității conduse ar face ca
+        /// „subdiviziunea mea” să însemne altceva pentru el decât pentru colegi.
+        /// </summary>
+        [Authorize(Roles = nameof(UserRole.Administrator))]
+        [HttpPatch("{id:guid}/org-unit")]
+        public async Task<IActionResult> ChangeOrgUnit(Guid id, [FromBody] ChangeOrgUnitDto? dto, CancellationToken ct)
+        {
+            var user = await _context.Users.Include(u => u.OrgUnit).FirstOrDefaultAsync(u => u.Id == id, ct);
+            if (user is null) return NotFound(new { message = "Utilizatorul nu a fost găsit." });
+
+            var newUnitId = dto?.OrgUnitId;
+            string? newName = null;
+            if (newUnitId.HasValue)
+            {
+                var unit = await _context.OrgUnits.FirstOrDefaultAsync(o => o.Id == newUnitId && o.IsActive, ct);
+                if (unit is null)
+                    return BadRequest(new { message = "Subdiviziunea aleasă nu există sau este desființată." });
+                newName = unit.Name;
+            }
+
+            if (user.OrgUnitId == newUnitId)
+                return Ok(new { message = "Încadrarea era deja aceasta.", headReleased = false });
+
+            var oldName = user.OrgUnit?.Name ?? "neincadrat";
+
+            var led = await _context.OrgUnits.FirstOrDefaultAsync(o => o.HeadUserId == id, ct);
+            var headReleased = led is not null && led.Id != newUnitId;
+            if (headReleased) led!.HeadUserId = null;
+
+            user.OrgUnitId = newUnitId;
+
+            AddAudit(id, AuditAction.OrgStructureChanged,
+                $"Incadrare @{user.Username}: {oldName} -> {newName ?? "neincadrat"}" +
+                (headReleased ? $"; functia de sef al subdiviziunii '{led!.Name}' a fost eliberata" : string.Empty));
+            await _context.SaveChangesAsync(ct);
+
+            return Ok(new
+            {
+                message = headReleased
+                    ? $"@{user.Username} a fost mutat. Funcția de șef al subdiviziunii „{led!.Name}” a rămas vacantă."
+                    : $"@{user.Username} a fost încadrat în {newName ?? "nicio subdiviziune"}.",
+                headReleased,
             });
         }
 

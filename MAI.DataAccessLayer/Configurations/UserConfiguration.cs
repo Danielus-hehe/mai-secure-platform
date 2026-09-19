@@ -34,6 +34,22 @@ namespace MAI.DataAccessLayer.Configurations
                 .HasFilter("\"InvitationToken\" IS NOT NULL")
                 .HasDatabaseName("IX_Users_InvitationToken");
 
+            // Tokenul de resetare a parolei — același tipar ca invitația.
+            builder.HasIndex(u => u.PasswordResetToken)
+                .IsUnique()
+                .HasFilter("\"PasswordResetToken\" IS NOT NULL")
+                .HasDatabaseName("IX_Users_PasswordResetToken");
+
+            // Încadrarea în structură. Restrict: o subdiviziune cu membri nu se
+            // poate șterge; se mută întâi oamenii sau se dezactivează.
+            builder.HasOne(u => u.OrgUnit)
+                .WithMany()
+                .HasForeignKey(u => u.OrgUnitId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            builder.HasIndex(u => u.OrgUnitId)
+                .HasDatabaseName("IX_Users_OrgUnitId");
+
             // Indexurile care contează efectiv pentru unicitate NU apar aici, ci
             // în migrarea CaseInsensitiveUserIndexes, ca SQL:
             //

@@ -53,6 +53,7 @@ namespace MAI.Api.Configuration
                 ["TRANSFER_DEFAULT_EXPIRY_DAYS"] = new[] { "Transfers__DefaultExpiryDays" },
                 ["TRANSFER_MAX_EXPIRY_DAYS"]     = new[] { "Transfers__MaxExpiryDays" },
                 ["TRANSFER_MAX_RECIPIENTS"]      = new[] { "Transfers__MaxRecipients" },
+                ["PASSWORD_RESET_TOKEN_MINUTES"] = new[] { "PasswordReset__TokenMinutes" },
             };
 
         /// <summary>Rezultatul încărcării, pentru mesajul din log (fără valori).</summary>

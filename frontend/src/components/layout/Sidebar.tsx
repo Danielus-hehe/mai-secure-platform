@@ -1,15 +1,18 @@
-import { NavLink } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
 import {
-    LayoutDashboard, ArrowLeftRight, Landmark,
+    LayoutDashboard, ArrowLeftRight, Landmark, FileStack, Network,
     Users, ScrollText, ShieldCheck, UserCircle, X,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { getPendingAcknowledgements } from '../../api/internalDocuments';
 
 const NAV_MAIN = [
     // FIX: era to: '/' care redirecta la /login; acum merge corect la /dashboard
     { to: '/dashboard',  label: 'Panou principal',        icon: LayoutDashboard, end: true },
     { to: '/transfers',  label: 'Transferuri securizate',  icon: ArrowLeftRight   },
     { to: '/documents',  label: 'Documente normative',     icon: Landmark         },
+    { to: '/internal-documents', label: 'Documente interne', icon: FileStack       },
 ];
 
 const NAV_SEF = [
@@ -18,6 +21,7 @@ const NAV_SEF = [
 
 const NAV_ADMIN = [
     { to: '/users',      label: 'Gestiune utilizatori',    icon: Users            },
+    { to: '/org-units',  label: 'Structura organizatorică', icon: Network         },
     { to: '/admin',      label: 'Administrare & rapoarte',  icon: ShieldCheck      },
 ];
 
@@ -27,6 +31,20 @@ export default function Sidebar({ open, onClose }: { open: boolean; onClose: () 
     // role este string normalizat din AuthContext ('ADMINISTRATOR', 'SEF_DIRECTIE', 'UTILIZATOR')
     const isAdmin = user?.role === 'ADMINISTRATOR';
     const isSef   = isAdmin || user?.role === 'SEF_DIRECTIE';
+
+    // Câte documente interne îmi cer „Luat la cunoștință”. Se reîmprospătează la
+    // fiecare schimbare de pagină: după o confirmare, insigna scade imediat ce
+    // utilizatorul navighează, fără un sondaj continuu al serverului.
+    const location = useLocation();
+    const [pendingAck, setPendingAck] = useState(0);
+    useEffect(() => {
+        if (!user) return;
+        let cancelled = false;
+        getPendingAcknowledgements()
+            .then((n) => { if (!cancelled) setPendingAck(n); })
+            .catch(() => { /* insigna e opțională */ });
+        return () => { cancelled = true; };
+    }, [user, location.pathname]);
 
     const cls = ({ isActive }: { isActive: boolean }) =>
         `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
@@ -65,6 +83,14 @@ export default function Sidebar({ open, onClose }: { open: boolean; onClose: () 
                         <NavLink key={item.to} to={item.to} end={item.end} className={cls}>
                             <item.icon size={18} />
                             {item.label}
+                            {item.to === '/internal-documents' && pendingAck > 0 && (
+                                <span
+                                    className="ml-auto rounded-full bg-gold-500 px-2 py-0.5 text-[10px] font-bold text-mai-900"
+                                    title={`${pendingAck} documente de confirmat`}
+                                >
+                                    {pendingAck}
+                                </span>
+                            )}
                         </NavLink>
                     ))}
 

@@ -142,6 +142,8 @@ export interface ListTransfersParams {
     status?: string;
     direction?: 'sent' | 'received' | '';
     category?: TransferCategory | '';
+    /** Cealaltă parte a transferului lucrează în subdiviziune (cu subunități). */
+    orgUnitId?: string;
     sortBy?: string;
     sortDir?: 'asc' | 'desc';
     page?: number;
@@ -172,6 +174,7 @@ export async function listTransfers(
             status:    params.status    || undefined,
             direction: params.direction || undefined,
             category:  params.category === '' || params.category === undefined ? undefined : params.category,
+            orgUnitId: params.orgUnitId || undefined,
             sortBy:    params.sortBy    ?? 'createdAt',
             sortDir:   params.sortDir   ?? 'desc',
             page:      params.page      ?? 1,

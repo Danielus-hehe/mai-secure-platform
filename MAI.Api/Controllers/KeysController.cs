@@ -359,7 +359,8 @@ namespace MAI.Api.Controllers
                     id                  = u.Id,
                     username            = u.Username,
                     fullName            = u.FullName ?? u.Username,
-                    department          = u.Department ?? string.Empty,
+                    department          = u.OrgUnit != null ? u.OrgUnit.Name : string.Empty,
+                    orgUnitId           = u.OrgUnitId,
                     publicKeyEncryption = u.PublicKeyEncryption,
                     publicKeySigning    = u.PublicKeySigning,
                 })

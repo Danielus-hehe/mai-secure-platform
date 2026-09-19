@@ -247,6 +247,187 @@ namespace MAI.DataAccessLayer.Migrations
                     b.ToTable("FileTransfers", (string)null);
                 });
 
+            modelBuilder.Entity("MAI.Domain.Entities.InternalDocument", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AuthorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("AuthorOrgUnitId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DistributionMode")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("character varying(260)");
+
+                    b.Property<long>("FileSize")
+                        .HasColumnType("bigint");
+
+                    b.Property<bool>("IncludeSubunits")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Number")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("PublishedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("RepealedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("RepealedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RepealedReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<bool>("RequiresAcknowledgement")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("StorageKey")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("Summary")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AuthorOrgUnitId");
+
+                    b.HasIndex("Status")
+                        .HasDatabaseName("IX_InternalDocuments_Status");
+
+                    b.HasIndex("AuthorId", "CreatedAt")
+                        .HasDatabaseName("IX_InternalDocuments_Author_CreatedAt");
+
+                    b.ToTable("InternalDocuments", (string)null);
+                });
+
+            modelBuilder.Entity("MAI.Domain.Entities.InternalDocumentRecipient", b =>
+                {
+                    b.Property<Guid>("DocumentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("AcknowledgedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("AddedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("FirstOpenedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("OrgUnitId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("DocumentId", "UserId");
+
+                    b.HasIndex("OrgUnitId");
+
+                    b.HasIndex("UserId", "AcknowledgedAt")
+                        .HasDatabaseName("IX_InternalDocumentRecipients_User_Ack");
+
+                    b.ToTable("InternalDocumentRecipients", (string)null);
+                });
+
+            modelBuilder.Entity("MAI.Domain.Entities.InternalDocumentTarget", b =>
+                {
+                    b.Property<Guid>("DocumentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("TargetId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("DocumentId", "Kind", "TargetId");
+
+                    b.ToTable("InternalDocumentTargets", (string)null);
+                });
+
+            modelBuilder.Entity("MAI.Domain.Entities.OrgUnit", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Code")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("HeadUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid?>("ParentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HeadUserId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_OrgUnits_HeadUserId")
+                        .HasFilter("\"HeadUserId\" IS NOT NULL");
+
+                    b.HasIndex("ParentId")
+                        .HasDatabaseName("IX_OrgUnits_ParentId");
+
+                    b.ToTable("OrgUnits", (string)null);
+                });
+
             modelBuilder.Entity("MAI.Domain.Entities.TransferRecipient", b =>
                 {
                     b.Property<Guid>("TransferId")
@@ -295,9 +476,6 @@ namespace MAI.DataAccessLayer.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("CryptoSuite")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Department")
                         .HasColumnType("text");
 
                     b.Property<string>("Email")
@@ -349,9 +527,18 @@ namespace MAI.DataAccessLayer.Migrations
                     b.Property<bool>("MustChangePassword")
                         .HasColumnType("boolean");
 
+                    b.Property<Guid?>("OrgUnitId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("PasswordHash")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<string>("PasswordResetToken")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("PasswordResetTokenExpiry")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("PublicKeyEncryption")
                         .HasColumnType("text");
@@ -408,6 +595,14 @@ namespace MAI.DataAccessLayer.Migrations
                         .IsUnique()
                         .HasDatabaseName("IX_Users_InvitationToken")
                         .HasFilter("\"InvitationToken\" IS NOT NULL");
+
+                    b.HasIndex("OrgUnitId")
+                        .HasDatabaseName("IX_Users_OrgUnitId");
+
+                    b.HasIndex("PasswordResetToken")
+                        .IsUnique()
+                        .HasDatabaseName("IX_Users_PasswordResetToken")
+                        .HasFilter("\"PasswordResetToken\" IS NOT NULL");
 
                     b.HasIndex("Username")
                         .IsUnique()
@@ -502,6 +697,78 @@ namespace MAI.DataAccessLayer.Migrations
                     b.Navigation("Sender");
                 });
 
+            modelBuilder.Entity("MAI.Domain.Entities.InternalDocument", b =>
+                {
+                    b.HasOne("MAI.Domain.Entities.User", "Author")
+                        .WithMany()
+                        .HasForeignKey("AuthorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("MAI.Domain.Entities.OrgUnit", "AuthorOrgUnit")
+                        .WithMany()
+                        .HasForeignKey("AuthorOrgUnitId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Author");
+
+                    b.Navigation("AuthorOrgUnit");
+                });
+
+            modelBuilder.Entity("MAI.Domain.Entities.InternalDocumentRecipient", b =>
+                {
+                    b.HasOne("MAI.Domain.Entities.InternalDocument", "Document")
+                        .WithMany("Recipients")
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("MAI.Domain.Entities.OrgUnit", "OrgUnit")
+                        .WithMany()
+                        .HasForeignKey("OrgUnitId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("MAI.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Document");
+
+                    b.Navigation("OrgUnit");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("MAI.Domain.Entities.InternalDocumentTarget", b =>
+                {
+                    b.HasOne("MAI.Domain.Entities.InternalDocument", "Document")
+                        .WithMany("Targets")
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Document");
+                });
+
+            modelBuilder.Entity("MAI.Domain.Entities.OrgUnit", b =>
+                {
+                    b.HasOne("MAI.Domain.Entities.User", "HeadUser")
+                        .WithMany()
+                        .HasForeignKey("HeadUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("MAI.Domain.Entities.OrgUnit", "Parent")
+                        .WithMany("Children")
+                        .HasForeignKey("ParentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("HeadUser");
+
+                    b.Navigation("Parent");
+                });
+
             modelBuilder.Entity("MAI.Domain.Entities.TransferRecipient", b =>
                 {
                     b.HasOne("MAI.Domain.Entities.User", "ForwardedBy")
@@ -528,6 +795,16 @@ namespace MAI.DataAccessLayer.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("MAI.Domain.Entities.User", b =>
+                {
+                    b.HasOne("MAI.Domain.Entities.OrgUnit", "OrgUnit")
+                        .WithMany()
+                        .HasForeignKey("OrgUnitId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("OrgUnit");
+                });
+
             modelBuilder.Entity("MAI.Domain.Entities.UserSession", b =>
                 {
                     b.HasOne("MAI.Domain.Entities.User", "User")
@@ -547,6 +824,18 @@ namespace MAI.DataAccessLayer.Migrations
             modelBuilder.Entity("MAI.Domain.Entities.FileTransfer", b =>
                 {
                     b.Navigation("Recipients");
+                });
+
+            modelBuilder.Entity("MAI.Domain.Entities.InternalDocument", b =>
+                {
+                    b.Navigation("Recipients");
+
+                    b.Navigation("Targets");
+                });
+
+            modelBuilder.Entity("MAI.Domain.Entities.OrgUnit", b =>
+                {
+                    b.Navigation("Children");
                 });
 #pragma warning restore 612, 618
         }

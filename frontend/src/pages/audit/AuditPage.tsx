@@ -9,7 +9,9 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { formatDateTime } from '../../utils/format';
 
-type ActionKey = 'LOGIN' | 'LOGOUT' | 'UPLOAD' | 'DOWNLOAD' | 'MODIFICARE_DOC' | 'ADMIN';
+type ActionKey =
+    | 'LOGIN' | 'LOGOUT' | 'UPLOAD' | 'DOWNLOAD' | 'MODIFICARE_DOC'
+    | 'TRANSFER' | 'SECURITATE' | 'STRUCTURA' | 'DOC_INTERN' | 'ADMIN';
 
 const ACTION_LABELS: Record<ActionKey, string> = {
     LOGIN: 'Autentificare',
@@ -17,6 +19,10 @@ const ACTION_LABELS: Record<ActionKey, string> = {
     UPLOAD: 'Încărcare',
     DOWNLOAD: 'Descărcare',
     MODIFICARE_DOC: 'Modificare doc',
+    TRANSFER: 'Transfer',
+    SECURITATE: 'Securitate cont',
+    STRUCTURA: 'Structură organizatorică',
+    DOC_INTERN: 'Document intern',
     ADMIN: 'Administrare',
 };
 

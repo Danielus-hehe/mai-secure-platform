@@ -1,4 +1,4 @@
-# SGDM — Sistem de Gestiune a Documentelor și Transferurilor Securizate
+# SGDM - Sistem de Gestiune a Documentelor și Transferurilor Securizate
 
 Platformă de intranet pentru **Ministerul Afacerilor Interne al Republicii Moldova**.
 Angajații își trimit documente criptate **end-to-end**, iar serverul care le
@@ -6,7 +6,7 @@ transportă și le stochează **nu le poate citi**.
 
 **Stack:** .NET 8 (ASP.NET Core, EF Core) · React 19 + TypeScript · PostgreSQL
 (Supabase sau local) · MinIO (S3 auto-găzduit) · WebCrypto API în browser.
-**Proiect de practică** — UTM FCIM, Securitate Informațională, 2026.
+**Proiect de practică** - UTM FCIM, Securitate Informațională, 2026.
 
 > Document pentru **evaluare**: ce face sistemul, cum funcționează și de ce a
 > fost proiectat astfel. Pentru instalare: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
@@ -30,7 +30,7 @@ transportă și le stochează **nu le poate citi**.
 
 **Modelul de amenințare.** Serverul este tratat ca **onest dar curios**: execută
 corect protocolul, dar tot ce stochează poate ajunge, la un moment dat, pe mâna
-cuiva care nu ar trebui — un administrator de bază de date, un backup scurs, un
+cuiva care nu ar trebui - un administrator de bază de date, un backup scurs, un
 atacator care a obținut acces la MinIO. Sistemul e construit astfel încât în
 acest scenariu conținutul fișierelor să rămână **confidențial**, iar orice
 alterare să fie **detectată**.
@@ -48,13 +48,13 @@ alterare să fie **detectată**.
 
 **Unde să vă uitați în cod, în ordinea asta:**
 
-1. [`frontend/src/crypto/E2ee.ts`](frontend/src/crypto/E2ee.ts) — toată
+1. [`frontend/src/crypto/E2ee.ts`](frontend/src/crypto/E2ee.ts) - toată
    criptografia, ~300 de linii efective, comentate complet.
 2. [`MAI.Api/Controllers/TransfersController.cs`](MAI.Api/Controllers/TransfersController.cs)
-   — ce face serverul cu un transfer (și ce nu face — nu vede conținutul).
-3. [`MAI.Api/Program.cs`](MAI.Api/Program.cs) — configurarea de securitate și
+   - ce face serverul cu un transfer (și ce nu face - nu vede conținutul).
+3. [`MAI.Api/Program.cs`](MAI.Api/Program.cs) - configurarea de securitate și
    validările care opresc pornirea cu configurație nesigură.
-4. [`MAI.Tests/`](MAI.Tests/) — ce este verificat automat la fiecare push.
+4. [`MAI.Tests/`](MAI.Tests/) - ce este verificat automat la fiecare push.
 
 ---
 
@@ -87,7 +87,7 @@ Backend-ul e organizat pe straturi cu o singură direcție de dependență:
 
 | Proiect | Rol | Depinde de |
 |---|---|---|
-| `MAI.Domain` | Entități și enumerări. Zero logică, zero dependențe. | — |
+| `MAI.Domain` | Entități și enumerări. Zero logică, zero dependențe. | - |
 | `MAI.DataAccessLayer` | `AppDbContext`, configurări EF, migrări versionate | Domain |
 | `MAI.BusinessLogic` | Argon2id, TOTP, politica de parole, stocare fișiere, E-mail | Domain |
 | `MAI.Api` | Controllere, middleware, servicii de sesiune și token, job-uri | toate |
@@ -105,14 +105,14 @@ cifrotextul. Cine nu are dreptul nu primește niciodată un URL.
 
 - **Trimitere** cu criptare AES-256-GCM + ampachetare RSA-OAEP-3072 și
   semnătură RSA-PSS-3072, integral în browser.
-- **Destinatari multipli** — același fișier se împachetează pentru fiecare
+- **Destinatari multipli** - același fișier se împachetează pentru fiecare
   destinatar ales, stocat în tabelul `TransferRecipients`; fiecare destinatar
   vede și poate decripta doar propria copie a cheii.
-- **Retransmitere** — expeditorul poate retrimite din propria copie a DEK-ului.
-- **Dovadă de primire** — browserul destinatarului raportează dacă semnătura
+- **Retransmitere** - expeditorul poate retrimite din propria copie a DEK-ului.
+- **Dovadă de primire** - browserul destinatarului raportează dacă semnătura
   expeditorului este validă la deschidere; o semnătură invalidă apare ca
   `Warning` în jurnal și în panoul de alerte al administratorului.
-- **Retragere transfer** — expeditorul poate retrage un fișier; cifrotextul se
+- **Retragere transfer** - expeditorul poate retrage un fișier; cifrotextul se
   șterge din MinIO, rândul rămâne marcat `Retras` cu motiv și cu marcaj de timp.
 - **Categorii**: fiecare transfer se clasifică drept `Important`, `General` sau
   `Obișnuit`, filtrat în interfață.
@@ -125,7 +125,7 @@ cifrotextul. Cine nu are dreptul nu primește niciodată un URL.
 - Publicare cu versionare: fiecare versiune are SHA-256 calculat și stocat;
   browserul îl reverifică la descărcare.
 - Descărcarea oricărei versiuni anterioare cu trasabilitate completă în audit.
-- Documentele normative **nu sunt criptate E2EE** — sunt acte publice intern,
+- Documentele normative **nu sunt criptate E2EE** - sunt acte publice intern,
   accesibile tuturor angajaților cu căutare pe server.
 
 ### 3.3 Gestionarea conturilor și invitații
@@ -152,8 +152,8 @@ cifrotextul. Cine nu are dreptul nu primește niciodată un URL.
 
 ### 3.4 Notificări email (SMTP / MailKit)
 
-- Email de **invitație** la crearea contului — template HTML cu antet MAI.
-- Email de **notificare transfer primit** — expeditor, nume fișier, dată expirare.
+- Email de **invitație** la crearea contului - template HTML cu antet MAI.
+- Email de **notificare transfer primit** - expeditor, nume fișier, dată expirare.
 
 ### 3.5 Securitate multi-strat
 
@@ -183,7 +183,7 @@ cifrotextul. Cine nu are dreptul nu primește niciodată un URL.
   de recuperare 2FA folosite, semnături invalide la descărcare, conturi
   privilegiate fără 2FA activat.
 - **Rapoarte grafice**: transferuri pe zi, distribuție pe categorii, utilizatori
-  activi — alimentate de `StatsController`.
+  activi - alimentate de `StatsController`.
 
 ---
 
@@ -194,10 +194,10 @@ cifrotextul. Cine nu are dreptul nu primește niciodată un URL.
 | Cheie | Unde se naște | Unde stă | Cine o are în clar | Cât trăiește |
 |---|---|---|---|---|
 | **Parola** utilizatorului | Tastatura | Pe server doar hash Argon2id + pepper | Utilizatorul; serverul, pe durata cererii de login | Până la schimbare |
-| **KEK** — cheia de împachetare (AES-256, PBKDF2-SHA256, 600.000 iterații) | Browser, derivată din parolă + salt | Nicăieri | Browserul, doar pe durata descuierii | Secunde |
+| **KEK** - cheia de împachetare (AES-256, PBKDF2-SHA256, 600.000 iterații) | Browser, derivată din parolă + salt | Nicăieri | Browserul, doar pe durata descuierii | Secunde |
 | **Pereche RSA-OAEP-3072** (criptare) | Browser, la prima autentificare | Publică: `Users.PublicKeyEncryption`. Privată: în blobul criptat cu KEK | Privată: doar tabul titularului, **non-extractable** | Până la resetarea contului |
 | **Pereche RSA-PSS-3072** (semnare) | La fel | La fel | La fel | La fel |
-| **DEK** — cheia de fișier (AES-256-GCM) | Browserul expeditorului, per transfer | Doar împachetată, pentru fiecare destinatar și pentru expeditor | Expeditorul la trimitere, destinatarul la deschidere | Cât transferul |
+| **DEK** - cheia de fișier (AES-256-GCM) | Browserul expeditorului, per transfer | Doar împachetată, pentru fiecare destinatar și pentru expeditor | Expeditorul la trimitere, destinatarul la deschidere | Cât transferul |
 | Secret **TOTP** | Server | `Users.TwoFactorSecret`, cifrat AES-GCM cu `MAI_TWOFACTOR_KEY` | Serverul (necesar pentru verificarea codului) | Până la dezactivare |
 | **Refresh token** (512 biți aleatori) | Server | În `UserSessions` doar SHA-256; în clar în browser | Browserul | 7 zile, rotit la fiecare folosire |
 | **Token invitație** (256 biți aleatori) | Server, la creare cont | SHA-256 în `Users.InvitationToken`; tokenul brut doar în email | Nimeni după trimitere | 72 ore |
@@ -230,7 +230,7 @@ sequenceDiagram
 ```
 
 Parola de confirmare (pasul 6) garantează că cheile nu vor fi încuiate cu o
-parolă greșită — ceea ce ar produce pierdere definitivă a accesului la fișiere.
+parolă greșită - ceea ce ar produce pierdere definitivă a accesului la fișiere.
 
 ### 4.3 Trimiterea unui fișier
 
@@ -244,9 +244,9 @@ sequenceDiagram
 
     BA->>S: GET /Keys/recipients
     S-->>BA: cheile publice ale destinatarilor + amprente
-    Note over BA: DEK = AES-256 aleator, IV = 96 biți aleatori<br/>C = AES-GCM(DEK, IV, fișier)<br/>K_dest = RSA-OAEP(pub_destinatar, DEK) — pentru fiecare<br/>K_exp  = RSA-OAEP(pub_expeditor, DEK)<br/>σ = RSA-PSS(priv_expeditor, SHA-256(fișier))
+    Note over BA: DEK = AES-256 aleator, IV = 96 biți aleatori<br/>C = AES-GCM(DEK, IV, fișier)<br/>K_dest = RSA-OAEP(pub_destinatar, DEK) - pentru fiecare<br/>K_exp  = RSA-OAEP(pub_expeditor, DEK)<br/>σ = RSA-PSS(priv_expeditor, SHA-256(fișier))
     BA->>S: POST /Transfers (C, IV, K_dest[], K_exp, σ, SHA-256(C))
-    Note over S: recalculează SHA-256(C) — nepotrivire → 400, nu scrie nimic
+    Note over S: recalculează SHA-256(C) - nepotrivire → 400, nu scrie nimic
     S->>M: PUT {dept}/{an}/{lună}/{guid}.enc
     S->>DB: FileTransfers + TransferRecipients + AuditLogs
 ```
@@ -277,9 +277,9 @@ blobului ar face toate fișierele primite inaccesibile. Ordinea garantează că
 nicio eroare parțială nu produce pierdere de date:
 
 1. Browserul descuie blobul cu parola **veche** și îl reîncuie cu cea **nouă**.
-   Dacă parola veche e greșită, se oprește — nimic nu s-a modificat.
-2. `PATCH /Auth/change-password` — schimbă hash-ul și închide toate sesiunile.
-3. `PATCH /Keys/rewrap` — trimite blobul nou, parola nouă verificată de server.
+   Dacă parola veche e greșită, se oprește - nimic nu s-a modificat.
+2. `PATCH /Auth/change-password` - schimbă hash-ul și închide toate sesiunile.
+3. `PATCH /Keys/rewrap` - trimite blobul nou, parola nouă verificată de server.
 
 ---
 
@@ -302,7 +302,7 @@ nicio eroare parțială nu produce pierdere de date:
 | Perimetru | Middleware intranet-only pe plaje IP configurate | Dezactivat implicit; mod `AuditOnly` pentru rodaj |
 | Antete de securitate | CSP, `nosniff`, `X-Frame-Options`, `Referrer-Policy`, HSTS | Pe toate răspunsurile API inclusiv 403 și 429 |
 
-### Fluxul de invitație — detaliat
+### Fluxul de invitație - detaliat
 
 ```mermaid
 sequenceDiagram
@@ -313,16 +313,16 @@ sequenceDiagram
     actor USR as Utilizator
 
     ADM->>API: POST /api/Users (username, email, rol)
-    API-->>ADM: 200 — "email de activare trimis"
+    API-->>ADM: 200 - "email de activare trimis"
     API->>SMTP: email HTML cu link /confirm-account?token=…
     Note over API: token brut (256-bit, Base64Url) → doar în email<br/>SHA-256(token) stocat în DB<br/>InvitationTokenExpiry = now + 72h
 
     USR->>API: GET /api/Auth/check-invitation?token=…
-    API-->>USR: { username, email } — token valid
+    API-->>USR: { username, email } - token valid
 
     USR->>API: POST /api/Auth/confirm-invitation { token, newPassword, confirmPassword }
     Note over API: validare PasswordPolicy → hash Argon2id<br/>EmailConfirmed = true, MustChangePassword = false<br/>token șters din DB
-    API-->>USR: 200 — "cont activat"
+    API-->>USR: 200 - "cont activat"
 
     USR->>API: POST /api/Auth/login
     API-->>USR: JWT + refresh token
@@ -343,7 +343,7 @@ cereri greșite.
 
 **De ce nu:** cheia ar sta lângă date. Oricine compromite serverul le are pe
 amândouă. Criptarea la repaus protejează împotriva furtului discului, nu
-împotriva administratorului de sistem — cel mai relevant scenariu pentru un
+împotriva administratorului de sistem - cel mai relevant scenariu pentru un
 minister.
 
 ### D2. Criptare cu plic: o cheie aleatorie per transfer
@@ -409,7 +409,7 @@ Pornirea eșuează explicit, cu un mesaj care indică problema, dacă:
 - cheia JWT este mai scurtă de 32 de octeți;
 - pepper-ul Argon2 sau cheia 2FA lipsesc;
 - orice secret are valoarea-șablon din fișierele versionate (`YOUR_…`,
-  `GENERATI_…`, `SCHIMBA_MA…`) — detectate de `PlaceholderSecrets`;
+  `GENERATI_…`, `SCHIMBA_MA…`) - detectate de `PlaceholderSecrets`;
 - parolele în clar sunt încă activate (`AllowLegacyPlaintext`).
 
 Un server care pornește cu o cheie publică înseamnă că **pare** că funcționează,
@@ -437,7 +437,7 @@ la fiecare push și pull request:
 - construiește imaginea Docker din `Dockerfile` (build în două etape,
   utilizator neprivilegiat).
 
-**Teste** (xUnit, fără bază de date — toate rulează offline):
+**Teste** (xUnit, fără bază de date - toate rulează offline):
 
 | Suită | Ce verifică |
 |---|---|

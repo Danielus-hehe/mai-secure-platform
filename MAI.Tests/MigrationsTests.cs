@@ -79,12 +79,11 @@ public class MigrationsTests
     }
 
     [Fact]
-    public void UltimaMigrare_ContineDovadaDePrimirePerDestinatar()
+    public void UltimaMigrare_ContineStructuraOrganizatorica_SiDocumenteleInterne()
     {
-        // Modelul-țintă al ultimei migrări trebuie să cunoască schimbările din
-        // runda 2026-09-19: confirmarea pe TransferRecipient, politica de forward
-        // și ștergerea logică pe FileTransfer, fără coloanele vechi ale
-        // destinatarului unic.
+        // Modelul-țintă al ultimei migrări trebuie să conțină tot ce au adus
+        // rundele 2026-09-19 (dovadă de primire per destinatar, forward, ștergere
+        // logică) și 2026-09-20 (structură, documente interne, resetare parolă).
         var last = MigrationTypes()
             .Select(t => (Type: t, Id: t.GetCustomAttribute<MigrationAttribute>()!.Id))
             .OrderBy(x => x.Id, StringComparer.Ordinal)
@@ -100,19 +99,22 @@ public class MigrationsTests
         Assert.NotNull(recipient!.FindProperty("DownloadedAt"));
         Assert.NotNull(recipient.FindProperty("SignatureValid"));
 
-        var user = model.FindEntityType("MAI.Domain.Entities.User");
-        Assert.NotNull(user);
-        Assert.NotNull(user!.FindProperty("EmailConfirmed"));
-        Assert.NotNull(user.FindProperty("InvitationToken"));
-
         var transfer = model.FindEntityType("MAI.Domain.Entities.FileTransfer");
         Assert.NotNull(transfer);
-        Assert.NotNull(transfer!.FindProperty("Category"));
-        Assert.NotNull(transfer.FindProperty("AllowForward"));
+        Assert.NotNull(transfer!.FindProperty("AllowForward"));
         Assert.NotNull(transfer.FindProperty("DeletedAt"));
         Assert.Null(transfer.FindProperty("RecipientId"));
-        Assert.Null(transfer.FindProperty("DownloadedAt"));
-        Assert.Null(transfer.FindProperty("EncryptedKeyForRecipient"));
+
+        var user = model.FindEntityType("MAI.Domain.Entities.User");
+        Assert.NotNull(user);
+        Assert.NotNull(user!.FindProperty("OrgUnitId"));
+        Assert.NotNull(user.FindProperty("PasswordResetToken"));
+        Assert.Null(user.FindProperty("Department"));
+
+        Assert.NotNull(model.FindEntityType("MAI.Domain.Entities.OrgUnit"));
+        Assert.NotNull(model.FindEntityType("MAI.Domain.Entities.InternalDocument"));
+        Assert.NotNull(model.FindEntityType("MAI.Domain.Entities.InternalDocumentRecipient"));
+        Assert.NotNull(model.FindEntityType("MAI.Domain.Entities.InternalDocumentTarget"));
     }
 
     [Fact]

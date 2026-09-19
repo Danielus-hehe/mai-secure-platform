@@ -1,6 +1,16 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { Search, X, Check } from 'lucide-react';
-import type { Recipient } from '../../api/transfers';
+/**
+ * Minimul necesar pentru alegere. Recipient (cu cheile publice, la transferuri)
+ * îl satisface structural; la documentele interne și la numirea șefilor se
+ * trimit conturi fără chei.
+ */
+export interface PickableUser {
+    id: string;
+    username: string;
+    fullName: string;
+    department: string;
+}
 
 /**
  * Alegerea destinatarilor prin căutare, cu selecție multiplă.
@@ -20,8 +30,8 @@ import type { Recipient } from '../../api/transfers';
  * Tastatură: ↑/↓ mută selecția, Enter alege, Escape închide lista.
  */
 
-interface Props {
-    recipients: Recipient[];
+interface Props<T extends PickableUser> {
+    recipients: T[];
     value: string[];
     onChange: (recipientIds: string[]) => void;
     disabled?: boolean;
@@ -34,6 +44,10 @@ interface Props {
     /** Câte rezultate se afișează cel mult. */
     maxResults?: number;
     inputId?: string;
+    /** Mesajul afișat când căutarea nu găsește nimic. */
+    noResultsText?: string;
+    /** Cum se numesc cei disponibili în textul ajutător („colegi”, „persoane”). */
+    availableNoun?: [singular: string, plural: string];
 }
 
 /** „Șef Direcție” → „sef directie”, pentru comparații fără diacritice. */
@@ -44,7 +58,7 @@ const normalize = (text: string): string =>
         .toLowerCase()
         .trim();
 
-export default function RecipientCombobox({
+export default function RecipientCombobox<T extends PickableUser>({
     recipients,
     value,
     onChange,
@@ -54,7 +68,9 @@ export default function RecipientCombobox({
     minChars = 1,
     maxResults = 8,
     inputId = 'recipient',
-}: Props) {
+    noResultsText = 'Niciun coleg cu chei de criptare nu corespunde căutării.',
+    availableNoun = ['coleg disponibil', 'colegi disponibili'],
+}: Props<T>) {
     const [query, setQuery] = useState('');
     const [open, setOpen] = useState(false);
     const [active, setActive] = useState(0);
@@ -66,7 +82,7 @@ export default function RecipientCombobox({
     const byId = useMemo(() => new Map(recipients.map((r) => [r.id, r])), [recipients]);
 
     const selected = useMemo(
-        () => value.map((id) => byId.get(id)).filter((r): r is Recipient => r !== undefined),
+        () => value.map((id) => byId.get(id)).filter((r): r is T => r !== undefined),
         [value, byId]
     );
 
@@ -103,7 +119,7 @@ export default function RecipientCombobox({
         el?.scrollIntoView({ block: 'nearest' });
     }, [active]);
 
-    const choose = (r: Recipient) => {
+    const choose = (r: T) => {
         if (full || value.includes(r.id)) return;
         onChange([...value, r.id]);
         setQuery('');
@@ -223,7 +239,7 @@ export default function RecipientCombobox({
                     >
                         {results.length === 0 ? (
                             <li className="px-3.5 py-2.5 text-sm text-mai-400">
-                                Niciun coleg cu chei de criptare nu corespunde căutării.
+                                {noResultsText}
                             </li>
                         ) : (
                             results.map((r, i) => (
@@ -267,9 +283,9 @@ export default function RecipientCombobox({
                     {full
                         ? `S-a atins limita de ${max} destinatari.`
                         : available > 0
-                            ? `${available} ${available === 1 ? 'coleg disponibil' : 'colegi disponibili'} — ` +
+                            ? `${available} ${available === 1 ? availableNoun[0] : availableNoun[1]} — ` +
                               'începeți să scrieți pentru a căuta.'
-                            : 'Niciun alt coleg cu chei de criptare disponibil.'}
+                            : noResultsText}
                 </p>
             )}
         </div>

@@ -110,6 +110,182 @@ namespace MAI.Api.Services
             }
         }
 
+        // ── Resetare parolă ──────────────────────────────────────────────────
+
+        /// <inheritdoc />
+        public Task<bool> SendPasswordResetEmailAsync(
+            string toEmail,
+            string toName,
+            string resetLink,
+            TimeSpan validFor,
+            bool accountHasKeys,
+            CancellationToken ct = default)
+        {
+            var validity = FormatDuration(validFor);
+            var name     = System.Net.WebUtility.HtmlEncode(toName);
+
+            var keysWarningHtml = accountHasKeys
+                ? """
+                  <p style="color:#8a4b00;background:#fff6e5;border:1px solid #f2d19a;border-radius:6px;
+                            padding:10px 14px;font-size:13px;line-height:1.6;margin:0 0 20px;">
+                    <strong>Atenție:</strong> cheile de criptare ale contului sunt protejate cu parola
+                    actuală. După resetare se generează chei noi, iar fișierele criptate primite anterior
+                    nu vor mai putea fi deschise — expeditorii le pot retrimite.
+                  </p>
+                  """
+                : string.Empty;
+
+            var inner = $"""
+                <h2 style="margin:0 0 14px;color:#1a3a6e;font-size:18px;">Resetarea parolei</h2>
+                <p style="color:#444;font-size:14px;line-height:1.75;margin:0 0 18px;">
+                  Bună, <strong>{name}</strong>.<br>
+                  Administratorul platformei a inițiat resetarea parolei contului dumneavoastră.
+                  Pentru a stabili o parolă nouă, accesați butonul de mai jos.
+                </p>
+                {keysWarningHtml}
+                {Button(resetLink, "Stabilește parola nouă")}
+                {InfoBox(
+                    $"⏱&nbsp; Linkul este valabil <strong>{validity}</strong> și poate fi folosit o singură dată.",
+                    "🔒&nbsp; Parola actuală rămâne valabilă până când stabiliți una nouă.",
+                    "Dacă nu vă așteptați la acest email, anunțați administratorul și nu accesați linkul.")}
+                """;
+
+            var text =
+                $"Buna, {toName},\r\n\r\n" +
+                "Administratorul platformei SGDM MAI a initiat resetarea parolei contului dumneavoastra.\r\n" +
+                $"Stabiliti parola noua accesand linkul (valabil {validity}, o singura utilizare):\r\n{resetLink}\r\n\r\n" +
+                (accountHasKeys
+                    ? "Atentie: dupa resetare se genereaza chei de criptare noi; fisierele criptate primite anterior nu vor mai putea fi deschise.\r\n\r\n"
+                    : string.Empty) +
+                "Daca nu va asteptati la acest email, anuntati administratorul.\r\n\r\n" +
+                "SGDM MAI - Sistem Securizat de Gestiune Documente";
+
+            return TrySendAsync(toEmail, toName, "[SGDM] Resetarea parolei", Layout(inner), text, "resetare parolă", ct);
+        }
+
+        /// <inheritdoc />
+        public Task<bool> SendPasswordChangedEmailAsync(
+            string toEmail,
+            string toName,
+            DateTime changedAtUtc,
+            CancellationToken ct = default)
+        {
+            var when = changedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm");
+            var name = System.Net.WebUtility.HtmlEncode(toName);
+
+            var inner = $"""
+                <h2 style="margin:0 0 14px;color:#1a3a6e;font-size:18px;">Parola a fost schimbată</h2>
+                <p style="color:#444;font-size:14px;line-height:1.75;margin:0 0 18px;">
+                  Bună, <strong>{name}</strong>.<br>
+                  Parola contului dumneavoastră SGDM a fost schimbată la <strong>{when}</strong>,
+                  iar toate sesiunile deschise anterior au fost închise.
+                </p>
+                {InfoBox(
+                    "Dacă dumneavoastră ați făcut schimbarea, nu trebuie să mai faceți nimic.",
+                    "<strong>Dacă NU ați schimbat parola, anunțați imediat administratorul.</strong>")}
+                """;
+
+            var text =
+                $"Buna, {toName},\r\n\r\n" +
+                $"Parola contului SGDM a fost schimbata la {when}; sesiunile anterioare au fost inchise.\r\n" +
+                "Daca NU ati schimbat parola, anuntati imediat administratorul.\r\n\r\n" +
+                "SGDM MAI - Sistem Securizat de Gestiune Documente";
+
+            return TrySendAsync(toEmail, toName, "[SGDM] Parola contului a fost schimbată", Layout(inner), text, "confirmare schimbare parolă", ct);
+        }
+
+        private async Task<bool> TrySendAsync(
+            string toEmail, string toName, string subject, string html, string text,
+            string kind, CancellationToken ct)
+        {
+            if (!_opts.IsConfigured)
+            {
+                _logger.LogDebug("SMTP nu este configurat. Emailul de {Kind} pentru {Email} a fost omis.", kind, toEmail);
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(toEmail))
+            {
+                _logger.LogWarning("Email de {Kind}: adresa destinatarului este goală — emailul a fost omis.", kind);
+                return false;
+            }
+
+            try
+            {
+                var msg = new MimeMessage();
+                msg.From.Add(new MailboxAddress(_opts.DisplayName, _opts.From));
+                msg.To.Add(new MailboxAddress(toName, toEmail));
+                msg.Subject = subject;
+                msg.Body = new BodyBuilder { HtmlBody = html, TextBody = text }.ToMessageBody();
+
+                await SendAsync(msg, ct);
+                _logger.LogInformation("Email de {Kind} trimis la {Email}.", kind, toEmail);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Emailul de {Kind} pentru {Email} nu a putut fi trimis.", kind, toEmail);
+                return false;
+            }
+        }
+
+        /// <summary>Cadrul comun al emailurilor: antet MAI, conținut, subsol.</summary>
+        private static string Layout(string innerHtml) => $"""
+            <!DOCTYPE html>
+            <html lang="ro">
+            <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+            <body style="margin:0;padding:0;background:#eef1f6;font-family:Arial,Helvetica,sans-serif;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#eef1f6;padding:40px 0;">
+                <tr><td align="center">
+                  <table width="560" cellpadding="0" cellspacing="0"
+                         style="background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 16px rgba(0,0,0,.10);">
+                    <tr><td style="background:#1a3a6e;padding:26px 36px;">
+                      <p style="margin:0;color:#fff;font-size:18px;font-weight:bold;letter-spacing:.3px;">
+                        Ministerul Afacerilor Interne</p>
+                      <p style="margin:4px 0 0;color:#99bde0;font-size:12px;">
+                        Platforma Securizată de Transfer Documente — SGDM</p>
+                    </td></tr>
+                    <tr><td style="padding:34px 36px;">
+                      {innerHtml}
+                    </td></tr>
+                    <tr><td style="background:#f0f2f7;padding:14px 36px;border-top:1px solid #e4e7ef;">
+                      <p style="margin:0;color:#aaa;font-size:11px;text-align:center;">
+                        &copy; {DateTime.UtcNow.Year} Ministerul Afacerilor Interne — Republica Moldova
+                        &nbsp;&middot;&nbsp; SGDM &nbsp;&middot;&nbsp; Uz Intern
+                      </p>
+                    </td></tr>
+                  </table>
+                </td></tr>
+              </table>
+            </body>
+            </html>
+            """;
+
+        private static string Button(string href, string label) => $"""
+            <table cellpadding="0" cellspacing="0" width="100%">
+              <tr><td align="center" style="padding:4px 0 26px;">
+                <a href="{System.Net.WebUtility.HtmlEncode(href)}"
+                   style="background:#1a3a6e;color:#fff;text-decoration:none;padding:13px 40px;border-radius:7px;
+                          font-size:14px;font-weight:bold;display:inline-block;letter-spacing:.3px;">
+                  {System.Net.WebUtility.HtmlEncode(label)}
+                </a>
+              </td></tr>
+            </table>
+            """;
+
+        /// <summary>Casetă gri cu rânduri scurte. Rândurile sunt HTML de încredere (scris aici, nu de utilizator).</summary>
+        private static string InfoBox(params string[] lines) =>
+            "<table cellpadding=\"0\" cellspacing=\"0\" width=\"100%\" style=\"background:#f8f9fc;border-radius:7px;\">" +
+            "<tr><td style=\"padding:14px 18px;\">" +
+            string.Concat(lines.Select(l =>
+                $"<p style=\"margin:0 0 5px;color:#666;font-size:12px;line-height:1.7;\">{l}</p>")) +
+            "</td></tr></table>";
+
+        private static string FormatDuration(TimeSpan t) =>
+            t.TotalHours >= 1 && t.TotalMinutes % 60 == 0
+                ? (t.TotalHours == 1 ? "1 oră" : $"{(int)t.TotalHours} ore")
+                : $"{(int)t.TotalMinutes} minute";
+
         // ── Construcție mesaj ────────────────────────────────────────────────
 
         private MimeMessage BuildTransferMessage(

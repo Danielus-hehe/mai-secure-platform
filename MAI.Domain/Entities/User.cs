@@ -14,7 +14,14 @@ namespace MAI.Domain.Entities
         public string PasswordHash { get; set; } = string.Empty;
 
         public string? FullName { get; set; } = string.Empty;
-        public string? Department { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Subdiviziunea din care face parte utilizatorul. Înlocuiește vechiul
+        /// câmp text liber Department (vezi OrgUnit). Null = neîncadrat încă.
+        /// </summary>
+        public Guid? OrgUnitId { get; set; }
+        public OrgUnit? OrgUnit { get; set; }
+
         public UserRole Role { get; set; } = UserRole.Utilizator;
         public bool IsActive { get; set; } = true;
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -165,6 +172,17 @@ namespace MAI.Domain.Entities
         /// </summary>
         public int TwoFactorChallengeAttempts { get; set; }
 
+        // ── Resetarea parolei prin email ─────────────────────────────────────
+        // Separat de InvitationToken: invitația activează un cont nou (și poate
+        // fi retrimisă), resetarea înlocuiește parola unui cont existent. Un
+        // singur câmp pentru amândouă ar face ca retrimiterea invitației să
+        // anuleze o resetare în curs, și invers.
+
+        /// <summary>SHA-256 (hex) al tokenului din linkul de resetare. Niciodată tokenul brut.</summary>
+        public string? PasswordResetToken { get; set; }
+
+        public DateTime? PasswordResetTokenExpiry { get; set; }
+
         // ── Proprietăți calculate ────────────────────────────────────────────
 
         /// <summary>True dacă utilizatorul și-a generat cheile și poate primi fișiere.</summary>
@@ -177,6 +195,28 @@ namespace MAI.Domain.Entities
         /// </summary>
         [NotMapped]
         public bool IsLockedOut => LockoutEndsAt.HasValue && LockoutEndsAt.Value > DateTime.UtcNow;
+
+        /// <summary>
+        /// Șterge materialul de chei E2EE. Necesar la orice schimbare de parolă
+        /// făcută FĂRĂ parola veche (resetare de administrator, link de resetare):
+        /// cheile private sunt încuiate cu o cheie derivată din parola veche, deci
+        /// nu mai pot fi descuiate. Lăsate pe loc, contul ar intra în impas —
+        /// descuierea eșuează, iar serverul refuză chei noi fiindcă „există deja”.
+        /// </summary>
+        /// <returns>True dacă existau chei.</returns>
+        public bool ClearEncryptionKeys()
+        {
+            var had = HasKeys;
+            PublicKeyEncryption     = null;
+            PublicKeySigning        = null;
+            EncryptedPrivateBundle  = null;
+            KeyDerivationSalt       = null;
+            KeyDerivationIterations = null;
+            KeyWrapIv               = null;
+            CryptoSuite             = null;
+            KeysCreatedAt           = null;
+            return had;
+        }
 
         /// <summary>Câte coduri de recuperare mai sunt neconsumate.</summary>
         [NotMapped]
