@@ -10,8 +10,8 @@ namespace MAI.Tests;
 ///
 /// Profilele folosite aici sunt deliberat mai ieftine decât cele din producție
 /// (8 MiB, o iterație): un test care rulează Argon2id la 19 MiB de zeci de ori
-/// devine un test pe care nimeni nu-l mai rulează. Ce se verifică — formatul PHC,
-/// unicitatea sării, migrarea, rezultatul verificării — nu depinde de cost.
+/// devine un test pe care nimeni nu-l mai rulează. Ce se verifică - formatul PHC,
+/// unicitatea sării, migrarea, rezultatul verificării - nu depinde de cost.
 /// </summary>
 public class Argon2PasswordHasherTests
 {
@@ -118,7 +118,7 @@ public class Argon2PasswordHasherTests
         var hasher = Hasher(CheapOptions(allowLegacy: false));
 
         // După încheierea migrării, o parolă rămasă în clar nu mai e o cale de
-        // autentificare — e un rând care trebuie reparat de administrator.
+        // autentificare - e un rând care trebuie reparat de administrator.
         Assert.Equal(PasswordVerificationResult.Failed,
             await hasher.VerifyPasswordAsync(CorrectPassword, CorrectPassword));
     }

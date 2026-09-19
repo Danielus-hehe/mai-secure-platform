@@ -1,7 +1,8 @@
-using MAI.Api.Security;
+﻿using MAI.Api.Security;
 using MAI.Api.Services;
 using MAI.BusinessLogic.Dtos;
 using MAI.BusinessLogic.Interfaces;
+using MAI.BusinessLogic.Organization;
 using MAI.BusinessLogic.Security;
 using MAI.DataAccessLayer;
 using MAI.Domain.Entities;
@@ -24,7 +25,7 @@ namespace MAI.Api.Controllers
     /// lipsă complet pe /role, /activate și /deactivate: orice utilizator
     /// autentificat, inclusiv rolul Utilizator, putea să-și dea singur rol de
     /// Administrator cu un singur PATCH sau să dezactiveze toți administratorii.
-    /// Restul stivei de securitate — Argon2id, 2FA, E2EE, audit — nu apăra de
+    /// Restul stivei de securitate - Argon2id, 2FA, E2EE, audit - nu apăra de
     /// nimic cât timp promovarea de rol era deschisă tuturor.
     /// </summary>
     [Authorize]
@@ -40,6 +41,7 @@ namespace MAI.Api.Controllers
         private readonly IInvitationService _invitation;
         private readonly IInvitationDispatcher _invitationDispatcher;
         private readonly IEmailService _email;
+        private readonly IPasswordResetService _passwordReset;
         private readonly ILogger<UsersController> _logger;
 
         public UsersController(
@@ -51,6 +53,7 @@ namespace MAI.Api.Controllers
             IInvitationService invitation,
             IInvitationDispatcher invitationDispatcher,
             IEmailService email,
+            IPasswordResetService passwordReset,
             ILogger<UsersController> logger)
         {
             _context              = context;
@@ -61,6 +64,7 @@ namespace MAI.Api.Controllers
             _invitation           = invitation;
             _invitationDispatcher = invitationDispatcher;
             _email                = email;
+            _passwordReset        = passwordReset;
             _logger               = logger;
         }
 
@@ -99,7 +103,7 @@ namespace MAI.Api.Controllers
             role >= UserRole.SefDirectie ? _argon2.PrivilegedProfile : _argon2.DefaultProfile;
 
         // ═════════════════════════════════════════════════════════════════════
-        // GET api/Users — listă completă, doar pentru roluri privilegiate
+        // GET api/Users - listă completă, doar pentru roluri privilegiate
         // ═════════════════════════════════════════════════════════════════════
         /// <summary>
         /// Returnează email, rol, stare de blocare și ultima autentificare pentru
@@ -115,6 +119,7 @@ namespace MAI.Api.Controllers
             [FromQuery] string? search,
             [FromQuery] UserRole? role,
             [FromQuery] bool? isActive,
+            [FromQuery] Guid? orgUnitId,
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 25,
             CancellationToken ct = default)
@@ -130,7 +135,16 @@ namespace MAI.Api.Controllers
                     EF.Functions.ILike(u.Username, term) ||
                     EF.Functions.ILike(u.Email, term) ||
                     (u.FullName != null && EF.Functions.ILike(u.FullName, term)) ||
-                    (u.Department != null && EF.Functions.ILike(u.Department, term)));
+                    (u.OrgUnit != null && EF.Functions.ILike(u.OrgUnit.Name, term)));
+            }
+
+            // Filtru pe subdiviziune, cu tot cu subunitățile ei: „cine lucrează
+            // în Direcția X” include și secțiile direcției.
+            if (orgUnitId.HasValue)
+            {
+                var tree  = await OrgStructure.LoadTreeAsync(_context, ct);
+                var units = tree.Subtree(orgUnitId.Value).Select(u => u.Id).ToList();
+                query = query.Where(u => u.OrgUnitId != null && units.Contains(u.OrgUnitId.Value));
             }
 
             if (role.HasValue)
@@ -151,7 +165,11 @@ namespace MAI.Api.Controllers
                     Username      = u.Username,
                     Email         = u.Email,
                     FullName      = u.FullName   ?? string.Empty,
-                    Department    = u.Department ?? string.Empty,
+                    Department    = u.OrgUnit != null ? u.OrgUnit.Name : string.Empty,
+                    OrgUnitId     = u.OrgUnitId,
+                    LedOrgUnitId   = _context.OrgUnits.Where(o => o.HeadUserId == u.Id).Select(o => (Guid?)o.Id).FirstOrDefault(),
+                    LedOrgUnitName = _context.OrgUnits.Where(o => o.HeadUserId == u.Id).Select(o => o.Name).FirstOrDefault(),
+                    HasEmail      = u.Email != "",
                     Role          = u.Role,
                     IsActive       = u.IsActive,
                     EmailConfirmed = u.EmailConfirmed,
@@ -166,7 +184,7 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // GET api/Users/all — directorul intern, pentru dropdown-uri
+        // GET api/Users/all - directorul intern, pentru dropdown-uri
         // ═════════════════════════════════════════════════════════════════════
         /// <summary>
         /// Rămâne deschis oricărui utilizator autentificat, dar returnează strict
@@ -185,7 +203,8 @@ namespace MAI.Api.Controllers
                     id         = u.Id,
                     username   = u.Username,
                     fullName   = u.FullName ?? u.Username,
-                    department = u.Department ?? string.Empty,
+                    department = u.OrgUnit != null ? u.OrgUnit.Name : string.Empty,
+                    orgUnitId  = u.OrgUnitId,
                 })
                 .ToListAsync(ct);
 
@@ -193,14 +212,14 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // GET api/Users/search?q= — autocomplete pentru forward / share
+        // GET api/Users/search?q= - autocomplete pentru forward / share
         // ═════════════════════════════════════════════════════════════════════
         /// <summary>
         /// Caută utilizatori activi care și-au generat cheile (pot primi fișiere
         /// criptate). Folosit de dialogul de forward pentru autocomplete.
         ///
         /// Returnează maxim 10 rezultate, exclude apelantul și include cheia
-        /// publică de criptare — browserul o folosește direct ca să împacheteze
+        /// publică de criptare - browserul o folosește direct ca să împacheteze
         /// DEK-ul fără un apel suplimentar.
         ///
         /// Cheia publică este publică prin definiție: scopul ei este să fie
@@ -225,7 +244,7 @@ namespace MAI.Api.Controllers
                          && u.PublicKeyEncryption != null
                          && (EF.Functions.ILike(u.Username, term)
                           || (u.FullName   != null && EF.Functions.ILike(u.FullName,   term))
-                          || (u.Department != null && EF.Functions.ILike(u.Department, term))))
+                          || (u.OrgUnit != null && EF.Functions.ILike(u.OrgUnit.Name, term))))
                 .OrderBy(u => u.FullName ?? u.Username)
                 .Take(10)
                 .Select(u => new
@@ -233,7 +252,7 @@ namespace MAI.Api.Controllers
                     id                  = u.Id,
                     username            = u.Username,
                     fullName            = u.FullName   ?? u.Username,
-                    department          = u.Department ?? string.Empty,
+                    department          = u.OrgUnit != null ? u.OrgUnit.Name : string.Empty,
                     // Cheia publică e necesară în browser ca să împacheteze DEK-ul
                     // fără un al doilea round-trip. Cheile publice sunt publice.
                     publicKeyEncryption = u.PublicKeyEncryption,
@@ -244,7 +263,7 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // POST api/Users — creare cont, exclusiv Administrator
+        // POST api/Users - creare cont, exclusiv Administrator
         // ═════════════════════════════════════════════════════════════════════
         /// <summary>
         /// Creează un cont cu o parolă inițială aleasă de administrator.
@@ -275,7 +294,7 @@ namespace MAI.Api.Controllers
 
             // Un rol nedefinit (Role=99) ar trece prin binding, ar fi comparat cu
             // >= SefDirectie și ar produce un cont cu un rol pe care niciun
-            // [Authorize(Roles=...)] nu îl recunoaște — imposibil de administrat
+            // [Authorize(Roles=...)] nu îl recunoaște - imposibil de administrat
             // ulterior din interfață.
             if (!Enum.IsDefined(typeof(UserRole), dto.Role))
                 return BadRequest(new { message = "Rolul specificat nu există." });
@@ -286,6 +305,10 @@ namespace MAI.Api.Controllers
             var validation = _policy.Validate(dto.Password, username);
             if (!validation.IsValid)
                 return BadRequest(new { message = validation.Message, errors = validation.Errors });
+
+            if (dto.OrgUnitId.HasValue &&
+                !await _context.OrgUnits.AnyAsync(o => o.Id == dto.OrgUnitId && o.IsActive, ct))
+                return BadRequest(new { message = "Subdiviziunea aleasă nu există sau este desființată." });
 
             // Aceeași regulă ca indexurile unice din baza de date: fără diferență
             // între majuscule și minuscule. Verificarea de aici dă un mesaj clar;
@@ -319,12 +342,12 @@ namespace MAI.Api.Controllers
                     Email              = email,
                     PasswordHash       = await _hasher.HashPasswordAsync(dto.Password, ProfileFor(dto.Role), ct),
                     FullName           = dto.FullName?.Trim()   ?? string.Empty,
-                    Department         = dto.Department?.Trim() ?? string.Empty,
+                    OrgUnitId          = dto.OrgUnitId,
                     Role               = dto.Role,
                     IsActive           = true,
                     // Cu invitație: contul pornește neconfirmat, userul îl activează
                     // din linkul primit și își setează singur parola.
-                    // Fără invitație (fără email sau fără SMTP): fluxul clasic —
+                    // Fără invitație (fără email sau fără SMTP): fluxul clasic -
                     // cont confirmat, schimbare forțată a parolei temporare.
                     EmailConfirmed     = !useInvitation,
                     CreatedAt          = DateTime.UtcNow,
@@ -493,25 +516,19 @@ namespace MAI.Api.Controllers
             // Cheile private E2EE sunt încuiate cu o cheie derivată din parola
             // VECHE, pe care nu o mai știe nimeni. Lăsate pe loc, contul intra
             // într-un impas: descuierea eșua la fiecare autentificare, iar
-            // POST /api/Keys refuza chei noi fiindcă „există deja” — utilizatorul
+            // POST /api/Keys refuza chei noi fiindcă „există deja” - utilizatorul
             // nu mai putea nici trimite, nici primi fișiere.
             //
             // Fără key escrow, ștergerea materialului de chei e singura ieșire.
             // Costul se spune explicit: fișierele primite anterior nu mai pot fi
             // deschise de acest cont. Expeditorii le pot redeschide din „Trimise”
             // (au propria copie a cheii de fișier) și le pot retrimite.
-            var hadKeys = user.HasKeys;
-            if (hadKeys)
-            {
-                user.PublicKeyEncryption     = null;
-                user.PublicKeySigning        = null;
-                user.EncryptedPrivateBundle  = null;
-                user.KeyDerivationSalt       = null;
-                user.KeyDerivationIterations = null;
-                user.KeyWrapIv               = null;
-                user.CryptoSuite             = null;
-                user.KeysCreatedAt           = null;
-            }
+            var hadKeys = user.ClearEncryptionKeys();
+
+            // O resetare cu parolă temporară anulează orice link de resetare
+            // trimis anterior: altfel linkul vechi ar mai putea schimba parola.
+            user.PasswordResetToken       = null;
+            user.PasswordResetTokenExpiry = null;
 
             AddAudit(user.Id, AuditAction.UserUpdated,
                 $"Parola resetata administrativ pentru @{user.Username}, {closed} sesiuni inchise" +
@@ -540,6 +557,117 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
+        // POST api/Users/{id}/send-password-reset
+        // ═════════════════════════════════════════════════════════════════════
+        /// <summary>
+        /// Trimite titularului un link de resetare a parolei. Varianta preferată
+        /// față de parola temporară: administratorul nu află parola nouă, iar
+        /// titularul nu mai trece prin schimbarea forțată la primul login.
+        /// </summary>
+        [Authorize(Roles = nameof(UserRole.Administrator))]
+        [EnableRateLimiting(RateLimitPolicies.PasswordWrite)]
+        [HttpPost("{id:guid}/send-password-reset")]
+        public async Task<IActionResult> SendPasswordReset(Guid id, CancellationToken ct)
+        {
+            var result = await _passwordReset.RequestAsync(id, ct);
+
+            switch (result.Status)
+            {
+                case PasswordResetRequestStatus.UserNotFound:
+                    return NotFound(new { message = "Utilizatorul nu a fost găsit." });
+                case PasswordResetRequestStatus.NoEmail:
+                    return BadRequest(new
+                    {
+                        message = $"Contul @{result.Username} nu are adresă de email. " +
+                                  "Folosiți resetarea cu parolă temporară.",
+                    });
+                case PasswordResetRequestStatus.Inactive:
+                    return BadRequest(new { message = "Contul este dezactivat. Activați-l înainte de resetare." });
+                case PasswordResetRequestStatus.SmtpNotConfigured:
+                    return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+                    {
+                        message = "Serverul SMTP nu este configurat, deci linkul nu poate fi trimis. " +
+                                  "Folosiți resetarea cu parolă temporară.",
+                    });
+            }
+
+            var sent = result.Status == PasswordResetRequestStatus.Sent;
+
+            AddAudit(id, AuditAction.PasswordResetRequested,
+                sent
+                    ? $"Link de resetare a parolei trimis pentru @{result.Username} la {result.Email}, " +
+                      $"valabil pana la {result.ExpiresAt:yyyy-MM-dd HH:mm} UTC"
+                    : $"Trimiterea linkului de resetare pentru @{result.Username} a esuat (SMTP)",
+                sent ? AuditResult.Success : AuditResult.Failure);
+            await _context.SaveChangesAsync(ct);
+
+            if (!sent)
+                return StatusCode(StatusCodes.Status502BadGateway, new
+                {
+                    message = "Serverul SMTP nu a acceptat emailul. Linkul NU a fost trimis; încercați din nou.",
+                });
+
+            return Ok(new
+            {
+                message   = $"Linkul de resetare a fost trimis la {result.Email}. Parola actuală rămâne " +
+                            "valabilă până când utilizatorul o stabilește pe cea nouă.",
+                expiresAt = result.ExpiresAt,
+            });
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
+        // PATCH api/Users/{id}/org-unit
+        // ═════════════════════════════════════════════════════════════════════
+        /// <summary>
+        /// Încadrează utilizatorul într-o subdiviziune (sau îl scoate din structură).
+        ///
+        /// Dacă persoana conduce o subdiviziune și e mutată în alta, funcția de
+        /// șef se eliberează: un șef încadrat în afara unității conduse ar face ca
+        /// „subdiviziunea mea” să însemne altceva pentru el decât pentru colegi.
+        /// </summary>
+        [Authorize(Roles = nameof(UserRole.Administrator))]
+        [HttpPatch("{id:guid}/org-unit")]
+        public async Task<IActionResult> ChangeOrgUnit(Guid id, [FromBody] ChangeOrgUnitDto? dto, CancellationToken ct)
+        {
+            var user = await _context.Users.Include(u => u.OrgUnit).FirstOrDefaultAsync(u => u.Id == id, ct);
+            if (user is null) return NotFound(new { message = "Utilizatorul nu a fost găsit." });
+
+            var newUnitId = dto?.OrgUnitId;
+            string? newName = null;
+            if (newUnitId.HasValue)
+            {
+                var unit = await _context.OrgUnits.FirstOrDefaultAsync(o => o.Id == newUnitId && o.IsActive, ct);
+                if (unit is null)
+                    return BadRequest(new { message = "Subdiviziunea aleasă nu există sau este desființată." });
+                newName = unit.Name;
+            }
+
+            if (user.OrgUnitId == newUnitId)
+                return Ok(new { message = "Încadrarea era deja aceasta.", headReleased = false });
+
+            var oldName = user.OrgUnit?.Name ?? "neincadrat";
+
+            var led = await _context.OrgUnits.FirstOrDefaultAsync(o => o.HeadUserId == id, ct);
+            var headReleased = led is not null && led.Id != newUnitId;
+            if (headReleased) led!.HeadUserId = null;
+
+            user.OrgUnitId = newUnitId;
+
+            AddAudit(id, AuditAction.OrgStructureChanged,
+                $"Incadrare @{user.Username}: {oldName} -> {newName ?? "neincadrat"}" +
+                (headReleased ? $"; functia de sef al subdiviziunii '{led!.Name}' a fost eliberata" : string.Empty));
+            await _context.SaveChangesAsync(ct);
+
+            return Ok(new
+            {
+                message = headReleased
+                    ? $"@{user.Username} a fost mutat. Funcția de șef al subdiviziunii „{led!.Name}” a rămas vacantă."
+                    : $"@{user.Username} a fost încadrat în {newName ?? "nicio subdiviziune"}.",
+                headReleased,
+            });
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
         // POST api/Users/{id}/unlock
         // ═════════════════════════════════════════════════════════════════════
         [Authorize(Roles = nameof(UserRole.Administrator))]
@@ -559,7 +687,7 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // PATCH api/Users/{id}/role — exclusiv Administrator
+        // PATCH api/Users/{id}/role - exclusiv Administrator
         // ═════════════════════════════════════════════════════════════════════
         /// <summary>
         /// Endpointul nu avea NICIO restricție de rol. Un utilizator obișnuit își
@@ -569,7 +697,7 @@ namespace MAI.Api.Controllers
         ///
         /// Pe lângă restricția de rol, două protecții structurale: nimeni nu-și
         /// schimbă propriul rol, și ultimul administrator activ nu poate fi
-        /// retrogradat — altfel sistemul rămâne fără nicio cale de administrare.
+        /// retrogradat - altfel sistemul rămâne fără nicio cale de administrare.
         /// </summary>
         [Authorize(Roles = nameof(UserRole.Administrator))]
         [HttpPatch("{id:guid}/role")]
@@ -642,7 +770,7 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // PATCH api/Users/{id}/deactivate — exclusiv Administrator
+        // PATCH api/Users/{id}/deactivate - exclusiv Administrator
         // ═════════════════════════════════════════════════════════════════════
         /// <summary>
         /// Fără restricție de rol, orice utilizator putea dezactiva toți
@@ -675,7 +803,7 @@ namespace MAI.Api.Controllers
 
             // Dezactivarea trebuie să omoare sesiunile, nu doar să blocheze
             // autentificările viitoare. Refresh-ul verifică IsActive, dar tokenul
-            // de acces deja emis rămâne valid până la expirare — revocarea explicită
+            // de acces deja emis rămâne valid până la expirare - revocarea explicită
             // închide fereastra și lasă urmă în lista de sesiuni.
             var closed = await _sessions.RevokeAllAsync(
                 user.Id, "cont dezactivat", exceptSessionId: null, ct);
@@ -697,7 +825,7 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // PATCH api/Users/{id}/activate — exclusiv Administrator
+        // PATCH api/Users/{id}/activate - exclusiv Administrator
         // ═════════════════════════════════════════════════════════════════════
         [Authorize(Roles = nameof(UserRole.Administrator))]
         [HttpPatch("{id:guid}/activate")]
@@ -726,7 +854,7 @@ namespace MAI.Api.Controllers
         /// <summary>
         /// True dacă operația ar lăsa sistemul fără niciun Administrator activ.
         ///
-        /// Nu e o măsură de securitate împotriva unui atacator — cine e deja
+        /// Nu e o măsură de securitate împotriva unui atacator - cine e deja
         /// administrator poate face oricum daune. E o măsură împotriva accidentului:
         /// un sistem fără administrator nu se mai poate repara din interfață, iar
         /// recuperarea cere acces direct la baza de date.

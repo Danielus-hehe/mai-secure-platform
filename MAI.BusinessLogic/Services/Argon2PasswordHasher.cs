@@ -16,15 +16,15 @@ namespace MAI.BusinessLogic.Services
     ///
     /// Trei mecanisme de protecție operațională:
     ///
-    /// 1. PROFILE DE COST (asymmetric tuning) — login-ul folosește un profil ieftin,
+    /// 1. PROFILE DE COST (asymmetric tuning) - login-ul folosește un profil ieftin,
     ///    crearea/resetarea de parolă și conturile privilegiate unul scump. Parametrii
     ///    fac parte din string-ul stocat, deci verificarea îi citește de acolo.
     ///
-    /// 2. CONCURENȚĂ MĂRGINITĂ (offloading) — SemaphoreSlim limitează numărul de operații
+    /// 2. CONCURENȚĂ MĂRGINITĂ (offloading) - SemaphoreSlim limitează numărul de operații
     ///    simultane. Consumul de memorie devine determinist și nu mai depinde de trafic.
     ///    La saturare, cererile stau în coadă; la depășirea timeout-ului primesc 503.
     ///
-    /// 3. THREAD POOL — calculul rulează pe Task.Run, nu pe firul de request. Un thread
+    /// 3. THREAD POOL - calculul rulează pe Task.Run, nu pe firul de request. Un thread
     ///    care face 40 ms de muncă CPU-bound sincronă blochează Kestrel; aici nu.
     /// </summary>
     public class Argon2PasswordHasher : IPasswordHasher, IDisposable
@@ -81,7 +81,7 @@ namespace MAI.BusinessLogic.Services
             // Parola goală: Konscious.Argon2 refuză un input gol cu ArgumentException,
             // care ajungea ca 500 la login cu câmpul de parolă gol. O parolă goală
             // nu poate corespunde niciunui hash (politica o respinge la creare),
-            // deci răspunsul corect e Failed — cu timp simulat, ca la hash invalid.
+            // deci răspunsul corect e Failed - cu timp simulat, ca la hash invalid.
             if (string.IsNullOrEmpty(password) || string.IsNullOrWhiteSpace(storedHash))
             {
                 await SimulateVerificationAsync(ct);
@@ -114,7 +114,7 @@ namespace MAI.BusinessLogic.Services
                 return PasswordVerificationResult.Failed;
             }
 
-            // Verificarea folosește parametrii din hash-ul stocat, nu pe cei curenți —
+            // Verificarea folosește parametrii din hash-ul stocat, nu pe cei curenți -
             // altfel hash-urile create cu alt profil nu s-ar mai valida niciodată.
             var actual = await ComputeHashAsync(password, salt, m, t, p, expected.Length, ct);
 

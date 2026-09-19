@@ -29,7 +29,7 @@ public class SecretProtectorTests
         var protector = Protector();
 
         // Nonce aleatoriu per operație. Dacă ar fi egale, un atacator cu acces la
-        // coloană ar vedea care utilizatori împart același secret — și, mai grav,
+        // coloană ar vedea care utilizatori împart același secret - și, mai grav,
         // refolosirea nonce-ului în GCM sparge complet confidențialitatea.
         Assert.NotEqual(protector.Protect("acelasi"), protector.Protect("acelasi"));
     }
@@ -178,7 +178,7 @@ public class AccountLockoutServiceTests
         for (var i = 0; i < 30; i++)
             outcome = service.RegisterFailedAttempt(user);
 
-        // Fără plafon, 2^25 minute ar însemna blocare pe 50 de ani — adică un
+        // Fără plafon, 2^25 minute ar însemna blocare pe 50 de ani - adică un
         // atacator ar putea distruge permanent conturi greșind parola intenționat.
         Assert.True(outcome.LockedOut);
         Assert.Equal(Options.MaxLockoutMinutes, outcome.LockoutMinutes);

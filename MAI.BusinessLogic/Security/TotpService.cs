@@ -38,7 +38,7 @@ namespace MAI.BusinessLogic.Security
         /// <summary>
         /// URI otpauth:// pentru codul QR.
         ///
-        /// Eticheta e "Emitent:utilizator", iar parametrul issuer se repeta —
+        /// Eticheta e "Emitent:utilizator", iar parametrul issuer se repeta -
         /// redundanta e ceruta de specificatie, pentru ca unele aplicatii citesc
         /// doar unul din cele doua locuri.
         /// </summary>
@@ -62,7 +62,7 @@ namespace MAI.BusinessLogic.Security
         ///
         /// Compararea se face in timp constant si abia dupa ce s-au calculat toate
         /// codurile candidate. Un scurtcircuit la prima potrivire ar scurge, prin
-        /// diferenta de timp, in ce interval a nimerit codul — informatie mica,
+        /// diferenta de timp, in ce interval a nimerit codul - informatie mica,
         /// dar gratuita de eliminat.
         /// </summary>
         public bool VerifyCode(string secretBase32, string? code) =>

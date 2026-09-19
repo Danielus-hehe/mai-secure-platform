@@ -18,18 +18,18 @@ namespace MAI.Api.Controllers
     ///
     /// 2FA este OPȚIONAL și se activează exclusiv de către utilizator, pentru
     /// contul lui. Nu există endpoint prin care un administrator să activeze 2FA
-    /// pe contul altcuiva — ar fi inutil: administratorul nu are cum să scaneze
+    /// pe contul altcuiva - ar fi inutil: administratorul nu are cum să scaneze
     /// codul QR pe telefonul acelei persoane. Poate doar să dezactiveze, pentru
     /// deblocarea unui coleg care și-a pierdut telefonul și codurile.
     ///
     /// Fluxul de activare are trei pași, în ordinea asta din motive concrete:
     ///
-    ///   1. /setup   — cere parola, generează un secret ÎN AȘTEPTARE și îl arată
+    ///   1. /setup   - cere parola, generează un secret ÎN AȘTEPTARE și îl arată
     ///                 ca URI otpauth. Nimic nu e activat încă.
-    ///   2. /enable  — cere un cod generat din acel secret. Abia dovada că
+    ///   2. /enable  - cere un cod generat din acel secret. Abia dovada că
     ///                 aplicația de pe telefon funcționează activează 2FA.
     ///                 Returnează codurile de recuperare, o singură dată.
-    ///   3. /disable — cere parola ȘI un cod valid.
+    ///   3. /disable - cere parola ȘI un cod valid.
     ///
     /// Pasul 2 nu e birocrație: dacă am activa direct la /setup, un utilizator
     /// care scanează greșit codul QR se închide singur în afara contului, iar
@@ -102,7 +102,7 @@ namespace MAI.Api.Controllers
         /// Generează un secret în așteptare și returnează datele pentru codul QR.
         ///
         /// Cere parola. Fără verificare, oricine ajunge la un calculator lăsat
-        /// deblocat poate reînrola 2FA pe telefonul lui și prelua contul definitiv —
+        /// deblocat poate reînrola 2FA pe telefonul lui și prelua contul definitiv -
         /// atacul devine mai grav decât absența 2FA.
         /// </summary>
         [EnableRateLimiting(RateLimitPolicies.PasswordWrite)]
@@ -152,7 +152,7 @@ namespace MAI.Api.Controllers
         // ═════════════════════════════════════════════════════════════════════
         /// <summary>
         /// Confirmă înrolarea cu un cod generat din secretul în așteptare și
-        /// activează 2FA. Returnează codurile de recuperare — singura dată când
+        /// activează 2FA. Returnează codurile de recuperare - singura dată când
         /// sunt vizibile în clar.
         /// </summary>
         [EnableRateLimiting(RateLimitPolicies.PasswordWrite)]
@@ -297,7 +297,7 @@ namespace MAI.Api.Controllers
         // ═════════════════════════════════════════════════════════════════════
         /// <summary>
         /// Regenerează codurile de recuperare. Cele vechi devin inutilizabile
-        /// imediat — altfel un set de coduri scurs ar rămâne valabil la nesfârșit.
+        /// imediat - altfel un set de coduri scurs ar rămâne valabil la nesfârșit.
         /// </summary>
         [EnableRateLimiting(RateLimitPolicies.PasswordWrite)]
         [HttpPost("recovery-codes")]
@@ -341,7 +341,7 @@ namespace MAI.Api.Controllers
         /// codurile de recuperare. Fără această ieșire, contul devine inaccesibil
         /// permanent.
         ///
-        /// Este, prin construcție, un ocol al celui de-al doilea factor — de aceea
+        /// Este, prin construcție, un ocol al celui de-al doilea factor - de aceea
         /// se jurnalizează cu ATENTIE și numele administratorului care l-a folosit.
         /// Verificarea identității persoanei se face în afara sistemului, iar
         /// procedura trebuie descrisă în documentația de exploatare.
@@ -435,7 +435,7 @@ namespace MAI.Api.Controllers
             }
 
             // Cod de recuperare: se consumă chiar dacă operația care urmează e
-            // dezactivarea. Consumul e corect — codul a fost folosit.
+            // dezactivarea. Consumul e corect - codul a fost folosit.
             if (string.IsNullOrEmpty(user.TwoFactorRecoveryCodeHashes))
                 return Task.FromResult(false);
 

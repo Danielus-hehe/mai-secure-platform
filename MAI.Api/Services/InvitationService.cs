@@ -14,7 +14,7 @@ namespace MAI.Api.Services
     /// <see cref="IEmailService"/>) și Argon2id (prin <see cref="IPasswordHasher"/>).
     ///
     /// Tokenul brut (Base64Url, 256 bit) ajunge în email și nu se loghează.
-    /// În DB se stochează SHA-256(token) — același principiu ca la refresh token.
+    /// În DB se stochează SHA-256(token) - același principiu ca la refresh token.
     ///
     /// Parola setată de utilizator trece prin <see cref="PasswordPolicy"/> și e
     /// hashată cu profilul Argon2 corespunzător rolului.
@@ -180,7 +180,7 @@ namespace MAI.Api.Services
         }
 
         /// <summary>
-        /// SHA-256 hex al tokenului — stocat în DB.
+        /// SHA-256 hex al tokenului - stocat în DB.
         /// Tokenul brut nu se loghează și nu ajunge în DB.
         /// </summary>
         private static string HashToken(string raw)

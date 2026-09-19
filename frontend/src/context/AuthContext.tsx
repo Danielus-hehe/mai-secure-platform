@@ -17,7 +17,7 @@ import { isTwoFactorChallenge, type TwoFactorChallenge } from '../api/twoFactor'
 export interface User {
     /**
      * Guid din backend, mereu string. Era `string | number`, ceea ce obliga
-     * fiecare comparatie de identitate la o conversie defensiva — si lasa loc
+     * fiecare comparatie de identitate la o conversie defensiva - si lasa loc
      * ca `user.id === transfer.senderId` sa fie fals doar pentru ca unul era
      * numar si celalalt sir.
      */
@@ -63,7 +63,7 @@ interface LoginResponse {
  *
  * `login` nu mai returneaza intotdeauna un utilizator: daca acel cont si-a
  * activat 2FA, returneaza provocarea, iar sesiunea se deschide abia dupa
- * `verifyTwoFactor`. Tipul uniune obliga apelantul sa trateze ambele cazuri —
+ * `verifyTwoFactor`. Tipul uniune obliga apelantul sa trateze ambele cazuri -
  * un `User` returnat direct ar fi ascuns pasul lipsa in tipuri si l-ar fi
  * transformat intr-un bug la runtime.
  */
@@ -160,7 +160,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }, delay);
     }, [clearSession]);
 
-    // Sesiunea a expirat definitiv (refresh respins) — semnalat de interceptor.
+    // Sesiunea a expirat definitiv (refresh respins) - semnalat de interceptor.
     useEffect(() => {
         setOnSessionExpired(() => {
             clearSession();
@@ -185,7 +185,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 return;
             }
 
-            // Access token inca valid — nu deranjam serverul.
+            // Access token inca valid - nu deranjam serverul.
             if (!tokenStorage.isAccessTokenExpiring(60)) {
                 if (!cancelled) {
                     scheduleRefresh();
@@ -243,7 +243,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             );
 
             // Contul are 2FA activ: parola a fost corecta, dar nu s-a emis niciun
-            // token. Nu salvam absolut nimic in localStorage in acest punct —
+            // token. Nu salvam absolut nimic in localStorage in acest punct -
             // pana la codul corect, nu exista sesiune.
             if (isTwoFactorChallenge(data)) {
                 return { kind: 'twoFactor', challenge: data };

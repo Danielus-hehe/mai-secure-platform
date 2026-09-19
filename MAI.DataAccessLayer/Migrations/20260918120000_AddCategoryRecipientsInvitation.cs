@@ -6,7 +6,7 @@ namespace MAI.DataAccessLayer.Migrations
 {
     /// <summary>
     /// Categoria transferului, destinatarii suplimentari (forward) și invitația
-    /// de activare a contului — într-o singură migrare.
+    /// de activare a contului - într-o singură migrare.
     ///
     /// Înlocuiește patru migrări fără .Designer.cs (deci fără atributele
     /// [Migration]/[DbContext]), pe care EF Core nu le descoperea și nu le aplica

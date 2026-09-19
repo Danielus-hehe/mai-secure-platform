@@ -10,7 +10,7 @@ namespace MAI.Api.Configuration
     /// Docker Compose citește <c>.env</c> și îl traduce în variabile de mediu
     /// (vezi <c>docker-compose.yml</c>). Fără clasa asta, rularea locală avea
     /// nevoie de aceleași valori a doua oară, în <c>user-secrets</c> sau în
-    /// <c>appsettings.Development.json</c> — două locuri care se desincronizează.
+    /// <c>appsettings.Development.json</c> - două locuri care se desincronizează.
     ///
     /// Reguli:
     /// <list type="bullet">
@@ -50,6 +50,10 @@ namespace MAI.Api.Configuration
                 ["SMTP_USE_SSL"]         = new[] { "Smtp__UseSsl" },
                 ["SMTP_FROM"]            = new[] { "Smtp__From" },
                 ["SMTP_USERNAME"]        = new[] { "Smtp__Username" },
+                ["TRANSFER_DEFAULT_EXPIRY_DAYS"] = new[] { "Transfers__DefaultExpiryDays" },
+                ["TRANSFER_MAX_EXPIRY_DAYS"]     = new[] { "Transfers__MaxExpiryDays" },
+                ["TRANSFER_MAX_RECIPIENTS"]      = new[] { "Transfers__MaxRecipients" },
+                ["PASSWORD_RESET_TOKEN_MINUTES"] = new[] { "PasswordReset__TokenMinutes" },
             };
 
         /// <summary>Rezultatul încărcării, pentru mesajul din log (fără valori).</summary>

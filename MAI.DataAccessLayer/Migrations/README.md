@@ -50,10 +50,77 @@ deci îl poți rula pe o bază parțial actualizată fără să se repete nimic.
 | `20260910200100_CaseInsensitiveUserIndexes` | Unicitate fără diferență de majuscule; email opțional |
 | `20260911090000_AddTotpReplayProtection` | Un cod TOTP nu mai poate fi folosit de două ori |
 | `20260918120000_AddCategoryRecipientsInvitation` | Categoria transferului, `TransferRecipients` (forward), invitația de activare (`EmailConfirmed`, `InvitationToken`) |
+| `20260919120000_PerRecipientReceiptsAndSoftDelete` | Dovada de primire per destinatar (`TransferRecipients.DownloadedAt/SignatureValid`), eliminarea destinatarului unic de pe `FileTransfers`, `AllowForward`, ștergere logică (`DeletedAt`, `DeletedById`), repararea stărilor suprascrise de jobul de expirare |
+| `20260920120000_OrgStructureInternalDocsPasswordReset` | `OrgUnits` (Direcție/Secție/Serviciu, cu șef), `Users.OrgUnitId` în locul lui `Department` (convertit automat), `Users.PasswordResetToken*`, documente interne cu destinatari și confirmare „Luat la cunoștință” |
+| `20260921120000_OrgLevels` | Niveluri configurabile ale structurii (`OrgLevels`); rangurile subdiviziunilor trec de la 1/2/3 la 100/200/300, ca niveluri noi să poată fi inserate între cele existente |
 
 ---
 
-## `AddCategoryRecipientsInvitation` — dacă ai rulat scripturile 008–010
+## `OrgStructureInternalDocsPasswordReset` - ce se întâmplă cu datele existente
+
+Coloana text `Users.Department` dispare. Înainte, migrarea:
+
+1. creează câte o subdiviziune de nivel **Direcție** pentru fiecare denumire
+   distinctă din `Department` (fără diferență de majuscule; grafia păstrată e
+   cea mai frecventă);
+2. încadrează fiecare cont în subdiviziunea corespunzătoare;
+3. numește ca **șef** cel mai vechi cont activ cu rolul `SefDirectie` din fiecare
+   subdiviziune.
+
+Secțiile și serviciile nu se pot deduce din text liber: se construiesc după
+migrare, din pagina **Structura organizatorică** (doar administrator).
+
+Verificare după aplicare:
+
+```sql
+SELECT o."Name", o."Type", h."Username" AS sef,
+       (SELECT count(*) FROM "Users" u WHERE u."OrgUnitId" = o."Id") AS membri
+  FROM "OrgUnits" o
+  LEFT JOIN "Users" h ON h."Id" = o."HeadUserId"
+ ORDER BY o."Name";
+```
+
+---
+
+## `PerRecipientReceiptsAndSoftDelete` - înainte de aplicare
+
+Migrarea **elimină coloane** din `FileTransfers` (`RecipientId`,
+`EncryptedKeyForRecipient`, `DownloadedAt`, `RecipientSignatureValid`), după ce
+le copiază conținutul în `TransferRecipients`. Faceți un backup înainte
+(Supabase → Database → Backups, sau `pg_dump`).
+
+Ce face, în ordine:
+
+1. adaugă `DownloadedAt` și `SignatureValid` pe `TransferRecipients`;
+2. copiază destinatarul original al fiecărui transfer ca rând în
+   `TransferRecipients` (`ForwardedById = NULL` = destinatar direct);
+3. golește `StorageKey` pe rândurile `Expired` (obiectul fusese deja șters) și
+   reface stările suprascrise de jobul vechi: `Expired` cu `RevokedAt` → `Revoked`,
+   `Expired` descărcat de toți → `Downloaded`; un `Downloaded` cu destinatari de
+   forward care nu l-au deschis revine în `Pending`;
+4. elimină coloanele vechi (cheia străină și indexul lor dispar odată cu ele);
+5. adaugă `AllowForward` (TRUE pentru transferurile existente - așa se comportau
+   -, FALSE implicit pentru cele noi), `DeletedAt`, `DeletedById`;
+6. înlocuiește indexul `IX_TransferRecipients_UserId` cu
+   `IX_TransferRecipients_UserId_DownloadedAt`.
+
+**Limitare pentru datele vechi:** până la această migrare, confirmarea oricărui
+destinatar (inclusiv a celor de forward) se scria pe rândul transferului. Nu se
+mai poate afla cine a confirmat, deci confirmarea se atribuie destinatarului
+original.
+
+Verificare după aplicare:
+
+```sql
+-- Fiecare transfer are cel puțin un destinatar direct.
+SELECT t."Id", t."FileName" FROM "FileTransfers" t
+WHERE NOT EXISTS (SELECT 1 FROM "TransferRecipients" r
+                  WHERE r."TransferId" = t."Id" AND r."ForwardedById" IS NULL);
+```
+
+---
+
+## `AddCategoryRecipientsInvitation` - dacă ai rulat scripturile 008–010
 
 Migrarea înlocuiește patru migrări scrise fără `.Designer.cs`
 (`AddExpiryAndCategory`, `AddTransferCategory`, `AddTransferRecipients`,

@@ -10,7 +10,7 @@ namespace MAI.Api.Services
     ///
     /// Metodele modifică entitățile și pun modificările în contextul curent, dar
     /// NU salvează. Apelantul decide când face SaveChanges, ca revocarea unei
-    /// sesiuni și rândul de audit corespunzător să intre în aceeași tranzacție —
+    /// sesiuni și rândul de audit corespunzător să intre în aceeași tranzacție -
     /// altfel poți avea o sesiune revocată fără urmă în jurnal, sau invers.
     /// </summary>
     public interface ISessionService

@@ -9,7 +9,9 @@ import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { formatDateTime } from '../../utils/format';
 
-type ActionKey = 'LOGIN' | 'LOGOUT' | 'UPLOAD' | 'DOWNLOAD' | 'MODIFICARE_DOC' | 'ADMIN';
+type ActionKey =
+    | 'LOGIN' | 'LOGOUT' | 'UPLOAD' | 'DOWNLOAD' | 'MODIFICARE_DOC'
+    | 'TRANSFER' | 'SECURITATE' | 'STRUCTURA' | 'DOC_INTERN' | 'ADMIN';
 
 const ACTION_LABELS: Record<ActionKey, string> = {
     LOGIN: 'Autentificare',
@@ -17,6 +19,10 @@ const ACTION_LABELS: Record<ActionKey, string> = {
     UPLOAD: 'Încărcare',
     DOWNLOAD: 'Descărcare',
     MODIFICARE_DOC: 'Modificare doc',
+    TRANSFER: 'Transfer',
+    SECURITATE: 'Securitate cont',
+    STRUCTURA: 'Structură organizatorică',
+    DOC_INTERN: 'Document intern',
     ADMIN: 'Administrare',
 };
 
@@ -31,7 +37,7 @@ const inputCls = `rounded-lg border border-mai-200 dark:border-mai-600 bg-white 
 /**
  * Rezultatul unei operatii, asa cum il trimite backend-ul.
  *
- * ATENTIE nu e nici succes, nici esec: operatia a reusit, dar merita privita —
+ * ATENTIE nu e nici succes, nici esec: operatia a reusit, dar merita privita -
  * 2FA dezactivat, reset administrativ, semnatura invalida la descarcare. Inainte
  * de migrarea pe coloana `Result`, aceste randuri erau afisate ca simplu SUCCES
  * si se pierdeau in lista.
@@ -91,7 +97,7 @@ export default function AuditPage() {
         return () => clearTimeout(t);
     }, [searchInput]);
 
-    // Orice schimbare de filtru readuce la pagina 1 — altfel ramai pe pagina 8
+    // Orice schimbare de filtru readuce la pagina 1 - altfel ramai pe pagina 8
     // a unui rezultat care are acum 2 pagini si vezi tabel gol.
     const isFirstRender = useRef(true);
     useEffect(() => {
@@ -168,7 +174,7 @@ export default function AuditPage() {
             link.remove();
             URL.revokeObjectURL(url);
 
-            toast.success(`Jurnal exportat — ${totalCount} înregistrări.`);
+            toast.success(`Jurnal exportat - ${totalCount} înregistrări.`);
         } catch (err: unknown) {
             // Backendul refuza exporturile peste 50.000 de randuri; mesajul vine ca blob JSON.
             let message = 'Exportul a eșuat.';
@@ -178,7 +184,7 @@ export default function AuditPage() {
                     const parsed = JSON.parse(await blob.text());
                     if (parsed?.message) message = parsed.message;
                 } catch {
-                    /* raspuns care nu e JSON — pastram mesajul generic */
+                    /* raspuns care nu e JSON - pastram mesajul generic */
                 }
             }
             toast.error(message);

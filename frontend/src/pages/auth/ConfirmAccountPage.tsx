@@ -139,7 +139,7 @@ export default function ConfirmAccountPage() {
                         Activare Cont
                     </h1>
                     <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                        Platforma Securizată — Ministerul Afacerilor Interne
+                        Platforma Securizată - Ministerul Afacerilor Interne
                     </p>
                 </div>
 
@@ -395,7 +395,7 @@ export default function ConfirmAccountPage() {
 
                 {/* Footer */}
                 <p className="text-center text-xs text-gray-400 dark:text-gray-600">
-                    © {new Date().getFullYear()} Ministerul Afacerilor Interne — Uz Intern Exclusiv
+                    © {new Date().getFullYear()} Ministerul Afacerilor Interne - Uz Intern Exclusiv
                 </p>
             </div>
         </div>

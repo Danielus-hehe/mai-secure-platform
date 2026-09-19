@@ -9,7 +9,7 @@ namespace MAI.DataAccessLayer.Configurations
     ///
     /// Deliberat minimală: doar indexuri. Adăugarea de HasMaxLength aici ar
     /// genera ALTER COLUMN pe coloane care conțin deja date, cu risc de
-    /// trunchiere — o schimbare separată, făcută conștient, nu un efect
+    /// trunchiere - o schimbare separată, făcută conștient, nu un efect
     /// secundar al adăugării unui index.
     /// </summary>
     public class UserConfiguration : IEntityTypeConfiguration<User>
@@ -33,6 +33,22 @@ namespace MAI.DataAccessLayer.Configurations
                 .IsUnique()
                 .HasFilter("\"InvitationToken\" IS NOT NULL")
                 .HasDatabaseName("IX_Users_InvitationToken");
+
+            // Tokenul de resetare a parolei - același tipar ca invitația.
+            builder.HasIndex(u => u.PasswordResetToken)
+                .IsUnique()
+                .HasFilter("\"PasswordResetToken\" IS NOT NULL")
+                .HasDatabaseName("IX_Users_PasswordResetToken");
+
+            // Încadrarea în structură. Restrict: o subdiviziune cu membri nu se
+            // poate șterge; se mută întâi oamenii sau se dezactivează.
+            builder.HasOne(u => u.OrgUnit)
+                .WithMany()
+                .HasForeignKey(u => u.OrgUnitId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            builder.HasIndex(u => u.OrgUnitId)
+                .HasDatabaseName("IX_Users_OrgUnitId");
 
             // Indexurile care contează efectiv pentru unicitate NU apar aici, ci
             // în migrarea CaseInsensitiveUserIndexes, ca SQL:

@@ -3,7 +3,7 @@
 /**
  * Client pentru /api/TwoFactor si pentru pasul doi de la /api/Auth.
  *
- * 2FA este optional. Nimic din modulul asta nu se apeleaza automat — utilizatorul
+ * 2FA este optional. Nimic din modulul asta nu se apeleaza automat - utilizatorul
  * il porneste singur din pagina de profil, iar conturile care nu l-au activat nu
  * ating niciodata codul de aici.
  */
@@ -78,7 +78,7 @@ export async function cancelTwoFactorSetup(): Promise<void> {
     await api.post('/TwoFactor/cancel-setup');
 }
 
-/** Dezactivare. Cere parola SI un cod valid — nu doar parola. */
+/** Dezactivare. Cere parola SI un cod valid - nu doar parola. */
 export async function disableTwoFactor(password: string, code: string): Promise<{ message: string }> {
     const { data } = await api.post<{ message: string }>('/TwoFactor/disable', { password, code });
     return data;

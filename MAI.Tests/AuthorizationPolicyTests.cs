@@ -14,7 +14,7 @@ namespace MAI.Tests;
 /// Motivul existenței lor: până în 2026-09-10, crearea de conturi, schimbarea
 /// rolului și (de)activarea din UsersController aveau doar [Authorize] pe clasă.
 /// Orice Utilizator își putea acorda singur rolul de Administrator. Pagina
-/// /users era ascunsă în meniu, deci nimeni nu a observat — interfața nu e
+/// /users era ascunsă în meniu, deci nimeni nu a observat - interfața nu e
 /// granița de securitate, API-ul este. Testele de mai jos fac din regula asta
 /// ceva ce CI-ul verifică la fiecare push, nu ceva ce trebuie ținut minte.
 ///
@@ -112,6 +112,12 @@ public class AuthorizationPolicyTests
             // (Login, respectiv PasswordWrite) și acceptă doar un token de 256 biți.
             "AuthController.CheckInvitation",
             "AuthController.ConfirmInvitation",
+            // Resetarea parolei din linkul trimis de administrator: cine și-a
+            // uitat parola nu se poate autentifica. Aceleași limitări ca la
+            // invitație (Login, respectiv PasswordWrite), token de 256 biți,
+            // de unică folosință, valabil PASSWORD_RESET_TOKEN_MINUTES.
+            "AuthController.CheckPasswordReset",
+            "AuthController.ResetPasswordWithToken",
         };
 
         var anonime = Controllers()

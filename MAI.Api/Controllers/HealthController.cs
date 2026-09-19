@@ -13,7 +13,7 @@ namespace MAI.Api.Controllers
     /// Anonim intenționat: un health check care cere autentificare nu poate fi
     /// folosit de un load balancer sau de Docker <c>HEALTHCHECK</c>, adică exact
     /// de cine are nevoie de el. În schimb, răspunsul nu conține niciodată
-    /// stringuri de conexiune, endpointuri sau mesaje de excepție — cine sondează
+    /// stringuri de conexiune, endpointuri sau mesaje de excepție - cine sondează
     /// endpointul află „merge / nu merge”, nu topologia sistemului.
     /// </summary>
     [ApiController]
@@ -40,7 +40,7 @@ namespace MAI.Api.Controllers
         }
 
         /// <summary>
-        /// GET /api/health — sondă de disponibilitate (readiness).
+        /// GET /api/health - sondă de disponibilitate (readiness).
         /// 200 dacă toate dependențele răspund, 503 dacă măcar una nu.
         /// </summary>
         [HttpGet]
@@ -72,7 +72,7 @@ namespace MAI.Api.Controllers
         }
 
         /// <summary>
-        /// GET /api/health/live — sondă de viață (liveness).
+        /// GET /api/health/live - sondă de viață (liveness).
         /// Nu atinge nicio dependență: răspunde cât timp procesul mai poate servi
         /// cereri. Dacă ar verifica baza de date, o indisponibilitate temporară a
         /// bazei ar face orchestratorul să repornească un proces perfect sănătos.

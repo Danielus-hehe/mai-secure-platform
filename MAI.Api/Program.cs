@@ -1,4 +1,4 @@
-using MAI.Api.BackgroundJobs;
+﻿using MAI.Api.BackgroundJobs;
 using MAI.Api.Configuration;
 using MAI.Api.Middleware;
 using MAI.Api.Options;
@@ -8,6 +8,7 @@ using MAI.BusinessLogic.Interfaces;
 using MAI.BusinessLogic.Security;
 using MAI.BusinessLogic.Services;
 using MAI.BusinessLogic.Storage;
+using MAI.BusinessLogic.Transfers;
 using MAI.DataAccessLayer;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http.Features;
@@ -192,7 +193,7 @@ try
     else
         builder.Services.AddSingleton<IFileStorage, LocalFileStorage>();
 
-    // ─── Kestrel și multipart — limitele corpului cererii ──────────────────────
+    // ─── Kestrel și multipart - limitele corpului cererii ──────────────────────
     // Limita GLOBALĂ e mică: toate endpointurile JSON (login, chei, 2FA,
     // administrare) primesc câțiva kiloocteți. Înainte era ridicată global la
     // 51 MB pentru upload, deci și /api/Auth/login, anonim, accepta 51 MB de
@@ -271,7 +272,7 @@ try
     builder.Services.AddSingleton(passwordPolicyOptions);
     builder.Services.AddSingleton<PasswordPolicy>();
 
-    // ─── Autentificare în doi pași (TOTP) — opțională, per utilizator ──────────
+    // ─── Autentificare în doi pași (TOTP) - opțională, per utilizator ──────────
     // Nimic nu se activează global. Fiecare utilizator decide din pagina de profil;
     // un cont fără 2FA se autentifică exact ca înainte.
 
@@ -280,7 +281,7 @@ try
 
     // Cheia de cifrare a secretelor TOTP vine din mediu, nu din fișierul care ajunge
     // în Git. Fără ea, în dezvoltare, derivăm una din cheia JWT ca aplicația să
-    // pornească — dar NU în producție: o cheie derivată dintr-un secret partajat
+    // pornească - dar NU în producție: o cheie derivată dintr-un secret partajat
     // înseamnă că scurgerea unuia le compromite pe amândouă.
     var twoFactorKeyFromEnv = Environment.GetEnvironmentVariable("MAI_TWOFACTOR_KEY");
     if (!string.IsNullOrWhiteSpace(twoFactorKeyFromEnv))
@@ -334,7 +335,7 @@ try
     // ─── JWT Authentication ────────────────────────────────────────────────────
     // Parametrii se citesc o singură dată, într-un obiect tipizat, folosit ȘI la
     // validare (aici) ȘI la emitere (TokenService). Înainte erau citiți din
-    // IConfiguration în două locuri — două locuri care trebuie să rămână identice
+    // IConfiguration în două locuri - două locuri care trebuie să rămână identice
     // sunt un loc unde diverg, iar aici divergența înseamnă tokenuri emise pe care
     // serverul propriu le respinge.
 
@@ -347,7 +348,7 @@ try
         jwtOptions.Key = jwtKeyFromEnv;
 
     // Oprește pornirea dacă tokenurile ar fi falsificabile sau dacă issuer/audience
-    // lipsesc — un server care rulează cu o cheie slabă e mai rău decât unul care
+    // lipsesc - un server care rulează cu o cheie slabă e mai rău decât unul care
     // nu pornește, fiindcă primul pare că funcționează.
     EnsureNotTemplate(
         "Jwt:Key (MAI_JWT_KEY)",
@@ -367,8 +368,8 @@ try
                 IssuerSigningKey         = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.Key)),
 
                 // Înainte erau amândouă false. Consecința: un token emis de ORICE alt
-                // serviciu semnat cu aceeași cheie — inclusiv unul dintr-un proiect
-                // unde cheia s-a scurs sau a fost refolosită din comoditate — era
+                // serviciu semnat cu aceeași cheie - inclusiv unul dintr-un proiect
+                // unde cheia s-a scurs sau a fost refolosită din comoditate - era
                 // acceptat aici ca sesiune validă. În intranet riscul e mic, dar
                 // validarea costă o comparație de șiruri.
                 ValidateIssuer   = true,
@@ -393,7 +394,7 @@ try
     builder.Services.AddSingleton<IAccountLockoutService, AccountLockoutService>();
 
     // Scoped, spre deosebire de celelalte două: are nevoie de AppDbContext, care e
-    // per cerere. Tocmai de aceea emiterea tokenurilor a rămas separată de sesiuni —
+    // per cerere. Tocmai de aceea emiterea tokenurilor a rămas separată de sesiuni -
     // un serviciu care nu face decât HMAC și numere aleatorii nu trebuie să devină
     // dependent de EF Core și nici să-și piardă durata de viață de singleton.
     builder.Services.AddScoped<ISessionService, SessionService>();
@@ -414,7 +415,7 @@ try
             // AllowCredentials() a fost eliminat intenționat.
             //
             // Tokenul de acces circulă prin antetul Authorization, pus explicit de
-            // client.ts — niciodată printr-un cookie. Fără cookie nu există CSRF
+            // client.ts - niciodată printr-un cookie. Fără cookie nu există CSRF
             // clasic: browserul nu atașează nimic automat la o cerere cross-origin.
             //
             // AllowCredentials nu era folosit de nimic, dar lăsa ușa deschisă: în ziua
@@ -423,7 +424,7 @@ try
             // linie din politica de CORS să se schimbe.
             //
             // Dacă vreodată chiar e nevoie de cookie-uri, se repune AllowCredentials
-            // ÎMPREUNĂ cu SameSite=Strict și un token anti-CSRF — nu separat.
+            // ÎMPREUNĂ cu SameSite=Strict și un token anti-CSRF - nu separat.
         });
     });
 
@@ -460,13 +461,21 @@ try
 
     // ─── Restricție de acces la rețeaua internă ────────────────────────────────
     // Implicit DEZACTIVATĂ. Se activează în appsettings.Production.json, după ce ai
-    // confirmat plajele reale — un API care refuză toată lumea la deploy e mai rău
+    // confirmat plajele reale - un API care refuză toată lumea la deploy e mai rău
     // decât unul deschis în laborator. Vezi Intranet:AuditOnly pentru rodaj.
 
     var intranetOptions = new IntranetOptions();
     builder.Configuration.GetSection("Intranet").Bind(intranetOptions);
     intranetOptions.Validate();
     builder.Services.AddSingleton(intranetOptions);
+
+    // ─── Politica transferurilor ───────────────────────────────────────────────
+    // Valabilitatea implicită/maximă și numărul maxim de destinatari. Din .env:
+    // TRANSFER_DEFAULT_EXPIRY_DAYS, TRANSFER_MAX_EXPIRY_DAYS, TRANSFER_MAX_RECIPIENTS.
+    var transferPolicy = new TransferPolicyOptions();
+    builder.Configuration.GetSection("Transfers").Bind(transferPolicy);
+    transferPolicy.Validate();
+    builder.Services.AddSingleton(transferPolicy);
 
     var expirationOptions = new TransferExpirationOptions();
     builder.Configuration.GetSection("TransferExpiration").Bind(expirationOptions);
@@ -492,7 +501,7 @@ try
         // Valorile-șablon („YOUR_SMTP_HOST_HERE”) contează ca lipsă: altfel
         // serviciul încerca conexiuni spre un host inexistent la fiecare transfer.
         // Fără SMTP, conturile noi pornesc direct confirmate, cu parolă temporară
-        // (vezi UsersController.CreateUser) — nu rămân blocate așteptând un email.
+        // (vezi UsersController.CreateUser) - nu rămân blocate așteptând un email.
         Log.Warning(
             "SMTP nu este configurat; notificările email și invitațiile sunt dezactivate. " +
             "Câmpuri lipsă sau rămase pe valoarea-șablon: {Missing}",
@@ -509,8 +518,15 @@ try
     builder.Services.AddSingleton(smtpOptions);
     builder.Services.AddSingleton<IEmailService, SmtpEmailService>();
 
-    // Invitație cont nou — Scoped (are nevoie de AppDbContext, care e Scoped).
+    // Invitație cont nou - Scoped (are nevoie de AppDbContext, care e Scoped).
     builder.Services.AddScoped<IInvitationService, InvitationService>();
+
+    // Resetarea parolei prin link trimis pe email (inițiată de administrator).
+    var passwordResetOptions = new PasswordResetOptions();
+    builder.Configuration.GetSection("PasswordReset").Bind(passwordResetOptions);
+    passwordResetOptions.Validate();
+    builder.Services.AddSingleton(passwordResetOptions);
+    builder.Services.AddScoped<IPasswordResetService, PasswordResetService>();
 
     // Trimiterea în fundal a invitației la crearea contului. Singleton, dar
     // fiecare trimitere își creează propriul scope (deci propriul AppDbContext):
@@ -519,7 +535,7 @@ try
 
     var app = builder.Build();
 
-    // Raport de pornire — util ca să vezi ce buget de memorie ai setat.
+    // Raport de pornire - util ca să vezi ce buget de memorie ai setat.
     app.Logger.LogInformation(
         "Argon2id: profil implicit={Default}, privilegiat={Privileged}, max concurent={Max}, memorie de varf={Mem} MiB",
         argon2Options.DefaultProfile,
@@ -561,7 +577,7 @@ try
     // O linie per cerere HTTP, cu durata și codul de răspuns. Pusă DUPĂ
     // UseForwardedHeaders (altfel ClientIp ar fi IP-ul proxy-ului) și ÎNAINTEA
     // filtrului de intranet și a rate limiter-ului, ca respingerile lor (403, 429)
-    // să apară în loguri — sunt exact cererile care contează într-o investigație.
+    // să apară în loguri - sunt exact cererile care contează într-o investigație.
     //
     // Calea se loghează fără query string (implicit la Serilog). Antetul
     // Authorization și corpul cererii nu se loghează niciodată: ar pune tokenuri
@@ -624,7 +640,7 @@ catch (Exception ex) when (ex is not HostAbortedException)
 {
     // HostAbortedException e aruncată intenționat de `dotnet ef` când pornește
     // aplicația doar ca să citească modelul. Nu e o eroare și nu se loghează ca
-    // Fatal — altfel fiecare `dotnet ef migrations add` ar părea un crash.
+    // Fatal - altfel fiecare `dotnet ef migrations add` ar părea un crash.
     Log.Fatal(ex, "SGDM API s-a oprit la pornire: {Reason}", ex.Message);
 
     // Cod de ieșire nenul: docker, systemd și CI trebuie să vadă eșecul.
@@ -632,7 +648,7 @@ catch (Exception ex) when (ex is not HostAbortedException)
 }
 finally
 {
-    // Golește buffer-ul consolei. Fără asta, exact ultimul mesaj — cel care
-    // explică de ce s-a oprit procesul — se poate pierde.
+    // Golește buffer-ul consolei. Fără asta, exact ultimul mesaj - cel care
+    // explică de ce s-a oprit procesul - se poate pierde.
     Log.CloseAndFlush();
 }

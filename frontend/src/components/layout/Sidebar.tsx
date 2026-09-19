@@ -1,15 +1,19 @@
-import { NavLink } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
 import {
-    LayoutDashboard, ArrowLeftRight, Landmark,
+    LayoutDashboard, ArrowLeftRight, Landmark, FileStack, Network,
     Users, ScrollText, ShieldCheck, UserCircle, X,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { getPendingAcknowledgements } from '../../api/internalDocuments';
+import { getAwaitingCount } from '../../api/transfers';
 
 const NAV_MAIN = [
     // FIX: era to: '/' care redirecta la /login; acum merge corect la /dashboard
     { to: '/dashboard',  label: 'Panou principal',        icon: LayoutDashboard, end: true },
     { to: '/transfers',  label: 'Transferuri securizate',  icon: ArrowLeftRight   },
     { to: '/documents',  label: 'Documente normative',     icon: Landmark         },
+    { to: '/internal-documents', label: 'Documente interne', icon: FileStack       },
 ];
 
 const NAV_SEF = [
@@ -18,6 +22,7 @@ const NAV_SEF = [
 
 const NAV_ADMIN = [
     { to: '/users',      label: 'Gestiune utilizatori',    icon: Users            },
+    { to: '/org-units',  label: 'Structura organizatorică', icon: Network         },
     { to: '/admin',      label: 'Administrare & rapoarte',  icon: ShieldCheck      },
 ];
 
@@ -27,6 +32,25 @@ export default function Sidebar({ open, onClose }: { open: boolean; onClose: () 
     // role este string normalizat din AuthContext ('ADMINISTRATOR', 'SEF_DIRECTIE', 'UTILIZATOR')
     const isAdmin = user?.role === 'ADMINISTRATOR';
     const isSef   = isAdmin || user?.role === 'SEF_DIRECTIE';
+
+    // Câte documente interne îmi cer „Luat la cunoștință”. Se reîmprospătează la
+    // fiecare schimbare de pagină: după o confirmare, insigna scade imediat ce
+    // utilizatorul navighează, fără un sondaj continuu al serverului.
+    const location = useLocation();
+    const [badges, setBadges] = useState<Record<string, number>>({});
+    useEffect(() => {
+        if (!user) return;
+        let cancelled = false;
+        Promise.allSettled([getAwaitingCount(), getPendingAcknowledgements()])
+            .then(([transfers, docs]) => {
+                if (cancelled) return;
+                setBadges({
+                    '/transfers':          transfers.status === 'fulfilled' ? transfers.value : 0,
+                    '/internal-documents': docs.status === 'fulfilled' ? docs.value : 0,
+                });
+            });
+        return () => { cancelled = true; };
+    }, [user, location.pathname]);
 
     const cls = ({ isActive }: { isActive: boolean }) =>
         `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
@@ -65,6 +89,16 @@ export default function Sidebar({ open, onClose }: { open: boolean; onClose: () 
                         <NavLink key={item.to} to={item.to} end={item.end} className={cls}>
                             <item.icon size={18} />
                             {item.label}
+                            {(badges[item.to] ?? 0) > 0 && (
+                                <span
+                                    className="ml-auto rounded-full bg-gold-500 px-2 py-0.5 text-[10px] font-bold text-mai-900"
+                                    title={item.to === '/transfers'
+                                        ? `${badges[item.to]} fișiere nedescărcate`
+                                        : `${badges[item.to]} documente de confirmat`}
+                                >
+                                    {badges[item.to]}
+                                </span>
+                            )}
                         </NavLink>
                     ))}
 
@@ -97,14 +131,14 @@ export default function Sidebar({ open, onClose }: { open: boolean; onClose: () 
                     )}
                 </nav>
 
-                {/* Footer — profil + info */}
+                {/* Footer - profil + info */}
                 <div className="border-t border-mai-700 p-4 space-y-1 shrink-0">
                     <NavLink to="/profile" className={cls}>
                         <UserCircle size={18} />
                         Profilul meu
                     </NavLink>
                     <p className="px-3 pt-2 text-[10px] text-mai-500 leading-relaxed">
-                        Acces restricționat — rețea intranet MAI
+                        Acces restricționat - rețea intranet MAI
                     </p>
                 </div>
             </aside>

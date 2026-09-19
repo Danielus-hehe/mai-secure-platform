@@ -15,6 +15,11 @@ namespace MAI.DataAccessLayer
         public DbSet<DocumentVersion> DocumentVersions => Set<DocumentVersion>();
         public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
         public DbSet<UserSession> UserSessions => Set<UserSession>();
+        public DbSet<OrgUnit> OrgUnits => Set<OrgUnit>();
+        public DbSet<OrgLevel> OrgLevels => Set<OrgLevel>();
+        public DbSet<InternalDocument> InternalDocuments => Set<InternalDocument>();
+        public DbSet<InternalDocumentTarget> InternalDocumentTargets => Set<InternalDocumentTarget>();
+        public DbSet<InternalDocumentRecipient> InternalDocumentRecipients => Set<InternalDocumentRecipient>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -24,6 +29,11 @@ namespace MAI.DataAccessLayer
             modelBuilder.ApplyConfiguration(new AuditLogConfiguration());
             modelBuilder.ApplyConfiguration(new UserSessionConfiguration());
             modelBuilder.ApplyConfiguration(new UserConfiguration());
+            modelBuilder.ApplyConfiguration(new OrgUnitConfiguration());
+            modelBuilder.ApplyConfiguration(new OrgLevelConfiguration());
+            modelBuilder.ApplyConfiguration(new InternalDocumentConfiguration());
+            modelBuilder.ApplyConfiguration(new InternalDocumentTargetConfiguration());
+            modelBuilder.ApplyConfiguration(new InternalDocumentRecipientConfiguration());
         }
     }
 }

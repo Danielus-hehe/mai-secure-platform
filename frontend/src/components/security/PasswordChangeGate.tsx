@@ -3,7 +3,7 @@
  *
  * Apare când parola contului a fost stabilită de un administrator: la crearea
  * contului sau după o resetare. Până la schimbare, nicio altă pagină nu se
- * randează — nici poarta cheilor.
+ * randează - nici poarta cheilor.
  *
  * Motivul ține de criptarea end-to-end. Cheile private se încuie cu o cheie
  * derivată din parolă. Dacă utilizatorul și-ar genera cheile cu parola primită

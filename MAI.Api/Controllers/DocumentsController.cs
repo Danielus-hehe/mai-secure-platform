@@ -95,7 +95,7 @@ namespace MAI.Api.Controllers
                     .Where(k => !string.IsNullOrWhiteSpace(k))
                     .ToArray(),
                 currentVersion = d.CurrentVersion,
-                publishedBy    = d.CreatedBy?.FullName ?? d.CreatedBy?.Username ?? "—",
+                publishedBy    = d.CreatedBy?.FullName ?? d.CreatedBy?.Username ?? "-",
                 publishedAt    = d.CreatedAt,
                 versions       = d.Versions
                     .OrderByDescending(v => v.VersionNumber)
@@ -120,7 +120,7 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // POST api/Documents — publică document nou
+        // POST api/Documents - publică document nou
         // ═════════════════════════════════════════════════════════════════════
         [HttpPost]
         [Consumes("multipart/form-data")]
@@ -159,7 +159,7 @@ namespace MAI.Api.Controllers
             {
                 Id             = docId,
                 Title          = title,
-                DocumentNumber = request.Number?.Trim() ?? "—",
+                DocumentNumber = request.Number?.Trim() ?? "-",
                 Category       = request.Category,
                 Keywords       = request.Keywords?.Trim() ?? string.Empty,
                 CurrentVersion = 1,
@@ -202,7 +202,7 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // POST api/Documents/{id}/versions — versiune nouă
+        // POST api/Documents/{id}/versions - versiune nouă
         // ═════════════════════════════════════════════════════════════════════
         [HttpPost("{id:guid}/versions")]
         [Consumes("multipart/form-data")]
@@ -274,7 +274,7 @@ namespace MAI.Api.Controllers
         ///   1. Conținutul se STREAMEAZĂ. Înainte se folosea ReadAllBytesAsync,
         ///      care încarcă tot fișierul în memoria procesului. Cu limita de
         ///      50 MB pe fișier, câteva zeci de cereri simultane la același
-        ///      document — un singur utilizator autentificat cu un for în bash —
+        ///      document - un singur utilizator autentificat cu un for în bash -
         ///      erau suficiente ca să doboare API-ul prin epuizarea memoriei.
         ///
         ///   2. Descărcarea se JURNALIZEAZĂ. Într-un registru de acte normative,
@@ -333,8 +333,8 @@ namespace MAI.Api.Controllers
         /// Diferența nu e cosmetică: versiunea anterioară stoca în coloană calea
         /// ABSOLUTĂ de pe server, iar endpointul de descărcare o dădea direct lui
         /// File.ReadAllBytes. Orice bug viitor care ar fi permis scrierea acelei
-        /// coloane — un import, o migrare, un endpoint de editare adăugat de
-        /// altcineva — s-ar fi transformat instantaneu în citire arbitrară de
+        /// coloane - un import, o migrare, un endpoint de editare adăugat de
+        /// altcineva - s-ar fi transformat instantaneu în citire arbitrară de
         /// fișiere de pe mașină, inclusiv appsettings.json.
         /// </summary>
         private static string BuildStorageKey(Guid documentId, int version, string safeName)
@@ -382,7 +382,7 @@ namespace MAI.Api.Controllers
         ///
         /// Compatibilitate cu rândurile scrise înainte de această schimbare, care
         /// conțin o cale absolută în loc de o cheie. Ele se citesc de pe disc, dar
-        /// numai după verificarea că rămân sub directorul de uploads — o cale
+        /// numai după verificarea că rămân sub directorul de uploads - o cale
         /// absolută dintr-un rând vechi nu devine automat de încredere.
         /// </summary>
         private async Task<Stream> OpenVersionAsync(DocumentVersion version, CancellationToken ct)

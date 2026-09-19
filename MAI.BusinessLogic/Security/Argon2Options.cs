@@ -36,14 +36,14 @@ namespace MAI.BusinessLogic.Security
     /// <summary>
     /// Configurarea hashing-ului de parole.
     ///
-    /// ASYMMETRIC TUNING — nu toate operațiile costă la fel de mult.
+    /// ASYMMETRIC TUNING - nu toate operațiile costă la fel de mult.
     /// Login-ul se întâmplă des și trebuie să reziste la concurență, deci folosește
     /// profilul "Interactive". Crearea de cont, resetarea de parolă și conturile
     /// privilegiate se întâmplă rar, deci pot plăti un cost mai mare ("Sensitive").
     /// Parametrii sunt scriși în însuși string-ul PHC, deci verificarea folosește automat
     /// costul cu care a fost creat hash-ul respectiv.
     ///
-    /// OFFLOADING / BACKPRESSURE — MaxConcurrentHashes limitează câte operații Argon2id
+    /// OFFLOADING / BACKPRESSURE - MaxConcurrentHashes limitează câte operații Argon2id
     /// rulează simultan. Consumul maxim de memorie devine determinist:
     ///     MaxConcurrentHashes x MemorySizeKib al celui mai scump profil.
     /// Peste limită, cererile așteaptă în coadă; dacă depășesc QueueTimeoutSeconds,
@@ -54,7 +54,7 @@ namespace MAI.BusinessLogic.Security
         /// <summary>Profilele disponibile, pe nume. Se pot defini oricâte în appsettings.</summary>
         public Dictionary<string, Argon2Profile> Profiles { get; set; } = new(StringComparer.OrdinalIgnoreCase)
         {
-            // OWASP Password Storage Cheat Sheet — minim recomandat pentru Argon2id.
+            // OWASP Password Storage Cheat Sheet - minim recomandat pentru Argon2id.
             ["Interactive"] = new Argon2Profile
             {
                 MemorySizeKib = 19456, Iterations = 2, DegreeOfParallelism = 1,
@@ -82,7 +82,7 @@ namespace MAI.BusinessLogic.Security
         public int QueueTimeoutSeconds { get; set; } = 10;
 
         /// <summary>
-        /// "Pepper" — secret global păstrat în afara bazei de date.
+        /// "Pepper" - secret global păstrat în afara bazei de date.
         /// ATENȚIE: dacă îl schimbi, toate parolele existente devin invalide.
         /// </summary>
         public string? Pepper { get; set; }

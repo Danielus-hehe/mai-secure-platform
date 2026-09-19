@@ -23,7 +23,7 @@ namespace MAI.Domain.Entities
 
         /// <summary>
         /// Rezultatul operației. Implicit <see cref="AuditResult.Success"/>, ca
-        /// apelantul să fie nevoit să spună explicit doar când ceva a mers prost —
+        /// apelantul să fie nevoit să spună explicit doar când ceva a mers prost -
         /// cazul rar, deci cel care merită să sară în ochi la citirea codului.
         /// </summary>
         public AuditResult Result { get; set; } = AuditResult.Success;

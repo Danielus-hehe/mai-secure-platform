@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# SGDM — imaginea API-ului (.NET 8)
+# SGDM - imaginea API-ului (.NET 8)
 #
 # Două etape:
 #   build   → SDK-ul complet, restaurează pachetele și publică în Release

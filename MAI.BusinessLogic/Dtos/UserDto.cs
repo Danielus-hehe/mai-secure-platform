@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using MAI.Domain.Enums;
 
 namespace MAI.BusinessLogic.Dtos
@@ -9,7 +9,17 @@ namespace MAI.BusinessLogic.Dtos
         public string Username { get; set; } = string.Empty;
         public string Email { get; set; } = string.Empty;
         public string FullName { get; set; } = string.Empty;
+
+        /// <summary>Denumirea subdiviziunii (păstrat sub numele vechi pentru frontend).</summary>
         public string Department { get; set; } = string.Empty;
+
+        public Guid? OrgUnitId { get; set; }
+
+        /// <summary>Subdiviziunea condusă de utilizator, dacă este șef.</summary>
+        public Guid? LedOrgUnitId { get; set; }
+        public string? LedOrgUnitName { get; set; }
+
+        public bool HasEmail { get; set; }
         public UserRole Role { get; set; }
         public bool IsActive { get; set; }
         public bool EmailConfirmed { get; set; }
@@ -27,8 +37,17 @@ namespace MAI.BusinessLogic.Dtos
         public string Email { get; set; } = string.Empty;
         public string Password { get; set; } = string.Empty;
         public string FullName { get; set; } = string.Empty;
-        public string Department { get; set; } = string.Empty;
+
+        /// <summary>Subdiviziunea în care se încadrează contul. Opțională.</summary>
+        public Guid? OrgUnitId { get; set; }
+
         public UserRole Role { get; set; } = UserRole.Utilizator;
+    }
+
+    /// <summary>PATCH /api/Users/{id}/org-unit - null = scoate din structură.</summary>
+    public class ChangeOrgUnitDto
+    {
+        public Guid? OrgUnitId { get; set; }
     }
 
     public class ChangeRoleDto

@@ -45,7 +45,7 @@ namespace MAI.DataAccessLayer.Migrations
             ");
 
             // Coloanele erau 'text' nemărginit, deci pot conține valori mai lungi
-            // decât noile limite — un nume de fișier lung în Details, sau un
+            // decât noile limite - un nume de fișier lung în Details, sau un
             // username inventat, trimis la /login de un client oarecare și
             // consemnat ca atare. ALTER COLUMN ar eșua pe ele, așa că se scurtează
             // înainte; nimic din ce se pierde nu are valoare probatorie.

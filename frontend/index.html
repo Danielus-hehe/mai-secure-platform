@@ -20,12 +20,12 @@
 
     Notă pe 'unsafe-inline' la style-src: Tailwind și componentele injectează
     stiluri inline. Eliminarea lui cere nonce-uri generate la fiecare cerere,
-    adică servirea index.html printr-un server care le poate insera — pas
+    adică servirea index.html printr-un server care le poate insera - pas
     rezonabil la trecerea în producție în spatele nginx, dar care nu poate fi
     făcut dintr-un fișier static.
 
     connect-src include localhost pentru dezvoltare. La deploy se restrânge la
-    originea reală a API-ului — vezi docs/DEPLOYMENT.md.
+    originea reală a API-ului - vezi docs/DEPLOYMENT.md.
   -->
   <meta
           http-equiv="Content-Security-Policy"
@@ -50,7 +50,7 @@
   <!-- Un jurnal de audit sau un nume de fișier nu au ce căuta într-un index public. -->
   <meta name="robots" content="noindex, nofollow" />
 
-  <title>SGDM — Sistem de Gestiune Documente și Transferuri Securizate</title>
+  <title>SGDM - Sistem de Gestiune Documente și Transferuri Securizate</title>
 </head>
 <body>
 <div id="root"></div>

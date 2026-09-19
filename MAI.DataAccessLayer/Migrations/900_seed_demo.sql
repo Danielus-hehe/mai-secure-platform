@@ -1,5 +1,5 @@
 -- ═══════════════════════════════════════════════════════════════════════════
--- 900 — Date demonstrative
+-- 900 - Date demonstrative
 --
 -- DE RULAT DOAR ÎN DEZVOLTARE ȘI LA PREZENTARE. Nu în producție.
 --
@@ -22,7 +22,7 @@
 -- ── Limitare de menționat la prezentare ────────────────────────────────────
 --
 -- Utilizatorii demo NU au chei criptografice: cheile se generează în browser, la
--- prima autentificare, iar serverul nu le poate fabrica — exact asta e garanția
+-- prima autentificare, iar serverul nu le poate fabrica - exact asta e garanția
 -- E2EE. Prin urmare transferurile din seed au IsEncrypted = false și sunt puse
 -- în stări terminale (descărcat, expirat, retras). Nimeni nu va încerca să le
 -- deschidă, iar listele, filtrele, dovada de primire și jurnalul de audit sunt
@@ -54,6 +54,9 @@ DECLARE
     v_id            uuid;
     v_sender        uuid;
     v_recipient     uuid;
+    v_recipient2    uuid;
+    v_tid           uuid;
+    v_unit_ids      uuid[];
     v_created       timestamptz;
     v_status        int;
     v_i             int;
@@ -88,9 +91,13 @@ BEGIN
     DELETE FROM "AuditLogs"
      WHERE "Username" LIKE '%.demo';
 
+    -- Destinatarii demo întâi (FK Restrict pe UserId), apoi transferurile demo;
+    -- rândurile lor din TransferRecipients se șterg în cascadă.
+    DELETE FROM "TransferRecipients"
+     WHERE "UserId" IN (SELECT "Id" FROM "Users" WHERE "Username" LIKE '%.demo');
+
     DELETE FROM "FileTransfers"
-     WHERE "SenderId"    IN (SELECT "Id" FROM "Users" WHERE "Username" LIKE '%.demo')
-        OR "RecipientId" IN (SELECT "Id" FROM "Users" WHERE "Username" LIKE '%.demo');
+     WHERE "SenderId" IN (SELECT "Id" FROM "Users" WHERE "Username" LIKE '%.demo');
 
     DELETE FROM "DocumentVersions"
      WHERE "DocumentId" IN (
@@ -103,7 +110,40 @@ BEGIN
     DELETE FROM "UserSessions"
      WHERE "UserId" IN (SELECT "Id" FROM "Users" WHERE "Username" LIKE '%.demo');
 
+    DELETE FROM "InternalDocumentRecipients"
+     WHERE "UserId" IN (SELECT "Id" FROM "Users" WHERE "Username" LIKE '%.demo');
+
+    DELETE FROM "InternalDocuments"
+     WHERE "AuthorId" IN (SELECT "Id" FROM "Users" WHERE "Username" LIKE '%.demo');
+
+    UPDATE "OrgUnits" SET "HeadUserId" = NULL WHERE "Code" LIKE 'DEMO-%';
+
     DELETE FROM "Users" WHERE "Username" LIKE '%.demo';
+
+    -- De jos în sus: cheia străină ParentId e RESTRICT, verificată pe rând.
+    DELETE FROM "OrgUnits" WHERE "Code" LIKE 'DEMO-%' AND "Type" >= 300;
+    DELETE FROM "OrgUnits" WHERE "Code" LIKE 'DEMO-%' AND "Type" >= 200;
+    DELETE FROM "OrgUnits" WHERE "Code" LIKE 'DEMO-%';
+
+    -- ── 0. Structura organizatorică demo ───────────────────────────────────
+    -- Cinci direcții (Code DEMO-1…5, după care le recunoaște curățenia de mai
+    -- sus), iar prima are o secție și un serviciu, ca distribuția „cu
+    -- subunități” să aibă ce demonstra.
+    v_unit_ids := ARRAY[]::uuid[];
+    FOR v_i IN 1..5 LOOP
+        v_id := gen_random_uuid();
+        INSERT INTO "OrgUnits" ("Id", "Name", "Code", "Type", "ParentId", "IsActive", "CreatedAt")
+        VALUES (v_id, v_directii[v_i] || ' (demo)', 'DEMO-' || v_i, 100, NULL, TRUE, v_now);
+        v_unit_ids := array_append(v_unit_ids, v_id);
+    END LOOP;
+
+    v_id := gen_random_uuid();
+    INSERT INTO "OrgUnits" ("Id", "Name", "Code", "Type", "ParentId", "IsActive", "CreatedAt")
+    VALUES (v_id, 'Sectia investigatii (demo)', 'DEMO-S1', 200, v_unit_ids[1], TRUE, v_now);
+    v_unit_ids := array_append(v_unit_ids, v_id);   -- [6]
+
+    INSERT INTO "OrgUnits" ("Id", "Name", "Code", "Type", "ParentId", "IsActive", "CreatedAt")
+    VALUES (gen_random_uuid(), 'Serviciul analiza (demo)', 'DEMO-V1', 300, v_id, TRUE, v_now);
 
     -- ── 1. Utilizatori ─────────────────────────────────────────────────────
     -- 15 conturi: 1 administrator, 2 șefi de direcție, 12 utilizatori.
@@ -115,7 +155,7 @@ BEGIN
         v_id := gen_random_uuid();
 
         INSERT INTO "Users" (
-            "Id", "Username", "Email", "PasswordHash", "FullName", "Department",
+            "Id", "Username", "Email", "PasswordHash", "FullName", "OrgUnitId",
             "Role", "IsActive", "CreatedAt",
             "FailedLoginAttempts", "TwoFactorEnabled", "TwoFactorChallengeAttempts",
             "LastLoginAt"
@@ -125,7 +165,7 @@ BEGIN
             lower(v_prenume[v_i]) || '.' || lower(v_nume[v_i]) || '@mai.demo',
             v_hash,
             v_prenume[v_i] || ' ' || v_nume[v_i],
-            v_directii[1 + (v_i % 5)],
+            v_unit_ids[1 + (v_i % 5)],
             CASE WHEN v_i = 1 THEN 3 WHEN v_i IN (2,3) THEN 2 ELSE 1 END,
             -- Doi utilizatori dezactivați, ca filtrul „doar activi” din pagina de
             -- utilizatori să aibă ce filtra.
@@ -146,6 +186,15 @@ BEGIN
     v_admin := v_user_ids[1];
     v_sef1  := v_user_ids[2];
     v_sef2  := v_user_ids[3];
+
+    -- Șefii: cei doi șefi de direcție conduc direcțiile lor; un utilizator
+    -- obișnuit conduce secția - șeful e dat de unitatea condusă, nu de rol.
+    UPDATE "OrgUnits" SET "HeadUserId" = v_user_ids[2]
+     WHERE "Id" = (SELECT "OrgUnitId" FROM "Users" WHERE "Id" = v_user_ids[2]);
+    UPDATE "OrgUnits" SET "HeadUserId" = v_user_ids[3]
+     WHERE "Id" = (SELECT "OrgUnitId" FROM "Users" WHERE "Id" = v_user_ids[3]);
+    UPDATE "Users" SET "OrgUnitId" = v_unit_ids[6] WHERE "Id" = v_user_ids[6];
+    UPDATE "OrgUnits" SET "HeadUserId" = v_user_ids[6] WHERE "Id" = v_unit_ids[6];
 
     -- Un cont blocat chiar acum, pentru alerta corespunzătoare.
     UPDATE "Users"
@@ -175,15 +224,16 @@ BEGIN
             ELSE 1
         END;
 
+        v_tid := gen_random_uuid();
+
         INSERT INTO "FileTransfers" (
-            "Id", "SenderId", "RecipientId", "FileName", "StorageKey",
+            "Id", "SenderId", "FileName", "StorageKey",
             "FileSize", "CiphertextSize", "ChecksumSHA256",
-            "Status", "CreatedAt", "DownloadedAt", "ExpiresAt",
-            "IsEncrypted", "RevokedAt", "RevokedReason", "RecipientSignatureValid"
+            "Status", "CreatedAt", "ExpiresAt",
+            "IsEncrypted", "RevokedAt", "RevokedReason", "Category", "AllowForward"
         ) VALUES (
-            gen_random_uuid(),
+            v_tid,
             v_sender,
-            v_recipient,
             v_fisiere[1 + (v_i % 10)],
             -- Gol pentru stările terminale: obiectul nu mai există în depozit,
             -- iar o cheie care arată către nimic ar produce 404 la descărcare.
@@ -195,15 +245,42 @@ BEGIN
             encode(sha256(('demo-' || v_i)::bytea), 'hex'),
             v_status,
             v_created,
-            CASE WHEN v_status = 1 THEN v_created + interval '3 hours' END,
             v_created + interval '7 days',
             false,
             CASE WHEN v_status = 3 THEN v_created + interval '20 minutes' END,
             CASE WHEN v_status = 3 THEN 'Versiune gresita a documentului' END,
-            -- Dovada de primire: majoritatea validă, una invalidă ca să apară în
-            -- alerte și în filtrul ATENȚIE al jurnalului.
-            CASE WHEN v_status = 1 THEN (v_i <> 8) END
+            v_i % 4,          -- toate cele patru categorii
+            v_i % 3 = 0       -- o parte permit redistribuirea
         );
+
+        -- Destinatarul direct. Dovada de primire: majoritatea validă, una
+        -- invalidă ca să apară în alerte și în filtrul ATENȚIE al jurnalului.
+        INSERT INTO "TransferRecipients" (
+            "TransferId", "UserId", "EncryptedKeyForUser", "ForwardedById",
+            "SentAt", "DownloadedAt", "SignatureValid"
+        ) VALUES (
+            v_tid, v_recipient, '', NULL, v_created,
+            CASE WHEN v_status IN (0, 1) AND (v_status = 1 OR v_i % 5 = 0)
+                 THEN v_created + interval '3 hours' END,
+            CASE WHEN v_status IN (0, 1) AND (v_status = 1 OR v_i % 5 = 0)
+                 THEN (v_i <> 8) END
+        );
+
+        -- Al doilea destinatar la fiecare al cincilea transfer: la cele în
+        -- așteptare, primul a confirmat și al doilea nu - exact cazul pe care
+        -- dovada de primire per destinatar trebuie să-l arate.
+        v_recipient2 := v_user_ids[1 + ((v_i + 9) % 15)];
+
+        IF v_i % 5 = 0 AND v_recipient2 NOT IN (v_sender, v_recipient) THEN
+            INSERT INTO "TransferRecipients" (
+                "TransferId", "UserId", "EncryptedKeyForUser", "ForwardedById",
+                "SentAt", "DownloadedAt", "SignatureValid"
+            ) VALUES (
+                v_tid, v_recipient2, '', NULL, v_created,
+                CASE WHEN v_status = 1 THEN v_created + interval '5 hours' END,
+                CASE WHEN v_status = 1 THEN true END
+            );
+        END IF;
     END LOOP;
 
     -- ── 3. Documente cu versiuni ───────────────────────────────────────────
@@ -331,7 +408,7 @@ BEGIN
 
     RAISE NOTICE 'Seed complet: 15 utilizatori, ~40 transferuri, 12 documente, ~410 randuri de audit.';
     RAISE NOTICE 'Toti utilizatorii demo au parola contului "%".', v_sursa_parola;
-    RAISE NOTICE 'Conturi: *.demo — administrator: %', (SELECT "Username" FROM "Users" WHERE "Id" = v_admin);
+    RAISE NOTICE 'Conturi: *.demo - administrator: %', (SELECT "Username" FROM "Users" WHERE "Id" = v_admin);
 
 END $$;
 
@@ -344,8 +421,8 @@ END $$;
 -- Rulează blocul de curățenie de la începutul scriptului, sau pe scurt:
 --
 --   DELETE FROM "AuditLogs" WHERE "Username" LIKE '%.demo';
---   DELETE FROM "FileTransfers" WHERE "SenderId" IN (SELECT "Id" FROM "Users" WHERE "Username" LIKE '%.demo')
---                                  OR "RecipientId" IN (SELECT "Id" FROM "Users" WHERE "Username" LIKE '%.demo');
+--   DELETE FROM "TransferRecipients" WHERE "UserId" IN (SELECT "Id" FROM "Users" WHERE "Username" LIKE '%.demo');
+--   DELETE FROM "FileTransfers" WHERE "SenderId" IN (SELECT "Id" FROM "Users" WHERE "Username" LIKE '%.demo');
 --   DELETE FROM "DocumentVersions" WHERE "DocumentId" IN (SELECT "Id" FROM "Documents" WHERE "CreatedById" IN (SELECT "Id" FROM "Users" WHERE "Username" LIKE '%.demo'));
 --   DELETE FROM "Documents" WHERE "CreatedById" IN (SELECT "Id" FROM "Users" WHERE "Username" LIKE '%.demo');
 --   DELETE FROM "Users" WHERE "Username" LIKE '%.demo';

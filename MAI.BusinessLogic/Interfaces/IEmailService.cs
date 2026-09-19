@@ -44,8 +44,35 @@
             CancellationToken ct = default);
 
         /// <summary>
+        /// Trimite linkul de resetare a parolei, cerut de un administrator.
+        /// </summary>
+        /// <param name="resetLink">URL-ul complet cu tokenul de resetare.</param>
+        /// <param name="validFor">Cât timp e valabil linkul (afișat în email).</param>
+        /// <param name="accountHasKeys">
+        /// Contul are chei E2EE: emailul avertizează că fișierele primite anterior
+        /// nu vor mai putea fi deschise după resetare.
+        /// </param>
+        Task<bool> SendPasswordResetEmailAsync(
+            string toEmail,
+            string toName,
+            string resetLink,
+            TimeSpan validFor,
+            bool accountHasKeys,
+            CancellationToken ct = default);
+
+        /// <summary>
+        /// Confirmă titularului că parola contului a fost schimbată. Dacă nu el a
+        /// făcut-o, acesta e semnalul să anunțe imediat administratorul.
+        /// </summary>
+        Task<bool> SendPasswordChangedEmailAsync(
+            string toEmail,
+            string toName,
+            DateTime changedAtUtc,
+            CancellationToken ct = default);
+
+        /// <summary>
         /// Verifică dacă serviciul este configurat și gata de utilizare.
-        /// Returnează false dacă lipsesc credențialele SMTP — utile pentru
+        /// Returnează false dacă lipsesc credențialele SMTP - utile pentru
         /// health check și pentru a sări notificările în locuri neeceritabile.
         /// </summary>
         bool IsConfigured { get; }

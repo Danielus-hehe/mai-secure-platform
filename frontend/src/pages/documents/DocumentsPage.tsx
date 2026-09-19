@@ -152,7 +152,7 @@ export default function DocumentsPage() {
 
             await api.post(`/Documents/${updateTarget}/versions`, fd);
 
-            toast.info('Versiune nouă publicată — versiunea anterioară a fost arhivată.');
+            toast.info('Versiune nouă publicată - versiunea anterioară a fost arhivată.');
             setUpdateTarget(null); setUpdateFile(null); setChangeNote('');
             fetchDocs();
         } catch (e: unknown) {
@@ -213,7 +213,7 @@ export default function DocumentsPage() {
         <div className="space-y-6">
             <PageHeader
                 title="Documente normative"
-                subtitle="Ordine interne, regulamente și proceduri — cu versionare automată"
+                subtitle="Ordine interne, regulamente și proceduri - cu versionare automată"
                 actions={canPublish && (
                     <Button onClick={() => setPublishOpen(true)}>
                         <FilePlus2 size={16} /> Publicare document

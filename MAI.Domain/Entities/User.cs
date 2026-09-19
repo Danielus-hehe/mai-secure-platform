@@ -14,7 +14,14 @@ namespace MAI.Domain.Entities
         public string PasswordHash { get; set; } = string.Empty;
 
         public string? FullName { get; set; } = string.Empty;
-        public string? Department { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Subdiviziunea din care face parte utilizatorul. Înlocuiește vechiul
+        /// câmp text liber Department (vezi OrgUnit). Null = neîncadrat încă.
+        /// </summary>
+        public Guid? OrgUnitId { get; set; }
+        public OrgUnit? OrgUnit { get; set; }
+
         public UserRole Role { get; set; } = UserRole.Utilizator;
         public bool IsActive { get; set; } = true;
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -42,7 +49,7 @@ namespace MAI.Domain.Entities
         /// <summary>Contul e blocat până la acest moment (UTC). Null = neblocat.</summary>
         public DateTime? LockoutEndsAt { get; set; }
 
-        /// <summary>Ultima încercare eșuată (UTC) — pentru audit și rapoarte.</summary>
+        /// <summary>Ultima încercare eșuată (UTC) - pentru audit și rapoarte.</summary>
         public DateTime? LastFailedLoginAt { get; set; }
 
         /// <summary>Ultimul login reușit (UTC).</summary>
@@ -65,7 +72,7 @@ namespace MAI.Domain.Entities
         //
         // La crearea contului de admin, dacă utilizatorul are email, contul
         // pornește cu EmailConfirmed=false și se trimite un link de activare.
-        // Tokenul e stocat ca SHA-256 (hex) — nu în clar — ca și refresh token-ul.
+        // Tokenul e stocat ca SHA-256 (hex) - nu în clar - ca și refresh token-ul.
         // Login-ul este blocat până la confirmare.
 
         /// <summary>SHA-256 (hex) al tokenului de invitație. Null după activare.</summary>
@@ -91,12 +98,12 @@ namespace MAI.Domain.Entities
         // ── Chei criptografice pentru transferuri E2E ────────────────────────
         // Cheile publice sunt publice prin definiție. Cheile private ajung aici
         // DOAR criptate cu o cheie derivată din parola utilizatorului, în browser.
-        // Serverul nu le poate descuia — asta e tot rostul.
+        // Serverul nu le poate descuia - asta e tot rostul.
 
-        /// <summary>Cheia publică RSA-OAEP (SPKI, base64) — împachetează cheile de fișier.</summary>
+        /// <summary>Cheia publică RSA-OAEP (SPKI, base64) - împachetează cheile de fișier.</summary>
         public string? PublicKeyEncryption { get; set; }
 
-        /// <summary>Cheia publică RSA-PSS (SPKI, base64) — verifică semnăturile.</summary>
+        /// <summary>Cheia publică RSA-PSS (SPKI, base64) - verifică semnăturile.</summary>
         public string? PublicKeySigning { get; set; }
 
         /// <summary>Cheile private, criptate AES-256-GCM cu cheia derivată din parolă.</summary>
@@ -105,7 +112,7 @@ namespace MAI.Domain.Entities
         /// <summary>Salt-ul PBKDF2 folosit la derivarea cheii de împachetare (base64).</summary>
         public string? KeyDerivationSalt { get; set; }
 
-        /// <summary>Numărul de iterații PBKDF2 — stocat ca să putem crește pragul în timp.</summary>
+        /// <summary>Numărul de iterații PBKDF2 - stocat ca să putem crește pragul în timp.</summary>
         public int? KeyDerivationIterations { get; set; }
 
         /// <summary>IV-ul AES-GCM folosit la împachetarea cheilor private (base64).</summary>
@@ -152,7 +159,7 @@ namespace MAI.Domain.Entities
         ///
         /// Provocarea NU este un JWT. Un token opac, cu stare pe server, nu poate
         /// fi confundat de middleware-ul de autentificare cu un access token
-        /// valid — riscul cel mai mare al implementărilor de 2FA făcute cu un JWT
+        /// valid - riscul cel mai mare al implementărilor de 2FA făcute cu un JWT
         /// „pe jumătate autentificat”.
         /// </summary>
         public string? TwoFactorChallengeHash { get; set; }
@@ -165,6 +172,17 @@ namespace MAI.Domain.Entities
         /// </summary>
         public int TwoFactorChallengeAttempts { get; set; }
 
+        // ── Resetarea parolei prin email ─────────────────────────────────────
+        // Separat de InvitationToken: invitația activează un cont nou (și poate
+        // fi retrimisă), resetarea înlocuiește parola unui cont existent. Un
+        // singur câmp pentru amândouă ar face ca retrimiterea invitației să
+        // anuleze o resetare în curs, și invers.
+
+        /// <summary>SHA-256 (hex) al tokenului din linkul de resetare. Niciodată tokenul brut.</summary>
+        public string? PasswordResetToken { get; set; }
+
+        public DateTime? PasswordResetTokenExpiry { get; set; }
+
         // ── Proprietăți calculate ────────────────────────────────────────────
 
         /// <summary>True dacă utilizatorul și-a generat cheile și poate primi fișiere.</summary>
@@ -172,11 +190,33 @@ namespace MAI.Domain.Entities
         public bool HasKeys => !string.IsNullOrEmpty(PublicKeyEncryption);
 
         /// <summary>
-        /// True dacă contul este blocat chiar acum. Calculată, nu stocată —
+        /// True dacă contul este blocat chiar acum. Calculată, nu stocată -
         /// [NotMapped] este obligatoriu, altfel EF caută o coloană "IsLockedOut".
         /// </summary>
         [NotMapped]
         public bool IsLockedOut => LockoutEndsAt.HasValue && LockoutEndsAt.Value > DateTime.UtcNow;
+
+        /// <summary>
+        /// Șterge materialul de chei E2EE. Necesar la orice schimbare de parolă
+        /// făcută FĂRĂ parola veche (resetare de administrator, link de resetare):
+        /// cheile private sunt încuiate cu o cheie derivată din parola veche, deci
+        /// nu mai pot fi descuiate. Lăsate pe loc, contul ar intra în impas -
+        /// descuierea eșuează, iar serverul refuză chei noi fiindcă „există deja”.
+        /// </summary>
+        /// <returns>True dacă existau chei.</returns>
+        public bool ClearEncryptionKeys()
+        {
+            var had = HasKeys;
+            PublicKeyEncryption     = null;
+            PublicKeySigning        = null;
+            EncryptedPrivateBundle  = null;
+            KeyDerivationSalt       = null;
+            KeyDerivationIterations = null;
+            KeyWrapIv               = null;
+            CryptoSuite             = null;
+            KeysCreatedAt           = null;
+            return had;
+        }
 
         /// <summary>Câte coduri de recuperare mai sunt neconsumate.</summary>
         [NotMapped]

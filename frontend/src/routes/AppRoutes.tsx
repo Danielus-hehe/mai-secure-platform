@@ -10,7 +10,7 @@ import PasswordChangeGate from '../components/security/PasswordChangeGate';
  * Încărcare leneșă pe rute.
  *
  * Înainte, toate paginile intrau în bundle-ul inițial. Consecința practică: cine
- * deschidea /login descărca și AdminDashboardPage cu tot Recharts-ul după el —
+ * deschidea /login descărca și AdminDashboardPage cu tot Recharts-ul după el -
  * cel mai mare chunk din aplicație, folosit de un singur rol, pe o singură rută.
  * Pe o rețea de intranet asta se vede mai puțin, dar tot se plătește la fiecare
  * deploy, când cache-ul e invalidat.
@@ -22,10 +22,13 @@ import PasswordChangeGate from '../components/security/PasswordChangeGate';
 import LoginPage from '../pages/auth/LoginPage';
 
 const ConfirmAccountPage = lazy(() => import('../pages/auth/ConfirmAccountPage'));
+const ResetPasswordPage  = lazy(() => import('../pages/auth/ResetPasswordPage'));
 
 const DashboardPage      = lazy(() => import('../pages/dashboard/DashboardPage'));
 const TransfersPage      = lazy(() => import('../pages/transfers/TransfersPage'));
 const DocumentsPage      = lazy(() => import('../pages/documents/DocumentsPage'));
+const InternalDocumentsPage = lazy(() => import('../pages/internal/InternalDocumentsPage'));
+const OrgUnitsPage       = lazy(() => import('../pages/org/OrgUnitsPage'));
 const ProfilePage        = lazy(() => import('../pages/profile/ProfilePage'));
 const AuditPage          = lazy(() => import('../pages/audit/AuditPage'));
 const UsersPage          = lazy(() => import('../pages/users/UsersPage'));
@@ -38,8 +41,10 @@ export function AppRoutes() {
         <Routes>
             <Route path="/"      element={<Navigate to="/login" replace />} />
             <Route path="/login" element={<LoginPage />} />
-            {/* Activare cont — publică, nu necesită autentificare */}
+            {/* Activare cont - publică, nu necesită autentificare */}
             <Route path="/confirm-account" element={<RouteBoundary><ConfirmAccountPage /></RouteBoundary>} />
+            {/* Resetare parolă din linkul trimis de administrator - publică */}
+            <Route path="/reset-password" element={<RouteBoundary><ResetPasswordPage /></RouteBoundary>} />
 
             {/* Toate rutele protejate învelite în AppLayout (sidebar + topbar) */}
             <Route element={<ProtectedRoute />}>
@@ -73,6 +78,7 @@ export function AppRoutes() {
                                 <Route path="/dashboard" element={<DashboardPage />} />
                                 <Route path="/transfers" element={<TransfersPage />} />
                                 <Route path="/documents" element={<DocumentsPage />} />
+                                <Route path="/internal-documents" element={<InternalDocumentsPage />} />
                                 <Route path="/profile"   element={<ProfilePage />} />
 
                                 {/* Supervizare: SefDirectie(2) + Administrator(3) */}
@@ -84,6 +90,7 @@ export function AppRoutes() {
                                 <Route element={<ProtectedRoute allowedRoles={[3]} />}>
                                     <Route path="/users" element={<UsersPage />} />
                                     <Route path="/admin" element={<AdminDashboardPage />} />
+                                    <Route path="/org-units" element={<OrgUnitsPage />} />
                                 </Route>
 
                             </Route>

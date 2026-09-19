@@ -1,7 +1,7 @@
 namespace MAI.Domain.Enums
 {
     /// <summary>
-    /// Tipul operației consemnate. Persistat ca int — membrii nu se reordonează
+    /// Tipul operației consemnate. Persistat ca int - membrii nu se reordonează
     /// și nu se șterg; unul scos din uz rămâne aici, marcat, ca rândurile vechi
     /// să rămână interpretabile.
     /// </summary>
@@ -15,7 +15,10 @@ namespace MAI.Domain.Enums
         DocumentNewVersion = 5,
         UserCreated = 6,
         UserUpdated = 7,
+
+        /// <summary>Transfer șters (logic) de expeditor sau de administrator.</summary>
         FileDeleted = 8,
+
         TransferExpired = 9,
 
         /// <summary>Expeditorul a retras un transfer înainte de descărcare.</summary>
@@ -23,5 +26,29 @@ namespace MAI.Domain.Enums
 
         /// <summary>O sesiune a fost încheiată de la distanță, din pagina de sesiuni.</summary>
         SessionRevoked = 11,
+
+        /// <summary>
+        /// Un transfer a fost redirecționat către destinatari noi.
+        ///
+        /// Până acum forward-ul se consemna ca FileUpload, deci în jurnal nu se
+        /// putea separa „a trimis un fișier nou” de „a dat mai departe un fișier
+        /// primit” - exact întrebarea pe care o pune un control intern.
+        /// </summary>
+        TransferForwarded = 12,
+
+        /// <summary>Administratorul a trimis un link de resetare a parolei.</summary>
+        PasswordResetRequested = 13,
+
+        /// <summary>Utilizatorul și-a stabilit parola nouă din linkul de resetare.</summary>
+        PasswordResetCompleted = 14,
+
+        /// <summary>Structura organizatorică s-a schimbat (subdiviziune, șef, încadrare).</summary>
+        OrgStructureChanged = 15,
+
+        InternalDocumentCreated = 16,
+        InternalDocumentPublished = 17,
+        InternalDocumentOpened = 18,
+        InternalDocumentAcknowledged = 19,
+        InternalDocumentRepealed = 20,
     }
 }

@@ -61,7 +61,7 @@
 
         /// <summary>
         /// Cheia AES-256 (base64, 32 de octeti) cu care se cifreaza secretele TOTP
-        /// in baza de date. NU in appsettings.json — din variabila de mediu
+        /// in baza de date. NU in appsettings.json - din variabila de mediu
         /// MAI_TWOFACTOR_KEY.
         /// </summary>
         public string? EncryptionKey { get; set; }

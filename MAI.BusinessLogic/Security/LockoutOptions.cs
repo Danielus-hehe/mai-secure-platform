@@ -24,7 +24,7 @@
 
         /// <summary>
         /// Fereastra în care se numără eșecurile. Dacă ultima greșeală e mai veche de
-        /// atât, contorul repornește de la zero — un utilizator care greșește parola
+        /// atât, contorul repornește de la zero - un utilizator care greșește parola
         /// o dată pe lună nu trebuie să acumuleze blocări.
         /// </summary>
         public double AttemptWindowMinutes { get; set; } = 30;

@@ -4,7 +4,7 @@
  * Ține cheile private DESCUIATE, dar exclusiv în memoria filei de browser:
  * niciun localStorage, niciun sessionStorage, niciun cookie. La refresh, la
  * închiderea tabului sau la delogare dispar și trebuie descuiate din nou cu
- * parola. Asta e intenționat — o cheie privată persistată în localStorage ar fi
+ * parola. Asta e intenționat - o cheie privată persistată în localStorage ar fi
  * citibilă de orice XSS și ar anula garanția end-to-end.
  *
  * Cheile sunt importate în WebCrypto ca NON-EXTRACTABLE: nici măcar codul
@@ -34,11 +34,11 @@ import {
 } from '../crypto/E2ee';
 
 /**
- * loading  — se interoghează serverul
- * absent   — contul nu are încă chei; trebuie generate
- * locked   — cheile există pe server, dar nu sunt descuiate în fila asta
- * unlocked — gata de lucru
- * error    — serverul nu a răspuns
+ * loading  - se interoghează serverul
+ * absent   - contul nu are încă chei; trebuie generate
+ * locked   - cheile există pe server, dar nu sunt descuiate în fila asta
+ * unlocked - gata de lucru
+ * error    - serverul nu a răspuns
  */
 export type KeysStatus = 'loading' | 'absent' | 'locked' | 'unlocked' | 'error';
 
@@ -54,7 +54,7 @@ interface KeysContextValue {
     fingerprint: string;
     /** Cheile private descuiate. Null cât timp status !== 'unlocked'. */
     keys: UnlockedKeys | null;
-    /** Propria cheie publică de criptare — necesară ca să-ți poți deschide fișierele trimise. */
+    /** Propria cheie publică de criptare - necesară ca să-ți poți deschide fișierele trimise. */
     myEncryptionPublicKey: CryptoKey | null;
     error: string | null;
 
@@ -135,7 +135,7 @@ export function KeysProvider({ children }: { children: ReactNode }) {
 
         // Parola se verifică ÎNTÂI pe server. Dacă utilizatorul tastează greșit,
         // cheile s-ar încuia cu o parolă inexistentă și ar deveni imposibil de
-        // descuiat la următoarea autentificare — pierdere permanentă și tăcută.
+        // descuiat la următoarea autentificare - pierdere permanentă și tăcută.
         const { data: check } = await api.post<{ valid: boolean }>(
             '/Keys/verify-password',
             { password }

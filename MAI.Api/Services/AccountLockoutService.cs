@@ -12,7 +12,7 @@ namespace MAI.Api.Services
     ///
     /// Nu salvează în baza de date și nu scrie în audit: modifică doar entitatea.
     /// Apelantul decide când face SaveChanges și ce text de audit potrivește
-    /// contextului — <see cref="LockoutOutcome"/> îi dă tot ce-i trebuie.
+    /// contextului - <see cref="LockoutOutcome"/> îi dă tot ce-i trebuie.
     /// </summary>
     public interface IAccountLockoutService
     {
@@ -21,7 +21,7 @@ namespace MAI.Api.Services
 
         /// <summary>
         /// Șterge contorul după o parolă corectă. Se apelează imediat ce parola e
-        /// validată, chiar dacă mai urmează pasul doi — altfel un utilizator cu 2FA
+        /// validată, chiar dacă mai urmează pasul doi - altfel un utilizator cu 2FA
         /// activ ar rămâne cu eșecuri vechi neșterse și s-ar bloca aparent din senin
         /// la o greșeală ulterioară.
         /// </summary>

@@ -2,7 +2,7 @@ import api from './client';
 import { tokenStorage } from './tokenStorage';
 
 /**
- * Client pentru /api/Sessions — sesiunile proprii și revocarea lor de la distanță.
+ * Client pentru /api/Sessions - sesiunile proprii și revocarea lor de la distanță.
  *
  * Toate apelurile trimit refresh token-ul curent, ca serverul să poată marca
  * „acest dispozitiv” și ca revocarea în masă să nu deconecteze chiar sesiunea

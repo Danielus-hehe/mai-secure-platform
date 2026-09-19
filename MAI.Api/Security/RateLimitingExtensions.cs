@@ -8,10 +8,10 @@ namespace MAI.Api.Security
     /// <summary>Politici de rate limiting. Numele se folosesc în [EnableRateLimiting("...")].</summary>
     public static class RateLimitPolicies
     {
-        /// <summary>Login — cea mai strictă. Apără împotriva brute force și credential stuffing.</summary>
+        /// <summary>Login - cea mai strictă. Apără împotriva brute force și credential stuffing.</summary>
         public const string Login = "login";
 
-        /// <summary>Refresh token — mai permisivă, dar tot limitată.</summary>
+        /// <summary>Refresh token - mai permisivă, dar tot limitată.</summary>
         public const string Refresh = "refresh";
 
         /// <summary>Operații de scriere pe parolă (change-password, reset-password).</summary>
@@ -35,7 +35,7 @@ namespace MAI.Api.Security
         /// <summary>
         /// Dacă aplicația rulează în spatele unui reverse proxy (nginx, IIS ARR, Traefik),
         /// pune true și configurează KnownProxies. Altfel RemoteIpAddress este IP-ul
-        /// proxy-ului și TOȚI utilizatorii ajung în aceeași găleată de rate limit —
+        /// proxy-ului și TOȚI utilizatorii ajung în aceeași găleată de rate limit -
         /// primul care greșește parola îi blochează pe toți.
         /// </summary>
         public bool BehindReverseProxy { get; set; } = false;

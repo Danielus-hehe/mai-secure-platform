@@ -8,7 +8,7 @@
  */
 
 import api from './client';
-import type { TransferCryptoEnvelope } from '../crypto/E2ee';
+import type { TransferCryptoEnvelope, WrappedKeyForUser } from '../crypto/E2ee';
 
 // ── Tipuri ───────────────────────────────────────────────────────────────────
 
@@ -40,6 +40,25 @@ export const CATEGORY_LABELS: Record<TransferCategory, string> = {
     [TransferCategory.Normal]:    'Obișnuit',
 };
 
+/** Un destinatar al transferului, cu dovada lui de primire. */
+export interface TransferRecipientItem {
+    userId: string;
+    name: string;
+    department: string;
+    sentAt: string;
+    /** Null = destinatar direct, ales de expeditor la trimitere. */
+    forwardedById: string | null;
+    forwardedByName: string | null;
+    /**
+     * False când utilizatorul curent nu are dreptul să vadă confirmarea
+     * acestui rând (e doar un alt destinatar). Atunci downloadedAt și
+     * signatureValid vin null - „necunoscut”, nu „nedescărcat”.
+     */
+    receiptVisible: boolean;
+    downloadedAt: string | null;
+    signatureValid: boolean | null;
+}
+
 export interface TransferListItem {
     id: string;
     fileName: string;
@@ -49,21 +68,30 @@ export interface TransferListItem {
     senderId: string;
     senderName: string;
     senderDepartment: string;
-    recipientId: string;
-    recipientName: string;
-    recipientDepartment: string;
     status: TransferStatus;
     createdAt: string;
-    downloadedAt: string | null;
-    signatureValid: boolean | null;
+    expiresAt: string | null;
     revokedAt: string | null;
     revokedReason: string | null;
-    canRevoke: boolean;
-    expiresAt: string | null;
     category: TransferCategory;
+    allowForward: boolean;
     isMine: boolean;
     isEncrypted: boolean;
     cryptoSuite: string | null;
+
+    recipients: TransferRecipientItem[];
+    recipientCount: number;
+    /** Doar pentru expeditor; null pentru destinatari. */
+    downloadedCount: number | null;
+    isRecipient: boolean;
+    myDownloadedAt: string | null;
+    mySignatureValid: boolean | null;
+
+    // Acțiuni permise, calculate de server.
+    canDownload: boolean;
+    canForward: boolean;
+    canRevoke: boolean;
+    canDelete: boolean;
 }
 
 export interface Recipient {
@@ -75,15 +103,18 @@ export interface Recipient {
     publicKeySigning: string;
 }
 
-/** Rezultat al căutării pentru dialogul de forward (autocomplete). */
-export interface UserSearchResult {
-    id: string;
-    username: string;
-    fullName: string;
-    department: string;
-    /** Cheia publică RSA-OAEP (SPKI, base64) — necesară pentru împachetarea DEK în browser. */
-    publicKeyEncryption: string;
+export interface TransferPolicy {
+    defaultExpiryDays: number;
+    maxExpiryDays: number;
+    maxRecipients: number;
 }
+
+/** Valorile folosite până răspunde serverul; identice cu cele implicite din API. */
+export const DEFAULT_TRANSFER_POLICY: TransferPolicy = {
+    defaultExpiryDays: 7,
+    maxExpiryDays: 30,
+    maxRecipients: 20,
+};
 
 export interface TransferEnvelopeResponse {
     id: string;
@@ -101,12 +132,18 @@ export interface TransferEnvelopeResponse {
     senderPublicKeySigning: string | null;
     downloadUrl: string | null;
     expiresAt: string | null;
+    /** True dacă utilizatorul curent e destinatar (nu expeditor). */
+    isRecipient: boolean;
+    alreadyConfirmed: boolean;
 }
 
 export interface ListTransfersParams {
     search?: string;
     status?: string;
     direction?: 'sent' | 'received' | '';
+    category?: TransferCategory | '';
+    /** Cealaltă parte a transferului lucrează în subdiviziune (cu subunități). */
+    orgUnitId?: string;
     sortBy?: string;
     sortDir?: 'asc' | 'desc';
     page?: number;
@@ -114,21 +151,15 @@ export interface ListTransfersParams {
 }
 
 export interface UploadInput {
-    recipientId: string;
+    recipientKeys: WrappedKeyForUser[];
     fileName: string;
     plaintextSize: number;
     ciphertext: Blob;
     envelope: TransferCryptoEnvelope;
     category: TransferCategory;
+    allowForward: boolean;
+    /** ISO 8601 în UTC (cu „Z”). */
     expiresAt?: string;
-}
-
-/** Un destinatar la care se redirecționează transferul. */
-export interface ForwardRecipientInput {
-    /** UUID al destinatarului. */
-    userId: string;
-    /** DEK-ul transferului împachetat cu cheia publică RSA-OAEP a lui userId. */
-    encryptedKeyForUser: string;
 }
 
 // ── Operații ─────────────────────────────────────────────────────────────────
@@ -142,6 +173,8 @@ export async function listTransfers(
             search:    params.search    || undefined,
             status:    params.status    || undefined,
             direction: params.direction || undefined,
+            category:  params.category === '' || params.category === undefined ? undefined : params.category,
+            orgUnitId: params.orgUnitId || undefined,
             sortBy:    params.sortBy    ?? 'createdAt',
             sortDir:   params.sortDir   ?? 'desc',
             page:      params.page      ?? 1,
@@ -152,45 +185,46 @@ export async function listTransfers(
     return data;
 }
 
+/** Câte fișiere primite nu am descărcat încă. */
+export async function getAwaitingCount(): Promise<number> {
+    const { data } = await api.get<{ count: number }>('/Transfers/awaiting-count');
+    return data.count;
+}
+
+export async function getTransferPolicy(): Promise<TransferPolicy> {
+    const { data } = await api.get<TransferPolicy>('/Transfers/policy');
+    return data;
+}
+
 /** Doar utilizatorii care și-au generat cheile pot primi fișiere criptate. */
 export async function listRecipients(): Promise<Recipient[]> {
     const { data } = await api.get<Recipient[]>('/Keys/recipients');
     return data;
 }
 
-/**
- * Caută utilizatori activi cu chei generate, pentru autocomplete-ul de forward.
- * Returnează maxim 10 rezultate; include cheia publică de criptare.
- */
-export async function searchUsers(
-    q: string,
-    signal?: AbortSignal
-): Promise<UserSearchResult[]> {
-    if (!q.trim()) return [];
-    const { data } = await api.get<UserSearchResult[]>('/Users/search', {
-        params: { q: q.trim() },
-        signal,
-    });
-    return data;
-}
-
 export async function uploadTransfer(
     input: UploadInput,
     onProgress?: (percent: number) => void
-): Promise<{ id: string; sha256: string; expiresAt: string }> {
+): Promise<{ id: string; sha256: string; expiresAt: string; message: string }> {
     const form = new FormData();
     form.append('File', input.ciphertext, 'ciphertext.enc');
-    form.append('RecipientId', input.recipientId);
     form.append('FileName', input.fileName);
     form.append('PlaintextSize', String(input.plaintextSize));
     form.append('Iv', input.envelope.iv);
-    form.append('EncryptedKeyForRecipient', input.envelope.encryptedKeyForRecipient);
     form.append('EncryptedKeyForSender', input.envelope.encryptedKeyForSender);
     form.append('Signature', input.envelope.signature);
     form.append('CiphertextSha256', input.envelope.ciphertextSha256);
     form.append('Suite', input.envelope.suite);
     form.append('Category', String(input.category));
+    form.append('AllowForward', String(input.allowForward));
     if (input.expiresAt) form.append('ExpiresAt', input.expiresAt);
+
+    // Lista de destinatari în formatul pe care îl leagă model binding-ul
+    // ASP.NET: Recipients[0].UserId, Recipients[0].EncryptedKeyForUser, …
+    input.recipientKeys.forEach((r, i) => {
+        form.append(`Recipients[${i}].UserId`, r.userId);
+        form.append(`Recipients[${i}].EncryptedKeyForUser`, r.encryptedKeyForUser);
+    });
 
     const { data } = await api.post('/Transfers', form, {
         timeout: 300_000,
@@ -206,12 +240,11 @@ export async function uploadTransfer(
  * Redirecționează un transfer către destinatari suplimentari.
  *
  * `recipients` conține, pentru fiecare destinatar nou, DEK-ul deja împachetat
- * cu cheia lui publică RSA-OAEP — browserul face împachetarea, serverul nu
- * participă la niciun pas criptografic.
+ * cu cheia lui publică RSA-OAEP (vezi rewrapFileKey în E2ee.ts).
  */
 export async function forwardTransfer(
     id: string,
-    recipients: ForwardRecipientInput[]
+    recipients: WrappedKeyForUser[]
 ): Promise<{ message: string; recipients: { id: string; name: string }[] }> {
     const { data } = await api.post(`/Transfers/${id}/forward`, { recipients });
     return data;
@@ -255,6 +288,8 @@ export async function revokeTransfer(id: string, reason?: string): Promise<{ mes
     return data;
 }
 
-export async function deleteTransfer(id: string): Promise<void> {
-    await api.delete(`/Transfers/${id}`);
+/** Ștergere logică: dovezile de primire rămân în bază și în jurnal. */
+export async function deleteTransfer(id: string): Promise<{ message: string }> {
+    const { data } = await api.delete<{ message: string }>(`/Transfers/${id}`);
+    return data;
 }

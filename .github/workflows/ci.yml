@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# SGDM — integrare continuă
+# SGDM - integrare continuă
 #
 # La fiecare push și pull request:
 #   backend  → verifică perechile de migrări EF, dotnet build, dotnet test
@@ -91,7 +91,7 @@ jobs:
           --results-directory TestResults
 
       # Rezultatele rămân descărcabile din pagina rulării, inclusiv când testele
-      # pică — exact atunci sunt utile.
+      # pică - exact atunci sunt utile.
       - name: Publică rezultatele testelor
         if: always()
         uses: actions/upload-artifact@v4

@@ -6,7 +6,7 @@ import api from '../../api/client';
  * Alertele de securitate de pe panoul de administrare.
  *
  * Rostul: jurnalul de audit are mii de rânduri, iar nimeni nu le citește. Aici
- * apar doar tiparele care merită atenție acum — conturi forțate, autentificări
+ * apar doar tiparele care merită atenție acum - conturi forțate, autentificări
  * cu cod de recuperare, semnături invalide, conturi privilegiate fără 2FA.
  *
  * Toate interogările din spate se sprijină pe indexul Action+Result+Timestamp

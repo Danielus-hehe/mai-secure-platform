@@ -140,7 +140,7 @@ export default function LoginPage() {
                             <div key={t} className="flex items-start gap-3">
                                 <ShieldCheck size={18} className="text-gold-400 mt-0.5 shrink-0" />
                                 <p className="text-sm text-mai-100">
-                                    <span className="font-semibold text-white">{t}</span> — {d}
+                                    <span className="font-semibold text-white">{t}</span> - {d}
                                 </p>
                             </div>
                         ))}

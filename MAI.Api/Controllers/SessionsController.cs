@@ -50,7 +50,7 @@ namespace MAI.Api.Controllers
         ///
         /// Clientul poate trimite refresh token-ul curent ca parametru, pentru ca
         /// interfața să marcheze „acest dispozitiv”. Se trimite tokenul, nu
-        /// id-ul sesiunii, pentru că frontend-ul nu îl cunoaște pe al doilea — și
+        /// id-ul sesiunii, pentru că frontend-ul nu îl cunoaște pe al doilea - și
         /// nici nu are de ce: ar fi un identificator în plus de ținut minte.
         /// </summary>
         [HttpGet]
@@ -123,7 +123,7 @@ namespace MAI.Api.Controllers
 
             await _context.SaveChangesAsync(ct);
 
-            // Tokenul de acces al sesiunii închise rămâne valid până expiră —
+            // Tokenul de acces al sesiunii închise rămâne valid până expiră -
             // cel mult cincisprezece minute. Invalidarea lui imediată ar cere o
             // listă de revocare consultată la fiecare cerere, adică o interogare
             // în plus pe tot API-ul ca să acoperi un sfert de oră.

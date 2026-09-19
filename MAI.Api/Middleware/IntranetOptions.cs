@@ -18,7 +18,7 @@ namespace MAI.Api.Middleware
 
         /// <summary>
         /// Plajele CIDR carora li se permite accesul. Implicit: spatiul privat
-        /// RFC 1918 plus loopback — exact ce inseamna "intranet".
+        /// RFC 1918 plus loopback - exact ce inseamna "intranet".
         /// </summary>
         public string[] AllowedNetworks { get; set; } =
         [
@@ -39,7 +39,7 @@ namespace MAI.Api.Middleware
         /// <summary>
         /// Daca aplicatia sta in spatele unui reverse proxy, IP-ul real vine din
         /// X-Forwarded-For, nu din RemoteIpAddress. Middleware-ul se bazeaza pe
-        /// UseForwardedHeaders, care trebuie sa ruleze INAINTEA lui — altfel
+        /// UseForwardedHeaders, care trebuie sa ruleze INAINTEA lui - altfel
         /// filtreaza dupa IP-ul proxy-ului si lasa sa treaca tot internetul.
         /// </summary>
         public bool TrustForwardedHeaders { get; set; } = false;

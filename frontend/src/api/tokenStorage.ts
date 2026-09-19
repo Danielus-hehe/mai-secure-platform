@@ -1,7 +1,7 @@
 ﻿/**
  * Sursa unica de adevar pentru tokenuri si utilizatorul curent.
  *
- * Inainte, `client.ts` citea `mai_access_token` iar `AuthContext` scria in `user` —
+ * Inainte, `client.ts` citea `mai_access_token` iar `AuthContext` scria in `user` -
  * doua chei diferite, deci cererile nu purtau header-ul Authorization. Aici totul
  * trece printr-un singur modul.
  *

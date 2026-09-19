@@ -15,10 +15,10 @@ namespace MAI.DataAccessLayer.Configurations
 
             // ── Relații ──────────────────────────────────────────────────────
 
-            // Dacă transferul se șterge fizic (DELETE pe FileTransfers), toate
-            // rândurile de destinatari se șterg în cascadă. Logica de business
-            // șterge rar transferuri — de obicei revocă — dar consitența
-            // referențială trebuie garantată și la DELETE direct în baza de date.
+            // Cascada rămâne doar pentru consistență referențială la un DELETE
+            // manual în baza de date. Aplicația nu mai șterge fizic transferuri:
+            // DELETE /api/Transfers/{id} face ștergere logică, tocmai ca rândurile
+            // de aici - cu dovezile de primire - să nu dispară.
             builder.HasOne(r => r.Transfer)
                 .WithMany(t => t.Recipients)
                 .HasForeignKey(r => r.TransferId)
@@ -30,8 +30,8 @@ namespace MAI.DataAccessLayer.Configurations
                 .OnDelete(DeleteBehavior.Restrict);
 
             // ForwardedById e opțional. Dacă utilizatorul este șters, câmpul
-            // devine null (SetNull) — nu vrem să pierdem rândul destinatarului
-            // doar pentru că expeditorul forward-ului nu mai există.
+            // devine null (SetNull) - nu vrem să pierdem rândul destinatarului
+            // doar pentru că autorul forward-ului nu mai există.
             builder.HasOne(r => r.ForwardedBy)
                 .WithMany()
                 .HasForeignKey(r => r.ForwardedById)
@@ -46,14 +46,15 @@ namespace MAI.DataAccessLayer.Configurations
                 .HasMaxLength(600);
 
             // ── Indecși ──────────────────────────────────────────────────────
-            // GetAll caută „există vreun rând cu UserId == currentUser?" pentru
-            // fiecare pagină de transferuri. Fără index pe UserId, interogarea
-            // face sequential scan pe toată tabela.
-            builder.HasIndex(r => r.UserId)
-                .HasDatabaseName("IX_TransferRecipients_UserId");
+            // Lista de transferuri și contorul „te așteaptă” de pe pagina
+            // principală caută „rândurile lui X, nedescărcate încă”. Indexul
+            // compus acoperă ambele interogări; cel vechi, doar pe UserId, e
+            // prefixul lui și ar fi fost redundant.
+            builder.HasIndex(r => new { r.UserId, r.DownloadedAt })
+                .HasDatabaseName("IX_TransferRecipients_UserId_DownloadedAt");
 
-            // Index pe TransferId: rapid la ștergerea în cascadă și la listarea
-            // destinatarilor unui transfer (de ex. în dialogul de forward).
+            // Index pe TransferId: rapid la listarea destinatarilor unui transfer
+            // (dovada de primire din listă, dialogul de forward).
             builder.HasIndex(r => r.TransferId)
                 .HasDatabaseName("IX_TransferRecipients_TransferId");
         }

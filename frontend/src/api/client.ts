@@ -15,7 +15,7 @@ export const api: AxiosInstance = axios.create({
     timeout: 30_000,
 });
 
-/** Client separat, fara interceptoare — altfel refresh-ul s-ar apela recursiv pe el insusi. */
+/** Client separat, fara interceptoare - altfel refresh-ul s-ar apela recursiv pe el insusi. */
 const rawClient: AxiosInstance = axios.create({ baseURL: BASE_URL, timeout: 30_000 });
 
 interface RetriableConfig extends InternalAxiosRequestConfig {
@@ -115,7 +115,7 @@ api.interceptors.response.use(
         const path = config.url ?? '';
         if (AUTH_FREE_PATHS.some((p) => path.includes(p))) return Promise.reject(error);
 
-        // O singura reincercare per cerere — altfel intram in bucla infinita.
+        // O singura reincercare per cerere - altfel intram in bucla infinita.
         if (config._retried) {
             handleSessionExpired();
             return Promise.reject(error);

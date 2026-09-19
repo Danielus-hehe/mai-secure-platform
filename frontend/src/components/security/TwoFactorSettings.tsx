@@ -30,7 +30,7 @@ import {
  *   <TwoFactorSettings />
  *
  * Complet autonom: isi citeste singur starea, nu primeste props si nu depinde de
- * restul paginii. 2FA este OPTIONAL — pana cand utilizatorul apasa butonul, nu se
+ * restul paginii. 2FA este OPTIONAL - pana cand utilizatorul apasa butonul, nu se
  * schimba nimic la contul lui.
  *
  * Codul QR se deseneaza cu `qrcode.react`:
@@ -311,7 +311,7 @@ export default function TwoFactorSettings() {
 
                     <p className="text-xs text-mai-500 bg-mai-50 rounded-lg p-3">
                         Activarea vă deconectează de pe celelalte dispozitive. Nimic nu se schimbă
-                        până nu introduceți un cod valid — dacă renunțați acum, contul rămâne exact
+                        până nu introduceți un cod valid - dacă renunțați acum, contul rămâne exact
                         cum era.
                     </p>
 
@@ -368,7 +368,7 @@ export default function TwoFactorSettings() {
                                     ? new Date(status.enrolledAt).toLocaleString('ro-RO', {
                                         dateStyle: 'short', timeStyle: 'short',
                                     })
-                                    : '—'}
+                                    : '-'}
                             </span>
                         </div>
                         <div className="flex items-center justify-between">
@@ -409,7 +409,7 @@ export default function TwoFactorSettings() {
                     <p className="text-sm text-mai-600 dark:text-mai-300">
                         Sunt necesare <strong>și parola, și un cod valid</strong>. Dacă ar fi
                         suficientă parola, cineva care v-o află ar putea pur și simplu să oprească
-                        al doilea factor — iar 2FA nu ar mai apăra de nimic.
+                        al doilea factor - iar 2FA nu ar mai apăra de nimic.
                     </p>
 
                     <Input

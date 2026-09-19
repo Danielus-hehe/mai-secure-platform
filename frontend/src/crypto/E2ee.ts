@@ -11,31 +11,36 @@
  *
  *   2. Cheile private se exporta PKCS8, se pun intr-un pachet JSON si se
  *      cripteaza cu AES-256-GCM folosind o cheie derivata din parola
- *      (PBKDF2-SHA256, 600.000 iteratii — pragul OWASP 2023). Serverul
+ *      (PBKDF2-SHA256, 600.000 iteratii - pragul OWASP 2023). Serverul
  *      primeste doar blobul criptat; nu poate scoate cheile din el.
  *
  *   3. La trimiterea unui fisier:
  *      - se genereaza o cheie AES-256-GCM aleatorie (DEK), unica pe transfer
- *      - fisierul se cripteaza cu DEK
- *      - DEK se impacheteaza de doua ori: cu cheia publica a destinatarului
+ *      - fisierul se cripteaza O SINGURA DATA cu DEK, oricati destinatari ar fi
+ *      - DEK se impacheteaza separat cu cheia publica a fiecarui destinatar
  *        SI cu a expeditorului (altfel expeditorul nu si-ar mai putea citi
  *        propriile fisiere trimise)
  *      - SHA-256 al continutului in clar se semneaza cu RSA-PSS
+ *
+ *   3b. La redirectionare (forward): DEK se despacheteaza cu cheia privata
+ *      proprie si se re-impacheteaza pentru destinatarii noi. Cifrotextul si
+ *      semnatura raman neatinse - destinatarul nou verifica semnatura
+ *      EXPEDITORULUI ORIGINAL, nu a celui care a facut forward.
  *
  *   4. La primire: se despacheteaza DEK cu cheia privata proprie, se decripteaza,
  *      se recalculeaza SHA-256 si se verifica semnatura.
  *
  * Cele trei proprietati obtinute, cu numele lor:
- *   - CONFIDENTIALITATE — AES-256-GCM; serverul stocheaza doar cifrotext
- *   - INTEGRITATE       — tag-ul de autentificare GCM; orice bit modificat
+ *   - CONFIDENTIALITATE - AES-256-GCM; serverul stocheaza doar cifrotext
+ *   - INTEGRITATE       - tag-ul de autentificare GCM; orice bit modificat
  *                         face decriptarea sa esueze, nu sa produca gunoi
- *   - AUTENTICITATE si NON-REPUDIERE — semnatura RSA-PSS; dovedeste cine a
+ *   - AUTENTICITATE si NON-REPUDIERE - semnatura RSA-PSS; dovedeste cine a
  *                         trimis si ca nu s-a schimbat nimic pe drum
  *
  * LIMITARE, de mentionat in raport: la login parola ajunge la server (unde e
  * verificata cu Argon2id). Un server compromis ar putea, teoretic, sa derive
  * cheia de impachetare din ea in acel moment. Varianta completa foloseste
- * derivari separate — un authHash trimis la server si o cheie de impachetare
+ * derivari separate - un authHash trimis la server si o cheie de impachetare
  * care nu pleaca niciodata din browser. Vezi sectiunea de upgrade din README.
  */
 
@@ -44,7 +49,7 @@
 const PBKDF2_ITERATIONS = 600_000;   // OWASP 2023 pentru PBKDF2-HMAC-SHA256
 const RSA_MODULUS_BITS = 3072;       // ~128 biti de securitate simetrica
 const AES_KEY_BITS = 256;
-const IV_BYTES = 12;                 // 96 biti — dimensiunea recomandata pentru GCM
+const IV_BYTES = 12;                 // 96 biti - dimensiunea recomandata pentru GCM
 const SALT_BYTES = 16;
 
 export const CRYPTO_SUITE = 'AES-256-GCM+RSA-OAEP-3072+RSA-PSS-3072';
@@ -107,14 +112,25 @@ export interface UnlockedKeys {
     signingKey: CryptoKey;     // RSA-PSS private
 }
 
-/** Metadatele criptografice ale unui transfer. */
+/** Metadatele criptografice comune ale unui transfer. */
 export interface TransferCryptoEnvelope {
     iv: string;                      // base64
-    encryptedKeyForRecipient: string;// base64
     encryptedKeyForSender: string;   // base64
     signature: string;               // base64
     ciphertextSha256: string;        // hex
     suite: string;
+}
+
+/** Cheia publica a unui destinatar, asa cum vine de la /Keys/recipients. */
+export interface RecipientPublicKey {
+    userId: string;
+    publicKeyEncryption: string;     // SPKI, base64
+}
+
+/** DEK-ul impachetat pentru un anumit destinatar. */
+export interface WrappedKeyForUser {
+    userId: string;
+    encryptedKeyForUser: string;     // base64
 }
 
 // ── Generarea si descuierea cheilor ──────────────────────────────────────────
@@ -148,7 +164,7 @@ async function deriveWrappingKey(
 /**
  * Genereaza ambele perechi de chei si produce pachetul care se trimite la server.
  * Se apeleaza o singura data per utilizator, la prima autentificare.
- * Dureaza cateva secunde — generarea RSA-3072 nu e instantanee.
+ * Dureaza cateva secunde - generarea RSA-3072 nu e instantanee.
  */
 export async function generateKeyBundle(password: string): Promise<PublishedKeyBundle> {
     assertSecureContext();
@@ -212,7 +228,7 @@ export async function generateKeyBundle(password: string): Promise<PublishedKeyB
 }
 
 /**
- * Descuie cheile private folosind parola. Esueaza daca parola e gresita —
+ * Descuie cheile private folosind parola. Esueaza daca parola e gresita -
  * tag-ul GCM nu se verifica si decriptarea arunca, nu produce chei gresite.
  */
 export async function unlockKeys(
@@ -269,7 +285,7 @@ export async function unlockKeys(
 
 /**
  * Re-impacheteaza cheile private cu o parola noua. Se apeleaza OBLIGATORIU
- * la schimbarea parolei — altfel cheile raman incuiate cu cea veche si
+ * la schimbarea parolei - altfel cheile raman incuiate cu cea veche si
  * utilizatorul isi pierde accesul la toate fisierele primite.
  */
 export async function rewrapPrivateKeys(
@@ -344,23 +360,44 @@ export async function keyFingerprint(spkiBase64: string): Promise<string> {
 export interface EncryptedFile {
     ciphertext: Blob;
     envelope: TransferCryptoEnvelope;
+    /** DEK-ul impachetat cate o data pentru fiecare destinatar. */
+    recipientKeys: WrappedKeyForUser[];
     plaintextSha256: string;
 }
 
+/** Impacheteaza un DEK brut cu cheia publica RSA-OAEP a fiecarui destinatar. */
+async function wrapForRecipients(
+    rawDek: ArrayBuffer,
+    recipients: RecipientPublicKey[]
+): Promise<WrappedKeyForUser[]> {
+    return Promise.all(
+        recipients.map(async (r) => {
+            const publicKey = await importEncryptionPublicKey(r.publicKeyEncryption);
+            const wrapped = await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, publicKey, rawDek);
+            return { userId: r.userId, encryptedKeyForUser: toBase64(wrapped) };
+        })
+    );
+}
+
 /**
- * Cripteaza un fisier pentru un destinatar.
+ * Cripteaza un fisier pentru unul sau mai multi destinatari.
  *
  * DEK-ul este aleatoriu si unic per transfer: doua fisiere identice trimise de
  * doua ori produc cifrotexte complet diferite, iar compromiterea unei chei de
- * fisier nu spune nimic despre celelalte.
+ * fisier nu spune nimic despre celelalte. Cifrotextul e unul singur; doar DEK-ul
+ * se impacheteaza de N+1 ori (destinatari + expeditor).
  */
-export async function encryptFileForRecipient(
+export async function encryptFileForRecipients(
     file: File,
-    recipientEncryptionPublicKey: CryptoKey,
+    recipients: RecipientPublicKey[],
     senderEncryptionPublicKey: CryptoKey,
     senderSigningKey: CryptoKey
 ): Promise<EncryptedFile> {
     assertSecureContext();
+
+    if (recipients.length === 0) {
+        throw new Error('Alegeți cel puțin un destinatar.');
+    }
 
     const plaintext = await file.arrayBuffer();
     const plaintextSha256 = await sha256Hex(plaintext);
@@ -381,8 +418,8 @@ export async function encryptFileForRecipient(
 
     const rawDek = await crypto.subtle.exportKey('raw', dek);
 
-    const [forRecipient, forSender] = await Promise.all([
-        crypto.subtle.encrypt({ name: 'RSA-OAEP' }, recipientEncryptionPublicKey, rawDek),
+    const [recipientKeys, forSender] = await Promise.all([
+        wrapForRecipients(rawDek, recipients),
         crypto.subtle.encrypt({ name: 'RSA-OAEP' }, senderEncryptionPublicKey, rawDek),
     ]);
 
@@ -397,15 +434,42 @@ export async function encryptFileForRecipient(
     return {
         ciphertext: new Blob([ciphertext], { type: 'application/octet-stream' }),
         plaintextSha256,
+        recipientKeys,
         envelope: {
             iv: toBase64(iv),
-            encryptedKeyForRecipient: toBase64(forRecipient),
             encryptedKeyForSender: toBase64(forSender),
             signature: toBase64(signature),
             ciphertextSha256: await sha256Hex(ciphertext),
             suite: CRYPTO_SUITE,
         },
     };
+}
+
+/**
+ * Re-impacheteaza DEK-ul unui transfer pentru destinatari noi (forward).
+ *
+ * DEK-ul brut exista doar in memoria acestei functii. Serverul primeste numai
+ * blocurile RSA-OAEP rezultate, deci nu afla nici acum cheia de fisier.
+ */
+export async function rewrapFileKey(
+    wrappedKeyForMe: string,
+    myDecryptionKey: CryptoKey,
+    recipients: RecipientPublicKey[]
+): Promise<WrappedKeyForUser[]> {
+    assertSecureContext();
+
+    let rawDek: ArrayBuffer;
+    try {
+        rawDek = await crypto.subtle.decrypt(
+            { name: 'RSA-OAEP' },
+            myDecryptionKey,
+            fromBase64(wrappedKeyForMe) as BufferSource
+        );
+    } catch {
+        throw new Error('Cheia de fișier nu a putut fi despachetată cu cheia dumneavoastră privată.');
+    }
+
+    return wrapForRecipients(rawDek, recipients);
 }
 
 export interface DecryptedFile {
@@ -426,7 +490,7 @@ export interface DecryptedFile {
  */
 export async function decryptTransfer(
     ciphertext: ArrayBuffer,
-    envelope: TransferCryptoEnvelope,
+    envelope: Pick<TransferCryptoEnvelope, 'iv' | 'signature'>,
     wrappedKeyForMe: string,
     myDecryptionKey: CryptoKey,
     senderSigningPublicKey: CryptoKey
