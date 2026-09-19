@@ -112,6 +112,12 @@ public class AuthorizationPolicyTests
             // (Login, respectiv PasswordWrite) și acceptă doar un token de 256 biți.
             "AuthController.CheckInvitation",
             "AuthController.ConfirmInvitation",
+            // Resetarea parolei din linkul trimis de administrator: cine și-a
+            // uitat parola nu se poate autentifica. Aceleași limitări ca la
+            // invitație (Login, respectiv PasswordWrite), token de 256 biți,
+            // de unică folosință, valabil PASSWORD_RESET_TOKEN_MINUTES.
+            "AuthController.CheckPasswordReset",
+            "AuthController.ResetPasswordWithToken",
         };
 
         var anonime = Controllers()
