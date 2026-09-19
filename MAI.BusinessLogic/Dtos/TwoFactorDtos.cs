@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations;
 namespace MAI.BusinessLogic.Dtos
 {
     /// <summary>
-    /// Corpul cererii POST /api/Auth/2fa/verify — pasul doi al autentificării.
+    /// Corpul cererii POST /api/Auth/2fa/verify - pasul doi al autentificării.
     ///
     /// Mutat aici din interiorul fișierului de controller: un DTO definit lângă
     /// controllerul care îl consumă nu poate fi refolosit de teste sau de alt

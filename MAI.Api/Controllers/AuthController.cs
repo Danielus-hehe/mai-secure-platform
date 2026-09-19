@@ -98,7 +98,7 @@ namespace MAI.Api.Controllers
 
         /// <summary>
         /// User-Agent-ul cererii, pentru eticheta sesiunii. Vine de la client,
-        /// deci e o indicație, nu o dovadă — se afișează, nu se folosește la
+        /// deci e o indicație, nu o dovadă - se afișează, nu se folosește la
         /// nicio decizie de autorizare.
         /// </summary>
         private string? UserAgent => Request.Headers.UserAgent.ToString() is { Length: > 0 } ua
@@ -120,7 +120,7 @@ namespace MAI.Api.Controllers
             var username = request.Username?.Trim() ?? string.Empty;
             var password = request.Password ?? string.Empty;
 
-            // Mesaj identic pentru orice eșec — nu divulgăm dacă userul există,
+            // Mesaj identic pentru orice eșec - nu divulgăm dacă userul există,
             // dacă e blocat sau dacă parola era aproape corectă.
             const string genericError = "Nume de utilizator sau parolă incorectă.";
 
@@ -160,7 +160,7 @@ namespace MAI.Api.Controllers
                     return BadRequest(new { message = genericError });
                 }
 
-                // Contul blocat: NU calculăm hash. Exact ăsta e scopul blocării —
+                // Contul blocat: NU calculăm hash. Exact ăsta e scopul blocării -
                 // un atacator nu trebuie să poată consuma 19 MiB pe încercare la nesfârșit.
                 if (user.IsLockedOut)
                 {
@@ -204,7 +204,7 @@ namespace MAI.Api.Controllers
                 }
 
                 // Contul creat de administrator cu email, dar neactivat încă.
-                // Mesajul e specific — parola a fost oricum corectă la acest punct.
+                // Mesajul e specific - parola a fost oricum corectă la acest punct.
                 if (!user.EmailConfirmed)
                 {
                     await WriteAuditAsync(user.Id, user.Username, AuditAction.Login,
@@ -233,7 +233,7 @@ namespace MAI.Api.Controllers
                 // ── Pasul doi, DOAR dacă utilizatorul l-a activat singur ──────
                 //
                 // 2FA este opțional. Un cont fără 2FA se autentifică exact ca
-                // înainte — comportamentul vechi rămâne calea implicită, iar
+                // înainte - comportamentul vechi rămâne calea implicită, iar
                 // activarea se face din pagina de profil, de către utilizator.
                 if (user.TwoFactorEnabled && !string.IsNullOrEmpty(user.TwoFactorSecret))
                 {
@@ -282,7 +282,7 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // POST api/Auth/2fa/verify — pasul doi
+        // POST api/Auth/2fa/verify - pasul doi
         // ═════════════════════════════════════════════════════════════════════
         /// <summary>
         /// Schimbă provocarea emisă de /login pe tokenurile reale, dacă vine
@@ -347,7 +347,7 @@ namespace MAI.Api.Controllers
             var replayed         = false;
 
             // Codul TOTP are exact Digits cifre. Orice altceva e tratat ca posibil
-            // cod de recuperare — nu-l trimitem degeaba prin HMAC.
+            // cod de recuperare - nu-l trimitem degeaba prin HMAC.
             var digitsOnly = new string(dto.Code.Where(char.IsDigit).ToArray());
 
             if (digitsOnly.Length == _twoFactor.Digits)
@@ -455,7 +455,7 @@ namespace MAI.Api.Controllers
                 usedRecoveryCode
                     ? $"Autentificare cu COD DE RECUPERARE 2FA ({user.RemainingRecoveryCodes} ramase)"
                     : "Autentificare reusita cu 2FA",
-                // Un login cu cod de recuperare nu e o eroare — dar e exact rândul
+                // Un login cu cod de recuperare nu e o eroare - dar e exact rândul
                 // pe care un supervizor vrea să-l găsească filtrând, nu citind.
                 usedRecoveryCode ? AuditResult.Warning : AuditResult.Success);
 
@@ -504,7 +504,7 @@ namespace MAI.Api.Controllers
             var hash = _tokens.HashOpaqueToken(dto.RefreshToken);
 
             // Un token revocat sau expirat nu este găsit deloc: filtrarea se face
-            // în interogare, nu după. Diferența contează — un token furat dintr-o
+            // în interogare, nu după. Diferența contează - un token furat dintr-o
             // sesiune încheiată nu trebuie nici măcar să identifice utilizatorul.
             var session = await _sessions.FindActiveAsync(hash, ct);
 
@@ -556,7 +556,7 @@ namespace MAI.Api.Controllers
         public async Task<IActionResult> Logout([FromBody] RefreshTokenRequestDto? dto, CancellationToken ct)
         {
             // Delogarea închide DOAR sesiunea de pe acest dispozitiv. Închiderea
-            // tuturor e o acțiune separată, explicită, din pagina de sesiuni —
+            // tuturor e o acțiune separată, explicită, din pagina de sesiuni -
             // un utilizator care apasă „ieși” pe telefon nu se așteaptă să fie
             // deconectat și de pe calculatorul de la birou.
             if (!string.IsNullOrWhiteSpace(dto?.RefreshToken))
@@ -623,12 +623,12 @@ namespace MAI.Api.Controllers
                 var replacedTemporaryPassword = user.MustChangePassword;
                 user.MustChangePassword = false;
 
-                // Schimbarea parolei închide TOATE sesiunile, fără excepție —
+                // Schimbarea parolei închide TOATE sesiunile, fără excepție -
                 // inclusiv cea curentă. Motivul obișnuit pentru care cineva își
                 // schimbă parola este suspiciunea că altcineva o știe; a lăsa
                 // deschisă chiar și o sesiune ar rata exact scenariul.
                 //
-                // Atenție: secretul 2FA NU se atinge. Este independent de parolă —
+                // Atenție: secretul 2FA NU se atinge. Este independent de parolă -
                 // exact ăsta e rostul celui de-al doilea factor. Dacă l-am reseta
                 // aici, o schimbare de parolă ar dezactiva pe tăcute protecția.
                 var closed = await _sessions.RevokeAllAsync(

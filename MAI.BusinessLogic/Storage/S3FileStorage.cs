@@ -15,7 +15,7 @@ namespace MAI.BusinessLogic.Storage
     /// Stocare pe un serviciu compatibil S3.
     ///
     /// Aceeași clasă funcționează cu MinIO auto-găzduit, Amazon S3, Cloudflare R2
-    /// și Supabase Storage — diferă doar endpointul și credențialele din
+    /// și Supabase Storage - diferă doar endpointul și credențialele din
     /// configurare. Ăsta e rostul alegerii protocolului S3: decizia de provider
     /// rămâne reversibilă, fără să rescrii cod.
     /// </summary>
@@ -26,7 +26,7 @@ namespace MAI.BusinessLogic.Storage
         private readonly IAmazonS3 _client;
 
         // Verificarea existenței bucketului se face o singură dată, la prima
-        // operație. Nu la fiecare upload — ar fi un round-trip inutil de fiecare dată.
+        // operație. Nu la fiecare upload - ar fi un round-trip inutil de fiecare dată.
         private readonly SemaphoreSlim _bucketGate = new(1, 1);
         private bool _bucketChecked;
 
@@ -80,7 +80,7 @@ namespace MAI.BusinessLogic.Storage
             };
 
             // Content-Length explicit: altfel SDK-ul ar trebui să bufferizeze tot
-            // conținutul ca să afle dimensiunea — exact ce vrem să evităm.
+            // conținutul ca să afle dimensiunea - exact ce vrem să evităm.
             request.Headers.ContentLength = contentLength;
 
             await _client.PutObjectAsync(request, ct);
@@ -155,7 +155,7 @@ namespace MAI.BusinessLogic.Storage
                 Protocol   = _options.UseSsl ? Protocol.HTTPS : Protocol.HTTP,
             };
 
-            // Semnarea e pur locală (HMAC peste parametrii cererii) — nu există
+            // Semnarea e pur locală (HMAC peste parametrii cererii) - nu există
             // apel de rețea, deci nu are ce eșua asincron.
             return Task.FromResult<string?>(_client.GetPreSignedURL(request));
         }
@@ -163,7 +163,7 @@ namespace MAI.BusinessLogic.Storage
         /// <summary>
         /// Sondă de disponibilitate: cere metadatele bucketului.
         ///
-        /// Deliberat NU apelează EnsureBucketAsync — acela creează bucketul dacă
+        /// Deliberat NU apelează EnsureBucketAsync - acela creează bucketul dacă
         /// lipsește, iar o sondă de sănătate care modifică infrastructura pe care
         /// o măsoară nu mai măsoară nimic.
         /// </summary>

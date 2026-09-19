@@ -191,7 +191,7 @@ export default function ProfilePage() {
                             <div>
                                 <p className="text-[11px] text-mai-400 uppercase tracking-wide">Direcție</p>
                                 <p className="text-sm text-mai-800 dark:text-mai-200 font-medium break-all">
-                                    {user.department || '—'}
+                                    {user.department || '-'}
                                 </p>
                             </div>
                         </div>
@@ -211,7 +211,7 @@ export default function ProfilePage() {
                             <div>
                                 <p className="text-[11px] text-mai-400 uppercase tracking-wide">Chei generate</p>
                                 <p className="text-sm text-mai-800 dark:text-mai-200 font-medium">
-                                    {keysCreatedAt ? formatDateTime(keysCreatedAt) : '—'}
+                                    {keysCreatedAt ? formatDateTime(keysCreatedAt) : '-'}
                                 </p>
                             </div>
                         </div>
@@ -310,8 +310,8 @@ export default function ProfilePage() {
 
                     {/*
                       Sesiunile active stau lângă schimbarea parolei pentru că
-                      răspund aceleiași întrebări — cine mai are acces la contul
-                      meu — iar cele două acțiuni se folosesc de obicei împreună:
+                      răspund aceleiași întrebări - cine mai are acces la contul
+                      meu - iar cele două acțiuni se folosesc de obicei împreună:
                       cine închide o sesiune necunoscută vrea imediat după și să-și
                       schimbe parola.
                     */}

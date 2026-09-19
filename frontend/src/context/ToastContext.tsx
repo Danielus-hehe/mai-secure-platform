@@ -122,7 +122,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         });
     }, [scheduleDismiss]);
 
-    // Curatare la unmount — altfel timerele apeleaza setState pe o componenta moarta.
+    // Curatare la unmount - altfel timerele apeleaza setState pe o componenta moarta.
     useEffect(() => {
         const map = timers.current;
         return () => {
@@ -136,7 +136,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
      *
      * Inainte era un obiect literal, deci o referinta noua la fiecare render al
      * provider-ului. Orice pagina care pune `toast` in dependentele unui useCallback
-     * sau useEffect — si toate o fac — isi re-crea callback-ul la fiecare render.
+     * sau useEffect - si toate o fac - isi re-crea callback-ul la fiecare render.
      * Rezultatul: fetch esueaza -> toast -> provider-ul se re-randeaza -> value nou
      * -> useEffect se re-declanseaza -> fetch esueaza... bucla infinita, cu ecranul
      * plin de acelasi mesaj.

@@ -5,7 +5,7 @@ namespace MAI.Domain.Entities
     /// <summary>
     /// Un destinatar al unui transfer, împreună cu dovada lui de primire.
     ///
-    /// Toți destinatarii stau aici — și cei aleși la trimitere, și cei adăugați
+    /// Toți destinatarii stau aici - și cei aleși la trimitere, și cei adăugați
     /// ulterior prin forward. Înainte de această schimbare, destinatarul original
     /// stătea pe rândul FileTransfer (RecipientId, EncryptedKeyForRecipient,
     /// DownloadedAt), iar cei de forward aici, fără dovadă de primire proprie:

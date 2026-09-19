@@ -7,7 +7,7 @@ namespace MAI.Api.Services
     /// <summary>
     /// Încărcarea structurii organizatorice pentru regulile din
     /// MAI.BusinessLogic.Organization. O interogare pentru tot arborele,
-    /// o interogare pentru toți membrii — apoi totul se calculează în memorie.
+    /// o interogare pentru toți membrii - apoi totul se calculează în memorie.
     /// </summary>
     public static class OrgStructure
     {

@@ -109,7 +109,7 @@ export default function DocumentDetailModal({ documentId, onClose, onChanged, on
                     <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800
                         dark:border-red-800/50 dark:bg-red-900/20 dark:text-red-300">
                         <strong>Document abrogat</strong> la {formatDateTime(doc.repealedAt!)}
-                        {doc.repealedReason ? ` — ${doc.repealedReason}` : ''}. Rămâne vizibil ca istoric și nu mai cere confirmare.
+                        {doc.repealedReason ? ` - ${doc.repealedReason}` : ''}. Rămâne vizibil ca istoric și nu mai cere confirmare.
                     </div>
                 )}
 
@@ -255,7 +255,7 @@ export default function DocumentDetailModal({ documentId, onClose, onChanged, on
                                 <Button
                                     disabled={busy !== null}
                                     onClick={() => {
-                                        if (!window.confirm('Publicați documentul? Lista destinatarilor se fixează acum și documentul nu mai poate fi modificat — doar abrogat.')) return;
+                                        if (!window.confirm('Publicați documentul? Lista destinatarilor se fixează acum și documentul nu mai poate fi modificat - doar abrogat.')) return;
                                         void run('publish', () => publishInternalDocument(doc.id));
                                     }}
                                 >
@@ -289,7 +289,7 @@ function ReportView({ report }: { report: DocumentReport | null }) {
                 {[
                     { label: 'Destinatari', value: report.total },
                     { label: 'Au deschis', value: report.opened },
-                    { label: 'Au confirmat', value: report.requiresAcknowledgement ? report.acknowledged : '—' },
+                    { label: 'Au confirmat', value: report.requiresAcknowledgement ? report.acknowledged : '-' },
                 ].map((m) => (
                     <div key={m.label} className="rounded-lg border border-mai-100 px-3 py-3 dark:border-mai-700">
                         <p className="text-xl font-bold text-mai-900 dark:text-white">{m.value}</p>
@@ -338,7 +338,7 @@ function ReportView({ report }: { report: DocumentReport | null }) {
                 </table>
             </div>
 
-            {/* Pe persoane — cei care n-au confirmat apar primii */}
+            {/* Pe persoane - cei care n-au confirmat apar primii */}
             <div className="max-h-72 overflow-y-auto rounded-lg border border-mai-100 dark:border-mai-700">
                 <table className="w-full text-sm">
                     <thead className="sticky top-0 bg-white dark:bg-mai-800">

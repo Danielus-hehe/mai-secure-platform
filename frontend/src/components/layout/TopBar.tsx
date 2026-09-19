@@ -34,7 +34,7 @@ export default function TopBar({ onMenuClick }: { onMenuClick: () => void }) {
 
                 <div className="h-8 w-px bg-mai-100 dark:bg-mai-700 hidden sm:block" />
 
-                {/* User info — ascuns pe ecrane mici */}
+                {/* User info - ascuns pe ecrane mici */}
                 <div className="text-right leading-tight hidden sm:block">
                     <p className="text-sm font-semibold text-mai-900 dark:text-white">{user?.fullName}</p>
                     <span className={`inline-block text-[10px] px-2 py-0.5 rounded-full font-semibold

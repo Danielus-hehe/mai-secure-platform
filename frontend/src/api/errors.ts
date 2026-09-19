@@ -3,7 +3,7 @@
  *
  * Backendul întoarce erorile ca `{ message: "..." }`. Axios ambalează asta în
  * `error.response.data`, deci `error.message` conține doar textul generic
- * „Request failed with status code 400" — inutil pentru utilizator.
+ * „Request failed with status code 400" - inutil pentru utilizator.
  *
  * Codul vechi făcea peste tot `res.json().catch(...)` manual. Aici se face o
  * singură dată, corect, inclusiv pentru cazurile în care serverul nu a răspuns

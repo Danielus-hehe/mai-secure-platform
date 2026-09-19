@@ -45,7 +45,7 @@ namespace MAI.BusinessLogic.Dtos
         /// <summary>
         /// Destinatarii, în ordinea adăugării. Toată lumea implicată vede cine a
         /// primit transferul (ca la CC); DownloadedAt și SignatureValid apar doar
-        /// unde utilizatorul curent are dreptul să le vadă — vezi
+        /// unde utilizatorul curent are dreptul să le vadă - vezi
         /// TransferRecipientDto.ReceiptVisible.
         /// </summary>
         public List<TransferRecipientDto> Recipients { get; set; } = [];

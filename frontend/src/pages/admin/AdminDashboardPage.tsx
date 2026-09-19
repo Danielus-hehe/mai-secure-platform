@@ -405,12 +405,12 @@ export default function AdminDashboardPage() {
                                    <span className={`px-2.5 py-1 rounded-full text-xs font-medium shrink-0
                                     ${jobHealthy ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400'
                                        : 'bg-red-50 text-red-700 dark:bg-red-900/40 dark:text-red-400'}`}>
-                                    {job?.status ?? '—'}
+                                    {job?.status ?? '-'}
                                 </span>
                                }>
                             <div className="space-y-2.5 text-sm">
                                 {[
-                                    ['Interval', job ? `${job.intervalMinutes} min` : '—'],
+                                    ['Interval', job ? `${job.intervalMinutes} min` : '-'],
                                     ['Ultima rulare', job?.lastRunAt ? formatDateTime(job.lastRunAt) : 'niciodată'],
                                     ['Expirate în total', String(job?.expiredTotal ?? 0)],
                                     ['Obiecte purjate', String(job?.purgedTotal ?? 0)],
@@ -548,7 +548,7 @@ export default function AdminDashboardPage() {
                             units={orgUnits}
                             value={form.orgUnitId}
                             onChange={v => setForm(prev => ({ ...prev, orgUnitId: v }))}
-                            emptyLabel="— neîncadrat —"
+                            emptyLabel="- neîncadrat -"
                         />
                     </div>
                     <div>

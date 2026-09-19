@@ -4,7 +4,7 @@ namespace MAI.Domain.Enums
     /// Starea unui transfer, la nivelul întregului transfer.
     ///
     /// Starea fiecărui destinatar (a descărcat sau nu, semnătură validă sau nu)
-    /// stă pe TransferRecipient. Aici e doar agregatul — ce vede expeditorul
+    /// stă pe TransferRecipient. Aici e doar agregatul - ce vede expeditorul
     /// dintr-o privire în listă.
     ///
     /// Valorile sunt persistate ca int, deci ordinea membrilor nu se schimbă:

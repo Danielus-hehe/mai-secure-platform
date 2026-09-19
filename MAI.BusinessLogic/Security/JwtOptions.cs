@@ -8,7 +8,7 @@ namespace MAI.BusinessLogic.Security
     /// Există ca tip separat pentru că înainte aceleași valori erau citite din
     /// <c>IConfiguration</c> în două locuri: Program.cs le folosea la validare,
     /// AuthController la emitere. Două locuri care trebuie să rămână identice
-    /// sunt un loc unde diverg — iar aici divergența înseamnă tokenuri emise pe
+    /// sunt un loc unde diverg - iar aici divergența înseamnă tokenuri emise pe
     /// care serverul propriu le respinge.
     /// </summary>
     public class JwtOptions
@@ -18,8 +18,8 @@ namespace MAI.BusinessLogic.Security
 
         /// <summary>
         /// Cine a emis tokenul. Validat la primire: fără el, orice token semnat cu
-        /// aceeași cheie — inclusiv unul emis de alt serviciu al aceleiași
-        /// instituții, sau de un proiect unde cheia s-a scurs — ar fi acceptat aici.
+        /// aceeași cheie - inclusiv unul emis de alt serviciu al aceleiași
+        /// instituții, sau de un proiect unde cheia s-a scurs - ar fi acceptat aici.
         /// </summary>
         public string Issuer { get; set; } = "SGDM";
 
@@ -78,10 +78,10 @@ namespace MAI.BusinessLogic.Security
             }
 
             if (string.IsNullOrWhiteSpace(Issuer))
-                throw new InvalidOperationException("Jwt:Issuer nu poate fi gol — este validat la fiecare cerere.");
+                throw new InvalidOperationException("Jwt:Issuer nu poate fi gol - este validat la fiecare cerere.");
 
             if (string.IsNullOrWhiteSpace(Audience))
-                throw new InvalidOperationException("Jwt:Audience nu poate fi gol — este validat la fiecare cerere.");
+                throw new InvalidOperationException("Jwt:Audience nu poate fi gol - este validat la fiecare cerere.");
 
             if (AccessTokenMinutes <= 0)  AccessTokenMinutes = 15;
             if (RefreshTokenDays   <= 0)  RefreshTokenDays   = 7;

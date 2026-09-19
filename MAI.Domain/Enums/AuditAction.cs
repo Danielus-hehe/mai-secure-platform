@@ -1,7 +1,7 @@
 namespace MAI.Domain.Enums
 {
     /// <summary>
-    /// Tipul operației consemnate. Persistat ca int — membrii nu se reordonează
+    /// Tipul operației consemnate. Persistat ca int - membrii nu se reordonează
     /// și nu se șterg; unul scos din uz rămâne aici, marcat, ca rândurile vechi
     /// să rămână interpretabile.
     /// </summary>
@@ -32,7 +32,7 @@ namespace MAI.Domain.Enums
         ///
         /// Până acum forward-ul se consemna ca FileUpload, deci în jurnal nu se
         /// putea separa „a trimis un fișier nou” de „a dat mai departe un fișier
-        /// primit” — exact întrebarea pe care o pune un control intern.
+        /// primit” - exact întrebarea pe care o pune un control intern.
         /// </summary>
         TransferForwarded = 12,
 

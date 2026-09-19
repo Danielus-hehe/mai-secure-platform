@@ -20,7 +20,7 @@
 
   "TwoFactor": {
     "//": "Lasat gol in dezvoltare: se deriveaza din Jwt:Key. In productie e obligatoriu",
-    "//_2": "si trebuie sa fie un secret SEPARAT — o cheie derivata dintr-un secret",
+    "//_2": "si trebuie sa fie un secret SEPARAT - o cheie derivata dintr-un secret",
     "//_3": "partajat inseamna ca scurgerea unuia le compromite pe amandoua.",
     "EncryptionKey": ""
   },

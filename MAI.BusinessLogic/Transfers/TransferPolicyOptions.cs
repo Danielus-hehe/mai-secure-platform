@@ -16,7 +16,7 @@ namespace MAI.BusinessLogic.Transfers
 
         /// <summary>
         /// Cea mai lungă valabilitate permisă. Fără limită, un expeditor putea
-        /// cere expirare peste 50 de ani — adică un document sensibil ținut pe
+        /// cere expirare peste 50 de ani - adică un document sensibil ținut pe
         /// server pe termen nedefinit, exact ce expirarea trebuia să prevină.
         /// </summary>
         public int MaxExpiryDays { get; set; } = 30;

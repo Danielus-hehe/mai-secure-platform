@@ -83,7 +83,7 @@ namespace MAI.BusinessLogic.Storage
 
         /// <summary>
         /// Sondă de disponibilitate: rădăcina există și se poate scrie în ea.
-        /// Scrierea se testează efectiv, nu se deduce din atributele directorului —
+        /// Scrierea se testează efectiv, nu se deduce din atributele directorului -
         /// un mount read-only arată identic cu unul scriibil până încerci.
         /// </summary>
         public Task<bool> HealthCheckAsync(CancellationToken ct = default)

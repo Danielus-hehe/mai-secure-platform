@@ -46,7 +46,7 @@ namespace MAI.Api.Services
 
             if (string.IsNullOrWhiteSpace(toEmail))
             {
-                _logger.LogWarning("SendTransferNotification: adresa destinatarului este goală — notificarea a fost omisă.");
+                _logger.LogWarning("SendTransferNotification: adresa destinatarului este goală - notificarea a fost omisă.");
                 return false;
             }
 
@@ -88,7 +88,7 @@ namespace MAI.Api.Services
 
             if (string.IsNullOrWhiteSpace(toEmail))
             {
-                _logger.LogWarning("SendInvitationEmail: adresa destinatarului este goală — emailul a fost omis.");
+                _logger.LogWarning("SendInvitationEmail: adresa destinatarului este goală - emailul a fost omis.");
                 return false;
             }
 
@@ -130,7 +130,7 @@ namespace MAI.Api.Services
                             padding:10px 14px;font-size:13px;line-height:1.6;margin:0 0 20px;">
                     <strong>Atenție:</strong> cheile de criptare ale contului sunt protejate cu parola
                     actuală. După resetare se generează chei noi, iar fișierele criptate primite anterior
-                    nu vor mai putea fi deschise — expeditorii le pot retrimite.
+                    nu vor mai putea fi deschise - expeditorii le pot retrimite.
                   </p>
                   """
                 : string.Empty;
@@ -206,7 +206,7 @@ namespace MAI.Api.Services
 
             if (string.IsNullOrWhiteSpace(toEmail))
             {
-                _logger.LogWarning("Email de {Kind}: adresa destinatarului este goală — emailul a fost omis.", kind);
+                _logger.LogWarning("Email de {Kind}: adresa destinatarului este goală - emailul a fost omis.", kind);
                 return false;
             }
 
@@ -243,14 +243,14 @@ namespace MAI.Api.Services
                       <p style="margin:0;color:#fff;font-size:18px;font-weight:bold;letter-spacing:.3px;">
                         Ministerul Afacerilor Interne</p>
                       <p style="margin:4px 0 0;color:#99bde0;font-size:12px;">
-                        Platforma Securizată de Transfer Documente — SGDM</p>
+                        Platforma Securizată de Transfer Documente - SGDM</p>
                     </td></tr>
                     <tr><td style="padding:34px 36px;">
                       {innerHtml}
                     </td></tr>
                     <tr><td style="background:#f0f2f7;padding:14px 36px;border-top:1px solid #e4e7ef;">
                       <p style="margin:0;color:#aaa;font-size:11px;text-align:center;">
-                        &copy; {DateTime.UtcNow.Year} Ministerul Afacerilor Interne — Republica Moldova
+                        &copy; {DateTime.UtcNow.Year} Ministerul Afacerilor Interne - Republica Moldova
                         &nbsp;&middot;&nbsp; SGDM &nbsp;&middot;&nbsp; Uz Intern
                       </p>
                     </td></tr>
@@ -309,8 +309,8 @@ namespace MAI.Api.Services
                 $"  Fișier    : {fileName}\r\n" +
                 $"  Expiră la : {expiryText}\r\n\r\n" +
                 "Conectați-vă la SGDM pentru a descărca și decripta fișierul.\r\n" +
-                "Descărcarea se face în browser — serverul nu vede conținutul.\r\n\r\n" +
-                "SGDM MAI — Sistem Securizat de Gestiune Documente";
+                "Descărcarea se face în browser - serverul nu vede conținutul.\r\n\r\n" +
+                "SGDM MAI - Sistem Securizat de Gestiune Documente";
 
             var bodyHtml =
                 $"""
@@ -339,10 +339,10 @@ namespace MAI.Api.Services
                   </table>
                   <p>
                     Conectați-vă la <strong>SGDM</strong> pentru a descărca și decripta fișierul.<br>
-                    <small style="color:#666">Descărcarea se face în browser — serverul nu vede conținutul.</small>
+                    <small style="color:#666">Descărcarea se face în browser - serverul nu vede conținutul.</small>
                   </p>
                   <hr style="border:none;border-top:1px solid #dde2e8;margin:24px 0">
-                  <p style="color:#888;font-size:12px">SGDM MAI — Sistem Securizat de Gestiune Documente</p>
+                  <p style="color:#888;font-size:12px">SGDM MAI - Sistem Securizat de Gestiune Documente</p>
                 </body>
                 </html>
                 """;
@@ -363,7 +363,7 @@ namespace MAI.Api.Services
             var msg = new MimeMessage();
             msg.From.Add(new MailboxAddress(_opts.DisplayName, _opts.From));
             msg.To.Add(new MailboxAddress(toName, toEmail));
-            msg.Subject = "[SGDM] Activare cont — Platforma Securizată MAI";
+            msg.Subject = "[SGDM] Activare cont - Platforma Securizată MAI";
 
             var htmlBody = $"""
                 <!DOCTYPE html>
@@ -378,7 +378,7 @@ namespace MAI.Api.Services
                           <p style="margin:0;color:#fff;font-size:18px;font-weight:bold;letter-spacing:.3px;">
                             Ministerul Afacerilor Interne</p>
                           <p style="margin:4px 0 0;color:#99bde0;font-size:12px;">
-                            Platforma Securizată de Transfer Documente — SGDM</p>
+                            Platforma Securizată de Transfer Documente - SGDM</p>
                         </td></tr>
                         <tr><td style="padding:34px 36px;">
                           <h2 style="margin:0 0 14px;color:#1a3a6e;font-size:18px;">
@@ -414,7 +414,7 @@ namespace MAI.Api.Services
                         </td></tr>
                         <tr><td style="background:#f0f2f7;padding:14px 36px;border-top:1px solid #e4e7ef;">
                           <p style="margin:0;color:#aaa;font-size:11px;text-align:center;">
-                            &copy; {DateTime.UtcNow.Year} Ministerul Afacerilor Interne — Republica Moldova
+                            &copy; {DateTime.UtcNow.Year} Ministerul Afacerilor Interne - Republica Moldova
                             &nbsp;&middot;&nbsp; SGDM &nbsp;&middot;&nbsp; Uz Intern
                           </p>
                         </td></tr>

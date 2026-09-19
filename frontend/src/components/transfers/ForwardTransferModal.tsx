@@ -26,7 +26,7 @@ interface Props {
  * browser pentru fiecare destinatar nou. Serverul primește doar blocurile
  * RSA-OAEP; cifrotextul și semnătura expeditorului original rămân neatinse.
  */
-/** Montată doar cât fereastra e deschisă — fiecare deschidere pornește curat. */
+/** Montată doar cât fereastra e deschisă - fiecare deschidere pornește curat. */
 export default function ForwardTransferModal({ transfer, policy, onClose, onDone }: Props) {
     const toast = useToast();
     const { keys } = useKeys();
@@ -121,7 +121,7 @@ export default function ForwardTransferModal({ transfer, policy, onClose, onDone
                 <div className="rounded-lg border border-mai-100 dark:border-mai-700 bg-mai-50 dark:bg-mai-900 px-4 py-3">
                     <p className="text-xs leading-relaxed text-mai-500 dark:text-mai-400">
                         Cheia de fișier se despachetează și se re-împachetează pe acest calculator.
-                        Serverul vede doar blocuri RSA-OAEP opace — nu accesează conținutul.
+                        Serverul vede doar blocuri RSA-OAEP opace - nu accesează conținutul.
                     </p>
                 </div>
 

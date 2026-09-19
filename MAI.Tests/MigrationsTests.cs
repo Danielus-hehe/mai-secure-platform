@@ -12,7 +12,7 @@ namespace MAI.Tests;
 /// <summary>
 /// Migrările EF sunt descoperite prin reflecție, după atributele
 /// [Migration] și [DbContext] din fișierele .Designer.cs. O migrare fără ele
-/// compilează, dar nu se aplică niciodată — exact ce s-a întâmplat cu cele patru
+/// compilează, dar nu se aplică niciodată - exact ce s-a întâmplat cu cele patru
 /// migrări din 2026-09-17/18, care au lăsat baza fără tabela TransferRecipients
 /// și fără coloana EmailConfirmed.
 ///
@@ -83,7 +83,8 @@ public class MigrationsTests
     {
         // Modelul-țintă al ultimei migrări trebuie să conțină tot ce au adus
         // rundele 2026-09-19 (dovadă de primire per destinatar, forward, ștergere
-        // logică) și 2026-09-20 (structură, documente interne, resetare parolă).
+        // logică), 2026-09-20 (structură, documente interne, resetare parolă) și
+        // 2026-09-21 (niveluri configurabile ale structurii).
         var last = MigrationTypes()
             .Select(t => (Type: t, Id: t.GetCustomAttribute<MigrationAttribute>()!.Id))
             .OrderBy(x => x.Id, StringComparer.Ordinal)
@@ -112,6 +113,7 @@ public class MigrationsTests
         Assert.Null(user.FindProperty("Department"));
 
         Assert.NotNull(model.FindEntityType("MAI.Domain.Entities.OrgUnit"));
+        Assert.NotNull(model.FindEntityType("MAI.Domain.Entities.OrgLevel"));
         Assert.NotNull(model.FindEntityType("MAI.Domain.Entities.InternalDocument"));
         Assert.NotNull(model.FindEntityType("MAI.Domain.Entities.InternalDocumentRecipient"));
         Assert.NotNull(model.FindEntityType("MAI.Domain.Entities.InternalDocumentTarget"));
@@ -123,7 +125,7 @@ public class MigrationsTests
         // Echivalentul lui „dotnet ef migrations has-pending-model-changes”, fără
         // bază de date: compară modelul din AppDbContext (configurările Fluent)
         // cu snapshot-ul din Migrations. O entitate sau o proprietate schimbată
-        // fără migrare — sau o migrare scrisă de mână cu snapshot greșit — apare
+        // fără migrare - sau o migrare scrisă de mână cu snapshot greșit - apare
         // aici ca listă de operații pe care EF le-ar genera.
         var options = new DbContextOptionsBuilder<AppDbContext>()
             .UseNpgsql("Host=localhost;Database=sgdm_design;Username=x;Password=x")

@@ -9,13 +9,13 @@ namespace MAI.BusinessLogic.Interfaces
     /// Abstractizarea depozitului de fișiere.
     ///
     /// Restul aplicației nu știe unde ajung octeții: pe disc, în MinIO, în S3
-    /// sau în Supabase Storage. Vorbește doar în termeni de "cheie de obiect" —
+    /// sau în Supabase Storage. Vorbește doar în termeni de "cheie de obiect" -
     /// niciodată cale absolută. Diferența nu e cosmetică: dacă în baza de date
     /// s-ar stoca o cale de sistem, orice bug care permite scrierea acelei
     /// coloane devine citire arbitrară de fișiere de pe server.
     ///
     /// Toate implementările primesc și returnează CIFROTEXT. Conținutul în clar
-    /// nu ajunge niciodată aici — criptarea se face în browser, înainte de upload.
+    /// nu ajunge niciodată aici - criptarea se face în browser, înainte de upload.
     /// </summary>
     public interface IFileStorage
     {
@@ -74,7 +74,7 @@ namespace MAI.BusinessLogic.Interfaces
         /// obligă fiecare apelant să le prindă și, mai rău, riscă să scurgă
         /// endpointul și credențialele în mesajul erorii.
         ///
-        /// Operația trebuie să fie ieftină și să nu scrie nimic — sonda rulează
+        /// Operația trebuie să fie ieftină și să nu scrie nimic - sonda rulează
         /// la fiecare câteva secunde, la infinit.
         /// </summary>
         Task<bool> HealthCheckAsync(CancellationToken ct = default);

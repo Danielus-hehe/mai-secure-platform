@@ -42,7 +42,7 @@ namespace MAI.DataAccessLayer.Configurations
             builder.Property(f => f.SenderSignature).HasMaxLength(600);
             builder.Property(f => f.CryptoSuite).HasMaxLength(128);
 
-            // AllowForward: implicit false în entitate — redistribuirea e o
+            // AllowForward: implicit false în entitate - redistribuirea e o
             // permisiune pe care expeditorul o acordă explicit. Default-ul din
             // coloană (FALSE) e pus de migrare, nu aici: HasDefaultValue pe un
             // bool l-ar face „generat de bază” și EF ar omite valoarea la INSERT.

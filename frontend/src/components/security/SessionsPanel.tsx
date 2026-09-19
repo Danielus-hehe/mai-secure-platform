@@ -9,7 +9,7 @@ import EmptyState from '../ui/EmptyState';
  * Sesiunile active ale utilizatorului, cu revocare de la distanță.
  *
  * Se montează în pagina de profil, lângă setările 2FA: amândouă răspund la
- * aceeași întrebare — „cine mai are acces la contul meu”.
+ * aceeași întrebare - „cine mai are acces la contul meu”.
  *
  * Nu afișează niciodată hash-ul tokenului. Serverul nici nu îl trimite: e
  * singura valoare din rând cu care se poate face ceva.

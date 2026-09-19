@@ -123,7 +123,7 @@ namespace MAI.BusinessLogic.Organization
 
                 case DistributionMode.DirectSubordinates:
                     // Membrii subdiviziunii conduse (fără cei din subunități) și
-                    // șefii subunităților imediat inferioare — organigrama clasică.
+                    // șefii subunităților imediat inferioare - organigrama clasică.
                     recipients = MembersOf([led!.Id])
                         .Concat(ActiveHeads(tree.ChildrenOf(led.Id)));
                     break;

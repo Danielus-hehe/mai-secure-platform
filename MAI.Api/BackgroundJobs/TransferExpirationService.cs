@@ -67,7 +67,7 @@ namespace MAI.Api.BackgroundJobs
                 catch (Exception ex)
                 {
                     // Orice exceptie neprinsa aici ar opri definitiv BackgroundService-ul,
-                    // fara ca aplicatia sa cada — adica jobul ar muri in tacere.
+                    // fara ca aplicatia sa cada - adica jobul ar muri in tacere.
                     _state.MarkRunFailed(ex.Message);
                     _logger.LogError(ex, "Trecerea jobului de expirare a esuat. Se reincearca la urmatorul interval.");
                 }
@@ -123,7 +123,7 @@ namespace MAI.Api.BackgroundJobs
                 // Doar transferurile care mai au ceva de făcut:
                 //   • Pending    → devin Expired, obiectul se șterge;
                 //   • Downloaded → rămân Downloaded (e dovada că toți l-au primit),
-                //                  dar obiectul se șterge — o singură dată, cât
+                //                  dar obiectul se șterge - o singură dată, cât
                 //                  StorageKey mai e nevid.
                 // Revoked, Expired și cele șterse logic nu mai au obiect în depozit
                 // și nu se ating. Selecția veche („Status <> Expired”) suprascria
@@ -229,7 +229,7 @@ namespace MAI.Api.BackgroundJobs
                 totalFailed  += failedInBatch;
 
                 _logger.LogInformation(
-                    "Job expirare: lot procesat — {Expired} expirate, {Purged} obiecte sterse, {Failed} esecuri.",
+                    "Job expirare: lot procesat - {Expired} expirate, {Purged} obiecte sterse, {Failed} esecuri.",
                     expiredInBatch, purgedInBatch, failedInBatch);
 
                 // Lotul a fost mai mic decat maximul: nu mai are ce urma.
@@ -247,7 +247,7 @@ namespace MAI.Api.BackgroundJobs
             if (totalExpired > 0 || totalFailed > 0)
             {
                 _logger.LogInformation(
-                    "Job expirare: trecere incheiata — {Expired} transferuri expirate, {Purged} obiecte purjate, {Failed} esecuri.",
+                    "Job expirare: trecere incheiata - {Expired} transferuri expirate, {Purged} obiecte purjate, {Failed} esecuri.",
                     totalExpired, totalPurged, totalFailed);
             }
 

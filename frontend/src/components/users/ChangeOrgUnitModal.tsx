@@ -39,7 +39,7 @@ export default function ChangeOrgUnitModal({ user, units, onClose, onDone }: Pro
     };
 
     return (
-        <Modal open title={`Subdiviziune — ${user.fullName || '@' + user.username}`} onClose={() => { if (!saving) onClose(); }}>
+        <Modal open title={`Subdiviziune - ${user.fullName || '@' + user.username}`} onClose={() => { if (!saving) onClose(); }}>
             <div className="space-y-4">
                 <div>
                     <label htmlFor="user-org-unit" className="mb-1.5 block text-sm font-medium text-mai-800 dark:text-mai-200">
@@ -50,7 +50,7 @@ export default function ChangeOrgUnitModal({ user, units, onClose, onDone }: Pro
                         units={activeUnits}
                         value={value}
                         onChange={setValue}
-                        emptyLabel="— neîncadrat —"
+                        emptyLabel="- neîncadrat -"
                         disabled={saving}
                     />
                 </div>

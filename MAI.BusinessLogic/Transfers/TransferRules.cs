@@ -40,7 +40,7 @@ namespace MAI.BusinessLogic.Transfers
 
         /// <summary>
         /// Conținutul mai poate fi descărcat: nu e șters, retras sau expirat.
-        /// Un transfer Downloaded rămâne descărcabil până la termen — și pentru
+        /// Un transfer Downloaded rămâne descărcabil până la termen - și pentru
         /// destinatarii care îl mai deschid o dată, și pentru expeditor.
         /// </summary>
         public static bool IsContentAvailable(FileTransfer t, DateTime nowUtc) =>
@@ -51,7 +51,7 @@ namespace MAI.BusinessLogic.Transfers
         /// <summary>
         /// Starea afișată: un transfer în așteptare trecut de termen apare ca
         /// Expired chiar dacă jobul nu l-a marcat încă. Downloaded rămâne
-        /// Downloaded — este o dovadă, nu o stare de curățenie.
+        /// Downloaded - este o dovadă, nu o stare de curățenie.
         /// </summary>
         public static TransferStatus EffectiveStatus(FileTransfer t, DateTime nowUtc) =>
             t.Status == TransferStatus.Pending && IsPastExpiry(t, nowUtc)
@@ -59,8 +59,8 @@ namespace MAI.BusinessLogic.Transfers
                 : t.Status;
 
         /// <summary>
-        /// Poate utilizatorul să adauge destinatari? Expeditorul — întotdeauna,
-        /// cât timp conținutul există. Un destinatar — doar dacă expeditorul a
+        /// Poate utilizatorul să adauge destinatari? Expeditorul - întotdeauna,
+        /// cât timp conținutul există. Un destinatar - doar dacă expeditorul a
         /// permis redistribuirea.
         /// </summary>
         public static bool CanForward(FileTransfer t, Guid userId, bool isRecipient, DateTime nowUtc)
@@ -86,7 +86,7 @@ namespace MAI.BusinessLogic.Transfers
         ///
         /// Null → valoarea implicită din politică. Data se normalizează la UTC:
         /// o valoare fără fus orar (Kind=Unspecified) e tratată ca UTC, nu ca ora
-        /// locală a serverului — în container, ora locală e oricum UTC, iar pe
+        /// locală a serverului - în container, ora locală e oricum UTC, iar pe
         /// Windows ar fi fost ora Chișinăului, deci același request ar fi dat
         /// rezultate diferite în funcție de unde rulează API-ul.
         /// </summary>

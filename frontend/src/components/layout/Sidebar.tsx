@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { getPendingAcknowledgements } from '../../api/internalDocuments';
+import { getAwaitingCount } from '../../api/transfers';
 
 const NAV_MAIN = [
     // FIX: era to: '/' care redirecta la /login; acum merge corect la /dashboard
@@ -36,13 +37,18 @@ export default function Sidebar({ open, onClose }: { open: boolean; onClose: () 
     // fiecare schimbare de pagină: după o confirmare, insigna scade imediat ce
     // utilizatorul navighează, fără un sondaj continuu al serverului.
     const location = useLocation();
-    const [pendingAck, setPendingAck] = useState(0);
+    const [badges, setBadges] = useState<Record<string, number>>({});
     useEffect(() => {
         if (!user) return;
         let cancelled = false;
-        getPendingAcknowledgements()
-            .then((n) => { if (!cancelled) setPendingAck(n); })
-            .catch(() => { /* insigna e opțională */ });
+        Promise.allSettled([getAwaitingCount(), getPendingAcknowledgements()])
+            .then(([transfers, docs]) => {
+                if (cancelled) return;
+                setBadges({
+                    '/transfers':          transfers.status === 'fulfilled' ? transfers.value : 0,
+                    '/internal-documents': docs.status === 'fulfilled' ? docs.value : 0,
+                });
+            });
         return () => { cancelled = true; };
     }, [user, location.pathname]);
 
@@ -83,12 +89,14 @@ export default function Sidebar({ open, onClose }: { open: boolean; onClose: () 
                         <NavLink key={item.to} to={item.to} end={item.end} className={cls}>
                             <item.icon size={18} />
                             {item.label}
-                            {item.to === '/internal-documents' && pendingAck > 0 && (
+                            {(badges[item.to] ?? 0) > 0 && (
                                 <span
                                     className="ml-auto rounded-full bg-gold-500 px-2 py-0.5 text-[10px] font-bold text-mai-900"
-                                    title={`${pendingAck} documente de confirmat`}
+                                    title={item.to === '/transfers'
+                                        ? `${badges[item.to]} fișiere nedescărcate`
+                                        : `${badges[item.to]} documente de confirmat`}
                                 >
-                                    {pendingAck}
+                                    {badges[item.to]}
                                 </span>
                             )}
                         </NavLink>
@@ -123,14 +131,14 @@ export default function Sidebar({ open, onClose }: { open: boolean; onClose: () 
                     )}
                 </nav>
 
-                {/* Footer — profil + info */}
+                {/* Footer - profil + info */}
                 <div className="border-t border-mai-700 p-4 space-y-1 shrink-0">
                     <NavLink to="/profile" className={cls}>
                         <UserCircle size={18} />
                         Profilul meu
                     </NavLink>
                     <p className="px-3 pt-2 text-[10px] text-mai-500 leading-relaxed">
-                        Acces restricționat — rețea intranet MAI
+                        Acces restricționat - rețea intranet MAI
                     </p>
                 </div>
             </aside>

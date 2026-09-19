@@ -41,7 +41,7 @@ namespace MAI.Api.Controllers
         private string CallerIp => HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
         // ─────────────────────────────────────────────────────────────────────
-        // GET api/Keys/me — pachetul propriu, pentru descuiere în browser
+        // GET api/Keys/me - pachetul propriu, pentru descuiere în browser
         // ─────────────────────────────────────────────────────────────────────
         [HttpGet("me")]
         public async Task<IActionResult> GetMyBundle(CancellationToken ct)
@@ -71,13 +71,13 @@ namespace MAI.Api.Controllers
         }
 
         // ─────────────────────────────────────────────────────────────────────
-        // POST api/Keys/verify-password — confirmă parola înainte de generare
+        // POST api/Keys/verify-password - confirmă parola înainte de generare
         // ─────────────────────────────────────────────────────────────────────
         /// <summary>
         /// Cheile private se încuie cu o cheie derivată din parola contului. Dacă
         /// utilizatorul tastează greșit parola pe ecranul de generare, cheile se
         /// încuie cu o parolă care nu există nicăieri, iar la următoarea
-        /// autentificare nu se mai pot descuia — pierdere permanentă și tăcută.
+        /// autentificare nu se mai pot descuia - pierdere permanentă și tăcută.
         ///
         /// Endpointul elimină exact acest scenariu. Nu returnează nimic în afara
         /// unui bool și consumă din cota de rate limiting pentru operații cu
@@ -108,7 +108,7 @@ namespace MAI.Api.Controllers
         }
 
         // ─────────────────────────────────────────────────────────────────────
-        // POST api/Keys — înregistrează pachetul de chei (o singură dată)
+        // POST api/Keys - înregistrează pachetul de chei (o singură dată)
         // ─────────────────────────────────────────────────────────────────────
         [HttpPost]
         [EnableRateLimiting(RateLimitPolicies.PasswordWrite)]
@@ -208,7 +208,7 @@ namespace MAI.Api.Controllers
         }
 
         // ─────────────────────────────────────────────────────────────────────
-        // PATCH api/Keys/rewrap — după schimbarea parolei
+        // PATCH api/Keys/rewrap - după schimbarea parolei
         // ─────────────────────────────────────────────────────────────────────
         /// <summary>
         /// Cheile private sunt încuiate cu o cheie derivată din parolă. Când parola
@@ -217,8 +217,8 @@ namespace MAI.Api.Controllers
         /// primite anterior rămân accesibile.
         ///
         /// Cere parola CURENTĂ a contului (după schimbare, adică cea nouă) și o
-        /// verifică cu Argon2id. Fără această dovadă, un token de acces furat —
-        /// valabil cincisprezece minute — ajungea ca să suprascrie blobul cu
+        /// verifică cu Argon2id. Fără această dovadă, un token de acces furat -
+        /// valabil cincisprezece minute - ajungea ca să suprascrie blobul cu
         /// gunoi. Serverul nu poate distinge un blob valid de unul corupt (nu îl
         /// poate decripta), iar fără key escrow nu există copie: rezultatul era
         /// pierderea definitivă a accesului la TOATE fișierele primite, printr-o
@@ -297,7 +297,7 @@ namespace MAI.Api.Controllers
         }
 
         // ─────────────────────────────────────────────────────────────────────
-        // GET api/Keys/{userId}/public — cheile publice ale unui destinatar
+        // GET api/Keys/{userId}/public - cheile publice ale unui destinatar
         // ─────────────────────────────────────────────────────────────────────
         [HttpGet("{userId:guid}/public")]
         public async Task<IActionResult> GetPublicKeys(Guid userId, CancellationToken ct)
@@ -343,7 +343,7 @@ namespace MAI.Api.Controllers
         }
 
         // ─────────────────────────────────────────────────────────────────────
-        // GET api/Keys/recipients — utilizatori activi care POT primi fișiere
+        // GET api/Keys/recipients - utilizatori activi care POT primi fișiere
         // ─────────────────────────────────────────────────────────────────────
         [HttpGet("recipients")]
         public async Task<IActionResult> GetRecipients(CancellationToken ct)

@@ -8,7 +8,7 @@ namespace MAI.Domain.Enums
 
         /// <summary>
         /// Distribuit. Lista destinatarilor a fost fixată în momentul publicării
-        /// și nu se mai schimbă — este lista față de care se măsoară „luat la
+        /// și nu se mai schimbă - este lista față de care se măsoară „luat la
         /// cunoștință”.
         /// </summary>
         Published = 1,

@@ -3,7 +3,7 @@
  *
  * Amprenta NU e un secret: e făcută tocmai ca să fie citită cu voce tare și
  * comparată cu un coleg, pe alt canal, ca să se excludă substituirea cheilor de
- * către server. Ascunderea ține de ecran — la o prezentare sau într-un birou
+ * către server. Ascunderea ține de ecran - la o prezentare sau într-un birou
  * deschis, un șir lung de caractere nu are ce căuta permanent la vedere. De
  * aceea se ascunde singură după un timp și poate fi copiată când e afișată.
  *
@@ -37,7 +37,7 @@ export default function KeyFingerprint({ value, autoHideSeconds = 30 }: KeyFinge
         return () => window.clearTimeout(timer);
     }, [copied]);
 
-    if (!value) return <span className="font-mono">—</span>;
+    if (!value) return <span className="font-mono">-</span>;
 
     const masked = value.replace(/[0-9A-Fa-f]/g, '•');
 

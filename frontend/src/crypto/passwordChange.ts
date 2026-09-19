@@ -5,7 +5,7 @@
  *
  * Cheile private ale utilizatorului sunt încuiate cu o cheie AES derivată
  * PBKDF2 din parola contului. Dacă utilizatorul își schimbă parola și nimeni nu
- * reîmpachetează blobul, cheile rămân încuiate cu parola VECHE — pe care nimeni
+ * reîmpachetează blobul, cheile rămân încuiate cu parola VECHE - pe care nimeni
  * nu o mai știe. Rezultatul: toate fișierele primite până atunci devin
  * imposibil de deschis, definitiv, iar utilizatorul află abia la următoarea
  * autentificare.
@@ -61,7 +61,7 @@ async function deriveWrappingKey(
  * (cheie, IV) în AES-GCM este o slăbiciune criptografică gravă, iar cheia se
  * schimbă oricum odată cu parola.
  *
- * Aruncă dacă parola veche e greșită — tagul GCM nu se verifică, deci
+ * Aruncă dacă parola veche e greșită - tagul GCM nu se verifică, deci
  * decriptarea eșuează în loc să producă gunoi care ar fi salvat pe server.
  */
 export async function rewrapKeysForNewPassword(

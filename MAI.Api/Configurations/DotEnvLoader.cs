@@ -10,7 +10,7 @@ namespace MAI.Api.Configuration
     /// Docker Compose citește <c>.env</c> și îl traduce în variabile de mediu
     /// (vezi <c>docker-compose.yml</c>). Fără clasa asta, rularea locală avea
     /// nevoie de aceleași valori a doua oară, în <c>user-secrets</c> sau în
-    /// <c>appsettings.Development.json</c> — două locuri care se desincronizează.
+    /// <c>appsettings.Development.json</c> - două locuri care se desincronizează.
     ///
     /// Reguli:
     /// <list type="bullet">

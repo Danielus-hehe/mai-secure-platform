@@ -6,7 +6,7 @@ namespace MAI.Domain.Entities
 {
     /// <summary>
     /// Document intern distribuit pe structura organizatorică: dispoziții,
-    /// note, circulare — cu confirmare de luare la cunoștință.
+    /// note, circulare - cu confirmare de luare la cunoștință.
     ///
     /// Diferit de registrul de documente normative (Document), care e public în
     /// toată instituția, și de transferuri, care sunt criptate end-to-end între

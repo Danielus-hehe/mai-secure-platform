@@ -129,7 +129,7 @@ export default function ResetPasswordPage() {
                                     <p className="text-xs leading-relaxed text-amber-800 dark:text-amber-300">
                                         Cheile de criptare ale contului sunt protejate cu parola veche. După schimbare
                                         veți genera chei noi, iar fișierele criptate primite anterior nu vor mai putea fi
-                                        deschise — expeditorii le pot retrimite.
+                                        deschise - expeditorii le pot retrimite.
                                     </p>
                                 </div>
                             )}

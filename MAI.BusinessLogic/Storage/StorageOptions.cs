@@ -25,7 +25,7 @@ namespace MAI.BusinessLogic.Storage
         ///   • Transferuri:  {dept-slug}/{yyyy}/{MM}/{transferId:N}.enc
         ///   • Documente:    documents/{docId:N}/v{n}.{ext}
         ///
-        /// Mediu de producție — dacă volumul o cere sau politicile IAM o impun, se
+        /// Mediu de producție - dacă volumul o cere sau politicile IAM o impun, se
         /// pot folosi bucket-uri separate (ex. "mai-secure-transfers" și
         /// "mai-secure-documents") cu configurații Storage distincte per controller.
         /// </summary>
@@ -42,12 +42,12 @@ namespace MAI.BusinessLogic.Storage
 
         /// <summary>
         /// Path-style (http://host/bucket/key) în loc de virtual-host-style
-        /// (http://bucket.host/key). Obligatoriu pentru MinIO — nu are DNS wildcard.
+        /// (http://bucket.host/key). Obligatoriu pentru MinIO - nu are DNS wildcard.
         /// </summary>
         public bool ForcePathStyle { get; set; } = true;
 
         /// <summary>
-        /// [Legacy — nefolosit pentru construcția cheilor noi]
+        /// [Legacy - nefolosit pentru construcția cheilor noi]
         ///
         /// Înainte de Feature #4, toate transferurile aveau prefixul fix "transfers/".
         /// Acum prefixul de prim nivel este departamentul expeditorului (slug-ificat),
@@ -57,7 +57,7 @@ namespace MAI.BusinessLogic.Storage
         /// consultanții care administrează instanțe vechi: bucket-urile create
         /// înainte de Feature #4 au obiectele sub "transfers/{yyyy}/{MM}/".
         /// Regulile ILM/lifecycle din MinIO care targetau "transfers/" nu se mai
-        /// potrivesc cu cheile noi — a se vedea comentariile din docker-compose.yml.
+        /// potrivesc cu cheile noi - a se vedea comentariile din docker-compose.yml.
         /// </summary>
         public string TransfersPrefix { get; set; } = "transfers";
 

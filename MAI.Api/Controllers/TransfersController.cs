@@ -19,10 +19,10 @@ namespace MAI.Api.Controllers
     /// Transferuri criptate end-to-end.
     ///
     /// Modelul de date, după runda „dovadă de primire per destinatar”:
-    ///   • FileTransfer — fișierul (cifrotext în depozit), plicul comun (IV,
+    ///   • FileTransfer - fișierul (cifrotext în depozit), plicul comun (IV,
     ///     semnătura, cheia împachetată pentru expeditor), politica aleasă de
     ///     expeditor (categorie, expirare, AllowForward) și starea agregată.
-    ///   • TransferRecipient — câte un rând pentru fiecare destinatar: cheia de
+    ///   • TransferRecipient - câte un rând pentru fiecare destinatar: cheia de
     ///     fișier împachetată pentru el și propria confirmare de primire.
     ///
     /// Serverul nu participă la niciun pas criptografic: primește și servește
@@ -82,6 +82,29 @@ namespace MAI.Api.Controllers
             Ok(new TransferPolicyDto(_policy.DefaultExpiryDays, _policy.MaxExpiryDays, _policy.MaxRecipients));
 
         // ═════════════════════════════════════════════════════════════════════
+        // GET api/Transfers/awaiting-count
+        // ═════════════════════════════════════════════════════════════════════
+        /// <summary>
+        /// Câte fișiere primite nu am descărcat încă (active și în termen).
+        /// Pentru insigna din meniu și contorul de pe fila „Primite”.
+        /// </summary>
+        [HttpGet("awaiting-count")]
+        public async Task<IActionResult> GetAwaitingCount(CancellationToken ct)
+        {
+            var userId = CurrentUserId;
+            var now    = DateTime.UtcNow;
+
+            var count = await _context.TransferRecipients.CountAsync(r =>
+                r.UserId == userId &&
+                r.DownloadedAt == null &&
+                r.Transfer!.DeletedAt == null &&
+                r.Transfer.Status == TransferStatus.Pending &&
+                (r.Transfer.ExpiresAt == null || r.Transfer.ExpiresAt > now), ct);
+
+            return Ok(new { count });
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
         // GET api/Transfers
         // ═════════════════════════════════════════════════════════════════════
         [HttpGet]
@@ -117,7 +140,7 @@ namespace MAI.Api.Controllers
                 query = query.Where(t => t.Category == category.Value);
 
             // Filtru pe subdiviziune (cu subunități): transferurile în care
-            // cealaltă parte — expeditorul sau un destinatar — lucrează acolo.
+            // cealaltă parte - expeditorul sau un destinatar - lucrează acolo.
             // Se aplică doar peste transferurile utilizatorului, deci nu dă acces
             // la nimic nou; e doar o sortare a propriei corespondențe.
             if (orgUnitId.HasValue)
@@ -201,7 +224,7 @@ namespace MAI.Api.Controllers
         /// Cine vede confirmările: expeditorul le vede pe toate; cel care a făcut
         /// un forward le vede pe ale destinatarilor adăugați de el; fiecare
         /// destinatar o vede pe a lui. Un destinatar nu află cine dintre colegi a
-        /// deschis deja documentul — asta e informația expeditorului.
+        /// deschis deja documentul - asta e informația expeditorului.
         /// </summary>
         private static TransferDto ToDto(FileTransfer t, Guid userId, bool isAdmin, DateTime now)
         {
@@ -273,7 +296,7 @@ namespace MAI.Api.Controllers
         /// Cifrotextul și IV-ul sunt comune; DEK-ul vine împachetat separat
         /// pentru fiecare destinatar (Recipients[i].UserId + EncryptedKeyForUser)
         /// și o dată pentru expeditor. Un singur obiect în depozit, oricâți
-        /// destinatari — nu N copii ale aceluiași fișier.
+        /// destinatari - nu N copii ale aceluiași fișier.
         /// </summary>
         [HttpPost]
         [Consumes("multipart/form-data")]
@@ -576,8 +599,8 @@ namespace MAI.Api.Controllers
         /// nou și trimite aici doar blocurile RSA-OAEP rezultate.
         ///
         /// Cine poate face forward (TransferRules.CanForward):
-        ///   • expeditorul — întotdeauna, cât timp conținutul există;
-        ///   • un destinatar — doar dacă expeditorul a bifat AllowForward.
+        ///   • expeditorul - întotdeauna, cât timp conținutul există;
+        ///   • un destinatar - doar dacă expeditorul a bifat AllowForward.
         /// </summary>
         [HttpPost("{id:guid}/forward")]
         public async Task<IActionResult> Forward(
@@ -783,7 +806,7 @@ namespace MAI.Api.Controllers
         /// <summary>
         /// Retrage transferul: obiectul se șterge din depozit, destinatarii care
         /// nu l-au descărcat nu îl mai pot deschide. Cei care l-au descărcat deja
-        /// îl păstrează — și dovada lor de primire rămâne.
+        /// îl păstrează - și dovada lor de primire rămâne.
         /// </summary>
         [HttpPost("{id:guid}/revoke")]
         public async Task<IActionResult> Revoke(
@@ -850,7 +873,7 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // DELETE api/Transfers/{id} — ștergere logică
+        // DELETE api/Transfers/{id} - ștergere logică
         // ═════════════════════════════════════════════════════════════════════
         /// <summary>
         /// Scoate transferul din liste și șterge cifrotextul, fără să distrugă
@@ -858,7 +881,7 @@ namespace MAI.Api.Controllers
         ///
         /// Un transfer activ (cu destinatari care nu l-au descărcat) nu se poate
         /// șterge direct: ar dispărea din lista destinatarilor fără explicație.
-        /// Se retrage întâi — destinatarii văd „Retras” — apoi se poate șterge.
+        /// Se retrage întâi - destinatarii văd „Retras” - apoi se poate șterge.
         /// </summary>
         [HttpDelete("{id:guid}")]
         public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
@@ -934,7 +957,7 @@ namespace MAI.Api.Controllers
 
         /// <summary>
         /// Șterge obiectul din depozit. La eșec consemnează în audit și întoarce
-        /// false — apelantul NU schimbă starea transferului, ca interfața să nu
+        /// false - apelantul NU schimbă starea transferului, ca interfața să nu
         /// afirme „șters” despre un fișier încă prezent.
         /// </summary>
         private async Task<bool> TryDeleteObjectAsync(
@@ -1050,7 +1073,7 @@ namespace MAI.Api.Controllers
 
         private static string DisplayName(User? user) =>
             user is null
-                ? "—"
+                ? "-"
                 : string.IsNullOrWhiteSpace(user.FullName) ? user.Username : user.FullName;
 
         private static string? Truncate(string? value, int max)
@@ -1066,7 +1089,7 @@ namespace MAI.Api.Controllers
         /// Prefixul era slug-ul departamentului expeditorului. Două probleme:
         /// Department nu mai există (a devenit OrgUnit, iar o reorganizare ar fi
         /// schimbat prefixul transferurilor noi), iar fără un prefix comun regula
-        /// de expirare din MinIO (ILM) nu putea ținti doar transferurile — ștergea
+        /// de expirare din MinIO (ILM) nu putea ținti doar transferurile - ștergea
         /// după 30 de zile tot bucketul, inclusiv documentele normative și interne.
         /// Transferurile vechi își păstrează cheile; jobul de expirare le curăță.
         /// </summary>

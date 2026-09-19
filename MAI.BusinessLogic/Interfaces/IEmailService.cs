@@ -72,7 +72,7 @@
 
         /// <summary>
         /// Verifică dacă serviciul este configurat și gata de utilizare.
-        /// Returnează false dacă lipsesc credențialele SMTP — utile pentru
+        /// Returnează false dacă lipsesc credențialele SMTP - utile pentru
         /// health check și pentru a sări notificările în locuri neeceritabile.
         /// </summary>
         bool IsConfigured { get; }

@@ -25,7 +25,7 @@ export interface PickableUser {
  *
  * Destinatarii aleși apar ca etichete deasupra câmpului; Backspace pe câmpul
  * gol îl scoate pe ultimul. Aceeași componentă servește la trimitere și la
- * forward — la forward, `exclude` ascunde pe cei care au deja acces.
+ * forward - la forward, `exclude` ascunde pe cei care au deja acces.
  *
  * Tastatură: ↑/↓ mută selecția, Enter alege, Escape închide lista.
  */
@@ -283,7 +283,7 @@ export default function RecipientCombobox<T extends PickableUser>({
                     {full
                         ? `S-a atins limita de ${max} destinatari.`
                         : available > 0
-                            ? `${available} ${available === 1 ? availableNoun[0] : availableNoun[1]} — ` +
+                            ? `${available} ${available === 1 ? availableNoun[0] : availableNoun[1]} - ` +
                               'începeți să scrieți pentru a căuta.'
                             : noResultsText}
                 </p>

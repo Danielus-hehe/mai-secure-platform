@@ -1,5 +1,5 @@
 -- ═══════════════════════════════════════════════════════════════════════════
--- 900 — Date demonstrative
+-- 900 - Date demonstrative
 --
 -- DE RULAT DOAR ÎN DEZVOLTARE ȘI LA PREZENTARE. Nu în producție.
 --
@@ -22,7 +22,7 @@
 -- ── Limitare de menționat la prezentare ────────────────────────────────────
 --
 -- Utilizatorii demo NU au chei criptografice: cheile se generează în browser, la
--- prima autentificare, iar serverul nu le poate fabrica — exact asta e garanția
+-- prima autentificare, iar serverul nu le poate fabrica - exact asta e garanția
 -- E2EE. Prin urmare transferurile din seed au IsEncrypted = false și sunt puse
 -- în stări terminale (descărcat, expirat, retras). Nimeni nu va încerca să le
 -- deschidă, iar listele, filtrele, dovada de primire și jurnalul de audit sunt
@@ -121,8 +121,8 @@ BEGIN
     DELETE FROM "Users" WHERE "Username" LIKE '%.demo';
 
     -- De jos în sus: cheia străină ParentId e RESTRICT, verificată pe rând.
-    DELETE FROM "OrgUnits" WHERE "Code" LIKE 'DEMO-%' AND "Type" = 3;
-    DELETE FROM "OrgUnits" WHERE "Code" LIKE 'DEMO-%' AND "Type" = 2;
+    DELETE FROM "OrgUnits" WHERE "Code" LIKE 'DEMO-%' AND "Type" >= 300;
+    DELETE FROM "OrgUnits" WHERE "Code" LIKE 'DEMO-%' AND "Type" >= 200;
     DELETE FROM "OrgUnits" WHERE "Code" LIKE 'DEMO-%';
 
     -- ── 0. Structura organizatorică demo ───────────────────────────────────
@@ -133,17 +133,17 @@ BEGIN
     FOR v_i IN 1..5 LOOP
         v_id := gen_random_uuid();
         INSERT INTO "OrgUnits" ("Id", "Name", "Code", "Type", "ParentId", "IsActive", "CreatedAt")
-        VALUES (v_id, v_directii[v_i] || ' (demo)', 'DEMO-' || v_i, 1, NULL, TRUE, v_now);
+        VALUES (v_id, v_directii[v_i] || ' (demo)', 'DEMO-' || v_i, 100, NULL, TRUE, v_now);
         v_unit_ids := array_append(v_unit_ids, v_id);
     END LOOP;
 
     v_id := gen_random_uuid();
     INSERT INTO "OrgUnits" ("Id", "Name", "Code", "Type", "ParentId", "IsActive", "CreatedAt")
-    VALUES (v_id, 'Sectia investigatii (demo)', 'DEMO-S1', 2, v_unit_ids[1], TRUE, v_now);
+    VALUES (v_id, 'Sectia investigatii (demo)', 'DEMO-S1', 200, v_unit_ids[1], TRUE, v_now);
     v_unit_ids := array_append(v_unit_ids, v_id);   -- [6]
 
     INSERT INTO "OrgUnits" ("Id", "Name", "Code", "Type", "ParentId", "IsActive", "CreatedAt")
-    VALUES (gen_random_uuid(), 'Serviciul analiza (demo)', 'DEMO-V1', 3, v_id, TRUE, v_now);
+    VALUES (gen_random_uuid(), 'Serviciul analiza (demo)', 'DEMO-V1', 300, v_id, TRUE, v_now);
 
     -- ── 1. Utilizatori ─────────────────────────────────────────────────────
     -- 15 conturi: 1 administrator, 2 șefi de direcție, 12 utilizatori.
@@ -188,7 +188,7 @@ BEGIN
     v_sef2  := v_user_ids[3];
 
     -- Șefii: cei doi șefi de direcție conduc direcțiile lor; un utilizator
-    -- obișnuit conduce secția — șeful e dat de unitatea condusă, nu de rol.
+    -- obișnuit conduce secția - șeful e dat de unitatea condusă, nu de rol.
     UPDATE "OrgUnits" SET "HeadUserId" = v_user_ids[2]
      WHERE "Id" = (SELECT "OrgUnitId" FROM "Users" WHERE "Id" = v_user_ids[2]);
     UPDATE "OrgUnits" SET "HeadUserId" = v_user_ids[3]
@@ -267,7 +267,7 @@ BEGIN
         );
 
         -- Al doilea destinatar la fiecare al cincilea transfer: la cele în
-        -- așteptare, primul a confirmat și al doilea nu — exact cazul pe care
+        -- așteptare, primul a confirmat și al doilea nu - exact cazul pe care
         -- dovada de primire per destinatar trebuie să-l arate.
         v_recipient2 := v_user_ids[1 + ((v_i + 9) % 15)];
 
@@ -408,7 +408,7 @@ BEGIN
 
     RAISE NOTICE 'Seed complet: 15 utilizatori, ~40 transferuri, 12 documente, ~410 randuri de audit.';
     RAISE NOTICE 'Toti utilizatorii demo au parola contului "%".', v_sursa_parola;
-    RAISE NOTICE 'Conturi: *.demo — administrator: %', (SELECT "Username" FROM "Users" WHERE "Id" = v_admin);
+    RAISE NOTICE 'Conturi: *.demo - administrator: %', (SELECT "Username" FROM "Users" WHERE "Id" = v_admin);
 
 END $$;
 

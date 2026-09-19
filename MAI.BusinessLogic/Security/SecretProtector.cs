@@ -7,7 +7,7 @@ namespace MAI.BusinessLogic.Security
     /// Cifreaza secrete scurte inainte sa ajunga in baza de date.
     ///
     /// Folosit pentru secretele TOTP. Motivul e concret: un secret TOTP stocat in
-    /// clar are exact aceeasi valoare pentru un atacator ca pentru utilizator —
+    /// clar are exact aceeasi valoare pentru un atacator ca pentru utilizator -
     /// cine citeste coloana poate genera coduri valide la infinit. Spre deosebire
     /// de parola, care e stocata ca hash si nu poate fi reconstruita, secretul
     /// TOTP TREBUIE sa fie reversibil ca serverul sa poata verifica codul. Deci
@@ -15,7 +15,7 @@ namespace MAI.BusinessLogic.Security
     ///
     /// Consecinta care trebuie inteleasa: daca atacatorul obtine si baza de date,
     /// si cheia din variabila de mediu, 2FA cade. Cifrarea apara scenariul
-    /// realist — dump de bază de date, backup pierdut, SQL injection — nu
+    /// realist - dump de bază de date, backup pierdut, SQL injection - nu
     /// compromiterea totala a serverului.
     ///
     /// AES-256-GCM: cifrare autentificata. Un octet modificat in baza de date
@@ -46,7 +46,7 @@ namespace MAI.BusinessLogic.Security
             catch (FormatException)
             {
                 // Acceptam si text simplu, dar il trecem prin SHA-256 ca sa obtinem
-                // fix 32 de octeti. Nu adauga entropie — doar face configurarea
+                // fix 32 de octeti. Nu adauga entropie - doar face configurarea
                 // tolerabila. Cheia tot trebuie sa fie aleatorie.
                 key = SHA256.HashData(Encoding.UTF8.GetBytes(options.EncryptionKey));
             }
@@ -112,7 +112,7 @@ namespace MAI.BusinessLogic.Security
             // În .NET 8, AesGcm aruncă AuthenticationTagMismatchException (o
             // subclasă). O normalizăm la CryptographicException cu mesaj propriu:
             // apelanții tratează un singur tip, iar mesajul nu divulgă dacă a
-            // fost cheia greșită sau datele alterate — ambele arată la fel.
+            // fost cheia greșită sau datele alterate - ambele arată la fel.
             try
             {
                 using var aes = new AesGcm(_key, TagSize);

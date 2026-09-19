@@ -385,6 +385,24 @@ namespace MAI.DataAccessLayer.Migrations
                     b.ToTable("InternalDocumentTargets", (string)null);
                 });
 
+            modelBuilder.Entity("MAI.Domain.Entities.OrgLevel", b =>
+                {
+                    b.Property<int>("Rank")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
+
+                    b.HasKey("Rank");
+
+                    b.ToTable("OrgLevels", (string)null);
+                });
+
             modelBuilder.Entity("MAI.Domain.Entities.OrgUnit", b =>
                 {
                     b.Property<Guid>("Id")

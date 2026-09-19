@@ -89,7 +89,7 @@ public class DistributionResolverTests
         // Ana e în DGP; șeful secției de investigații e subordonat direct.
         // Bob și Cara sunt subordonații ȘEFULUI DE SECȚIE, nu ai directorului.
         // Secția pază nu are șef, deci Dan nu e subordonat direct al nimănui
-        // aici — decizie documentată: distribuția nu „sare” un nivel.
+        // aici - decizie documentată: distribuția nu „sare” un nivel.
         var r = Resolve(Sef, DistributionMode.DirectSubordinates);
 
         Assert.True(r.Success);

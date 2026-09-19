@@ -42,7 +42,7 @@ namespace MAI.Api.Services
     /// Resetarea parolei inițiată de administrator, finalizată de titular.
     ///
     /// Diferența față de resetarea cu parolă temporară: administratorul nu află
-    /// niciodată parola nouă. Asta contează pentru E2EE — cheile generate după
+    /// niciodată parola nouă. Asta contează pentru E2EE - cheile generate după
     /// resetare se încuie cu o parolă pe care o știe doar titularul, deci nu mai
     /// e nevoie de pasul intermediar „schimbă parola temporară”.
     /// </summary>

@@ -9,7 +9,7 @@ namespace MAI.Domain.Entities
     ///
     /// Înlocuiește câmpul text liber User.Department. Textul liber nu putea
     /// răspunde la întrebările de care are nevoie distribuția documentelor
-    /// interne — „cine e în subordinea mea?”, „cine conduce secția asta?” —
+    /// interne - „cine e în subordinea mea?”, „cine conduce secția asta?” -
     /// iar „Directia IT” și „Direcția Tehnologii Informaționale” erau două
     /// departamente diferite pentru server.
     ///

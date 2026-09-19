@@ -22,7 +22,7 @@ namespace MAI.DataAccessLayer.Configurations
             builder.Property(s => s.IpAddress).HasMaxLength(64);
             builder.Property(s => s.RevokedReason).HasMaxLength(128);
 
-            // Calculată din RevokedAt și ExpiresAt — EF ar căuta altfel o coloană.
+            // Calculată din RevokedAt și ExpiresAt - EF ar căuta altfel o coloană.
             builder.Ignore(s => s.IsActive);
 
             // Ștergerea unui utilizator îi ia sesiunile cu ea. Aici cascada e

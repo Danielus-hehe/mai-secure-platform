@@ -13,11 +13,11 @@ namespace MAI.Api.Middleware
     ///
     /// Ce face si ce NU face:
     ///
-    ///   FACE — refuza cererile venite din afara plajelor configurate, inainte de
+    ///   FACE - refuza cererile venite din afara plajelor configurate, inainte de
     ///   orice autentificare. Este un perimetru, nu o autorizare: reduce suprafata
     ///   expusa, dar nu inlocuieste JWT-ul si RBAC-ul de dedesubt.
     ///
-    ///   NU FACE — nu opreste un atacator care se afla DEJA in reteaua interna.
+    ///   NU FACE - nu opreste un atacator care se afla DEJA in reteaua interna.
     ///   Filtrarea dupa IP este un control de perimetru; adresele sursa se pot
     ///   falsifica intr-o retea nesegmentata, iar un dispozitiv compromis din
     ///   intranet trece nestingherit. De aceea ramane un strat in plus, nu

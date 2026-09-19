@@ -11,7 +11,7 @@ interface Props {
     disabled?: boolean;
 }
 
-/** Listă cu bife, în ordinea arborelui — pentru distribuția „subdiviziuni selectate”. */
+/** Listă cu bife, în ordinea arborelui - pentru distribuția „subdiviziuni selectate”. */
 export default function UnitChecklist({ units, value, onChange, allowedIds, disabled }: Props) {
     const rows = useMemo(
         () => buildOrgTree(units.filter((u) => u.isActive)).filter((r) => allowedIds.has(r.unit.id)),

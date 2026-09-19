@@ -1,16 +1,20 @@
 namespace MAI.Domain.Enums
 {
     /// <summary>
-    /// Nivelul unei subdiviziuni în structura MAI. Persistat ca int.
+    /// Nivelul unei subdiviziuni, ca rang numeric. Persistat ca int.
     ///
-    /// Ordinea contează: un copil are întotdeauna un nivel mai mare decât
-    /// părintele (o Secție stă sub o Direcție, nu invers). Regula e verificată
-    /// de OrgTree.ValidatePlacement.
+    /// Membrii de aici sunt doar nivelurile predefinite. Administratorul poate
+    /// adăuga niveluri proprii (vezi OrgLevel) între ele sau sub ele, de aceea
+    /// rangurile au goluri de câte 100: un „Departament” între Direcție și
+    /// Secție primește rangul 150, un „Birou” sub Serviciu primește 400.
+    ///
+    /// Regula de structură rămâne una singură: un copil are rangul strict mai
+    /// mare decât părintele (verificată de OrgTree.ValidatePlacement).
     /// </summary>
     public enum OrgUnitType
     {
-        Directie = 1,
-        Sectie   = 2,
-        Serviciu = 3,
+        Directie = 100,
+        Sectie   = 200,
+        Serviciu = 300,
     }
 }

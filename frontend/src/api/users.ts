@@ -6,7 +6,7 @@
 import api from './client';
 import type { PickableUser } from '../components/transfers/RecipientCombobox';
 
-/** Un cont din directorul intern (GET /Users/all) — fără email, rol sau stare. */
+/** Un cont din directorul intern (GET /Users/all) - fără email, rol sau stare. */
 export interface DirectoryUser extends PickableUser {
     orgUnitId: string | null;
 }

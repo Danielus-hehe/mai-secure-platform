@@ -5,25 +5,25 @@
 
 import api from './client';
 
-export const OrgUnitType = {
-    Directie: 1,
-    Sectie:   2,
-    Serviciu: 3,
-} as const;
+/**
+ * Rangul nivelului (Direcție = 100, Secție = 200, Serviciu = 300; administratorul
+ * poate adăuga altele, ex. 150 sau 400). Denumirile vin din /OrgLevels.
+ */
+export type OrgUnitType = number;
 
-export type OrgUnitType = typeof OrgUnitType[keyof typeof OrgUnitType];
-
-export const ORG_UNIT_TYPE_LABELS: Record<OrgUnitType, string> = {
-    [OrgUnitType.Directie]: 'Direcție',
-    [OrgUnitType.Sectie]:   'Secție',
-    [OrgUnitType.Serviciu]: 'Serviciu',
-};
+export interface OrgLevel {
+    rank: number;
+    name: string;
+    unitCount: number;
+}
 
 export interface OrgUnit {
     id: string;
     name: string;
     code: string | null;
     type: OrgUnitType;
+    /** Denumirea nivelului (ex. „Secție”). */
+    levelName: string;
     parentId: string | null;
     headUserId: string | null;
     headName: string | null;
@@ -75,5 +75,42 @@ export async function setOrgUnitHead(id: string, userId: string | null): Promise
 
 export async function deleteOrgUnit(id: string): Promise<{ message: string }> {
     const { data } = await api.delete(`/OrgUnits/${id}`);
+    return data;
+}
+
+/** Încadrează persoanele în subdiviziune (le mută, dacă erau în alta). */
+export async function addOrgUnitMembers(
+    id: string,
+    userIds: string[]
+): Promise<{ message: string; moved: number; headsReleased: string[] }> {
+    const { data } = await api.post(`/OrgUnits/${id}/members`, { userIds });
+    return data;
+}
+
+export async function removeOrgUnitMember(id: string, userId: string): Promise<{ message: string }> {
+    const { data } = await api.delete(`/OrgUnits/${id}/members/${userId}`);
+    return data;
+}
+
+// ── Niveluri ─────────────────────────────────────────────────────────────────
+
+export async function listOrgLevels(): Promise<OrgLevel[]> {
+    const { data } = await api.get<OrgLevel[]>('/OrgLevels');
+    return data;
+}
+
+/** Adaugă un nivel imediat sub `afterRank` (null = deasupra tuturor). */
+export async function createOrgLevel(name: string, afterRank: number | null): Promise<{ rank: number; message: string }> {
+    const { data } = await api.post('/OrgLevels', { name, afterRank });
+    return data;
+}
+
+export async function renameOrgLevel(rank: number, name: string): Promise<{ message: string }> {
+    const { data } = await api.put(`/OrgLevels/${rank}`, { name });
+    return data;
+}
+
+export async function deleteOrgLevel(rank: number): Promise<{ message: string }> {
+    const { data } = await api.delete(`/OrgLevels/${rank}`);
     return data;
 }

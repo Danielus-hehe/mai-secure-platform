@@ -9,7 +9,7 @@ namespace MAI.DataAccessLayer.Configurations
     ///
     /// Deliberat minimală: doar indexuri. Adăugarea de HasMaxLength aici ar
     /// genera ALTER COLUMN pe coloane care conțin deja date, cu risc de
-    /// trunchiere — o schimbare separată, făcută conștient, nu un efect
+    /// trunchiere - o schimbare separată, făcută conștient, nu un efect
     /// secundar al adăugării unui index.
     /// </summary>
     public class UserConfiguration : IEntityTypeConfiguration<User>
@@ -34,7 +34,7 @@ namespace MAI.DataAccessLayer.Configurations
                 .HasFilter("\"InvitationToken\" IS NOT NULL")
                 .HasDatabaseName("IX_Users_InvitationToken");
 
-            // Tokenul de resetare a parolei — același tipar ca invitația.
+            // Tokenul de resetare a parolei - același tipar ca invitația.
             builder.HasIndex(u => u.PasswordResetToken)
                 .IsUnique()
                 .HasFilter("\"PasswordResetToken\" IS NOT NULL")

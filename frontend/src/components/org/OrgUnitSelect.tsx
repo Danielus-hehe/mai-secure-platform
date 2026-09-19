@@ -53,7 +53,7 @@ export default function OrgUnitSelect({
                 >
                     {'\u00A0\u00A0\u00A0'.repeat(depth)}{depth > 0 ? '└ ' : ''}{unit.name}
                     {unit.code ? ` (${unit.code})` : ''}
-                    {!unit.isActive ? ' — desființată' : ''}
+                    {!unit.isActive ? ' - desființată' : ''}
                 </option>
             ))}
         </select>

@@ -18,7 +18,7 @@ namespace MAI.DataAccessLayer.Configurations
             // Cascada rămâne doar pentru consistență referențială la un DELETE
             // manual în baza de date. Aplicația nu mai șterge fizic transferuri:
             // DELETE /api/Transfers/{id} face ștergere logică, tocmai ca rândurile
-            // de aici — cu dovezile de primire — să nu dispară.
+            // de aici - cu dovezile de primire - să nu dispară.
             builder.HasOne(r => r.Transfer)
                 .WithMany(t => t.Recipients)
                 .HasForeignKey(r => r.TransferId)
@@ -30,7 +30,7 @@ namespace MAI.DataAccessLayer.Configurations
                 .OnDelete(DeleteBehavior.Restrict);
 
             // ForwardedById e opțional. Dacă utilizatorul este șters, câmpul
-            // devine null (SetNull) — nu vrem să pierdem rândul destinatarului
+            // devine null (SetNull) - nu vrem să pierdem rândul destinatarului
             // doar pentru că autorul forward-ului nu mai există.
             builder.HasOne(r => r.ForwardedBy)
                 .WithMany()

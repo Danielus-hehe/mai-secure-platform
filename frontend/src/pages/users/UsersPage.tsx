@@ -30,7 +30,7 @@ const ROLE_STR: Record<Role, number> = {
     ADMINISTRATOR: 3,
 };
 
-/** Răspunsul brut de la /api/Users — role vine ca număr */
+/** Răspunsul brut de la /api/Users - role vine ca număr */
 interface ApiUser {
     id: string; fullName: string; username: string;
     email: string; role: number; department: string;
@@ -169,7 +169,7 @@ export default function UsersPage() {
             });
 
             // Mesajul serverului spune și că utilizatorul își va schimba parola
-            // la prima autentificare — util de transmis odată cu parola inițială.
+            // la prima autentificare - util de transmis odată cu parola inițială.
             toast.success(data?.message ?? `Contul @${form.username} a fost creat.`);
             setCreateOpen(false);
             setForm(EMPTY_FORM);
@@ -255,7 +255,7 @@ export default function UsersPage() {
 
             <PageHeader
                 title="Gestiune utilizatori"
-                subtitle="Conturile sunt create exclusiv de administrator — fără auto-înregistrare"
+                subtitle="Conturile sunt create exclusiv de administrator - fără auto-înregistrare"
                 actions={
                     <Button onClick={() => setCreateOpen(true)}>
                         <UserPlus size={16} /> Cont nou
@@ -329,7 +329,7 @@ export default function UsersPage() {
                                         </td>
 
                                         <td className="px-5 py-3.5 text-mai-500 dark:text-mai-300">
-                                            <p className="whitespace-nowrap">{u.department || '—'}</p>
+                                            <p className="whitespace-nowrap">{u.department || '-'}</p>
                                             {u.ledOrgUnitName && (
                                                 <p className="mt-0.5 inline-flex items-center gap-1 text-[11px] font-medium text-gold-600">
                                                     <Crown size={11} /> Șef: {u.ledOrgUnitName}
@@ -337,7 +337,7 @@ export default function UsersPage() {
                                             )}
                                         </td>
 
-                                        {/* Dropdown rol — schimbă direct în DB */}
+                                        {/* Dropdown rol - schimbă direct în DB */}
                                         <td className="px-5 py-3.5">
                                             <select
                                                 value={u.role}
@@ -461,7 +461,7 @@ export default function UsersPage() {
                             units={orgUnits.filter(o => o.isActive)}
                             value={form.orgUnitId}
                             onChange={v => setForm(f => ({ ...f, orgUnitId: v }))}
-                            emptyLabel="— neîncadrat —"
+                            emptyLabel="- neîncadrat -"
                         />
                         {orgUnits.length === 0 && (
                             <p className="mt-1 text-xs text-mai-400">

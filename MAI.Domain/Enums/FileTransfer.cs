@@ -28,7 +28,7 @@ namespace MAI.Domain.Entities
         /// LIMITARE conștientă, de menționat în raport: numele NU este criptat.
         /// Serverul îl vede, pentru că listele și căutarea server-side au nevoie
         /// de el. Într-o variantă strictă ar intra și el în plicul criptografic,
-        /// iar listele ar afișa nume decriptate în browser — cu prețul pierderii
+        /// iar listele ar afișa nume decriptate în browser - cu prețul pierderii
         /// căutării în baza de date.
         /// </summary>
         public string FileName { get; set; } = string.Empty;
@@ -77,7 +77,7 @@ namespace MAI.Domain.Entities
         public DateTime? ExpiresAt { get; set; }
 
         /// <summary>
-        /// Categoria transferului — pentru filtrare și prioritizare vizuală.
+        /// Categoria transferului - pentru filtrare și prioritizare vizuală.
         /// Valoarea implicită este General; expeditorul o poate schimba la trimitere.
         /// </summary>
         public TransferCategory Category { get; set; } = TransferCategory.General;
@@ -97,8 +97,8 @@ namespace MAI.Domain.Entities
         public bool AllowForward { get; set; }
 
         /// <summary>
-        /// Ștergere logică. Rândul și destinatarii lui rămân — cu dovezile de
-        /// primire — dar transferul dispare din liste, cifrotextul se șterge din
+        /// Ștergere logică. Rândul și destinatarii lui rămân - cu dovezile de
+        /// primire - dar transferul dispare din liste, cifrotextul se șterge din
         /// depozit și cheile împachetate se golesc.
         ///
         /// Ștergerea fizică (DELETE) distrugea tocmai dovada că un document a
@@ -118,7 +118,7 @@ namespace MAI.Domain.Entities
         public string? EncryptionIv { get; set; }
 
         /// <summary>
-        /// DEK-ul împachetat cu cheia publică a expeditorului — altfel expeditorul
+        /// DEK-ul împachetat cu cheia publică a expeditorului - altfel expeditorul
         /// nu și-ar mai putea deschide propriile fișiere trimise. Cheile
         /// destinatarilor stau pe TransferRecipient.EncryptedKeyForUser.
         /// </summary>

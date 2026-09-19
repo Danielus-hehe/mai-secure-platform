@@ -5,7 +5,7 @@ interface Props  { children: ReactNode; }
 interface State  { hasError: boolean; error?: Error; }
 
 /**
- * ErrorBoundary — prinde erorile din componentele copil și afișează
+ * ErrorBoundary - prinde erorile din componentele copil și afișează
  * un UI de fallback în loc de ecranul alb.
  *
  * Utilizare în AppLayout.tsx:

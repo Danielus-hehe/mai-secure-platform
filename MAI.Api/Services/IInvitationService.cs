@@ -4,7 +4,7 @@ namespace MAI.Api.Services
     /// Gestionează fluxul de invitație la crearea contului:
     /// generare token → trimitere email → confirmare cu setare parolă.
     ///
-    /// Tokenul este stocat în DB ca SHA-256 (hex) — niciodată în clar.
+    /// Tokenul este stocat în DB ca SHA-256 (hex) - niciodată în clar.
     /// Linkul din email conține tokenul brut; serverul îl hashează la validare.
     /// </summary>
     public interface IInvitationService
@@ -22,7 +22,7 @@ namespace MAI.Api.Services
         /// </summary>
         /// <returns>
         /// True dacă emailul a plecat. False dacă serverul SMTP nu e configurat
-        /// sau a refuzat trimiterea — tokenul rămâne salvat, deci invitația se
+        /// sau a refuzat trimiterea - tokenul rămâne salvat, deci invitația se
         /// poate retrimite din /users fără alte efecte.
         /// </returns>
         Task<bool> SendInvitationAsync(Guid userId, CancellationToken ct = default);

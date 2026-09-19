@@ -6,7 +6,7 @@ import { formatDateTime } from '../../utils/format';
  * Dovada de primire, per destinatar.
  *
  * Înainte existau o singură dată de descărcare și un singur rezultat de
- * semnătură pe tot transferul — primul destinatar care deschidea fișierul
+ * semnătură pe tot transferul - primul destinatar care deschidea fișierul
  * „confirma” pentru toți. Acum fiecare rând are confirmarea lui, iar expeditorul
  * vede exact cine a primit, când și dacă semnătura s-a verificat.
  */
@@ -54,7 +54,7 @@ function RecipientRow({ r }: { r: TransferRecipientItem }) {
     if (!r.receiptVisible) {
         status = (
             <span className="inline-flex items-center gap-1 text-mai-400" title="Doar expeditorul vede confirmările celorlalți destinatari">
-                <EyeOff size={12} /> —
+                <EyeOff size={12} /> -
             </span>
         );
     } else if (r.downloadedAt) {
@@ -81,10 +81,10 @@ function RecipientRow({ r }: { r: TransferRecipientItem }) {
             <div className="min-w-0">
                 <p className="truncate text-sm font-medium text-mai-800 dark:text-mai-100">{r.name}</p>
                 <p className="truncate text-xs text-mai-400">
-                    {r.department || '—'}
+                    {r.department || '-'}
                     {r.forwardedById && (
                         <span className="ml-2 inline-flex items-center gap-1">
-                            <Share2 size={10} /> redirecționat de {r.forwardedByName ?? '—'}, {formatDateTime(r.sentAt)}
+                            <Share2 size={10} /> redirecționat de {r.forwardedByName ?? '-'}, {formatDateTime(r.sentAt)}
                         </span>
                     )}
                 </p>

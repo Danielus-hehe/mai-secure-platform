@@ -2,7 +2,7 @@
  * Valori pentru <input type="datetime-local">.
  *
  * Câmpul lucrează în ORA LOCALĂ, fără fus orar: „2026-09-26T14:30”. Varianta
- * veche folosea date.toISOString().slice(0, 16), care dă ora UTC — la Chișinău
+ * veche folosea date.toISOString().slice(0, 16), care dă ora UTC - la Chișinău
  * (UTC+3 vara) formularul afișa o expirare cu trei ore mai devreme decât cea
  * dorită, iar `min` bloca ultimele trei ore ale zilei.
  */

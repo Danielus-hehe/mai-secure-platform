@@ -25,7 +25,7 @@ namespace MAI.Api.Controllers
     /// lipsă complet pe /role, /activate și /deactivate: orice utilizator
     /// autentificat, inclusiv rolul Utilizator, putea să-și dea singur rol de
     /// Administrator cu un singur PATCH sau să dezactiveze toți administratorii.
-    /// Restul stivei de securitate — Argon2id, 2FA, E2EE, audit — nu apăra de
+    /// Restul stivei de securitate - Argon2id, 2FA, E2EE, audit - nu apăra de
     /// nimic cât timp promovarea de rol era deschisă tuturor.
     /// </summary>
     [Authorize]
@@ -103,7 +103,7 @@ namespace MAI.Api.Controllers
             role >= UserRole.SefDirectie ? _argon2.PrivilegedProfile : _argon2.DefaultProfile;
 
         // ═════════════════════════════════════════════════════════════════════
-        // GET api/Users — listă completă, doar pentru roluri privilegiate
+        // GET api/Users - listă completă, doar pentru roluri privilegiate
         // ═════════════════════════════════════════════════════════════════════
         /// <summary>
         /// Returnează email, rol, stare de blocare și ultima autentificare pentru
@@ -184,7 +184,7 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // GET api/Users/all — directorul intern, pentru dropdown-uri
+        // GET api/Users/all - directorul intern, pentru dropdown-uri
         // ═════════════════════════════════════════════════════════════════════
         /// <summary>
         /// Rămâne deschis oricărui utilizator autentificat, dar returnează strict
@@ -212,14 +212,14 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // GET api/Users/search?q= — autocomplete pentru forward / share
+        // GET api/Users/search?q= - autocomplete pentru forward / share
         // ═════════════════════════════════════════════════════════════════════
         /// <summary>
         /// Caută utilizatori activi care și-au generat cheile (pot primi fișiere
         /// criptate). Folosit de dialogul de forward pentru autocomplete.
         ///
         /// Returnează maxim 10 rezultate, exclude apelantul și include cheia
-        /// publică de criptare — browserul o folosește direct ca să împacheteze
+        /// publică de criptare - browserul o folosește direct ca să împacheteze
         /// DEK-ul fără un apel suplimentar.
         ///
         /// Cheia publică este publică prin definiție: scopul ei este să fie
@@ -263,7 +263,7 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // POST api/Users — creare cont, exclusiv Administrator
+        // POST api/Users - creare cont, exclusiv Administrator
         // ═════════════════════════════════════════════════════════════════════
         /// <summary>
         /// Creează un cont cu o parolă inițială aleasă de administrator.
@@ -294,7 +294,7 @@ namespace MAI.Api.Controllers
 
             // Un rol nedefinit (Role=99) ar trece prin binding, ar fi comparat cu
             // >= SefDirectie și ar produce un cont cu un rol pe care niciun
-            // [Authorize(Roles=...)] nu îl recunoaște — imposibil de administrat
+            // [Authorize(Roles=...)] nu îl recunoaște - imposibil de administrat
             // ulterior din interfață.
             if (!Enum.IsDefined(typeof(UserRole), dto.Role))
                 return BadRequest(new { message = "Rolul specificat nu există." });
@@ -347,7 +347,7 @@ namespace MAI.Api.Controllers
                     IsActive           = true,
                     // Cu invitație: contul pornește neconfirmat, userul îl activează
                     // din linkul primit și își setează singur parola.
-                    // Fără invitație (fără email sau fără SMTP): fluxul clasic —
+                    // Fără invitație (fără email sau fără SMTP): fluxul clasic -
                     // cont confirmat, schimbare forțată a parolei temporare.
                     EmailConfirmed     = !useInvitation,
                     CreatedAt          = DateTime.UtcNow,
@@ -516,7 +516,7 @@ namespace MAI.Api.Controllers
             // Cheile private E2EE sunt încuiate cu o cheie derivată din parola
             // VECHE, pe care nu o mai știe nimeni. Lăsate pe loc, contul intra
             // într-un impas: descuierea eșua la fiecare autentificare, iar
-            // POST /api/Keys refuza chei noi fiindcă „există deja” — utilizatorul
+            // POST /api/Keys refuza chei noi fiindcă „există deja” - utilizatorul
             // nu mai putea nici trimite, nici primi fișiere.
             //
             // Fără key escrow, ștergerea materialului de chei e singura ieșire.
@@ -687,7 +687,7 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // PATCH api/Users/{id}/role — exclusiv Administrator
+        // PATCH api/Users/{id}/role - exclusiv Administrator
         // ═════════════════════════════════════════════════════════════════════
         /// <summary>
         /// Endpointul nu avea NICIO restricție de rol. Un utilizator obișnuit își
@@ -697,7 +697,7 @@ namespace MAI.Api.Controllers
         ///
         /// Pe lângă restricția de rol, două protecții structurale: nimeni nu-și
         /// schimbă propriul rol, și ultimul administrator activ nu poate fi
-        /// retrogradat — altfel sistemul rămâne fără nicio cale de administrare.
+        /// retrogradat - altfel sistemul rămâne fără nicio cale de administrare.
         /// </summary>
         [Authorize(Roles = nameof(UserRole.Administrator))]
         [HttpPatch("{id:guid}/role")]
@@ -770,7 +770,7 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // PATCH api/Users/{id}/deactivate — exclusiv Administrator
+        // PATCH api/Users/{id}/deactivate - exclusiv Administrator
         // ═════════════════════════════════════════════════════════════════════
         /// <summary>
         /// Fără restricție de rol, orice utilizator putea dezactiva toți
@@ -803,7 +803,7 @@ namespace MAI.Api.Controllers
 
             // Dezactivarea trebuie să omoare sesiunile, nu doar să blocheze
             // autentificările viitoare. Refresh-ul verifică IsActive, dar tokenul
-            // de acces deja emis rămâne valid până la expirare — revocarea explicită
+            // de acces deja emis rămâne valid până la expirare - revocarea explicită
             // închide fereastra și lasă urmă în lista de sesiuni.
             var closed = await _sessions.RevokeAllAsync(
                 user.Id, "cont dezactivat", exceptSessionId: null, ct);
@@ -825,7 +825,7 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // PATCH api/Users/{id}/activate — exclusiv Administrator
+        // PATCH api/Users/{id}/activate - exclusiv Administrator
         // ═════════════════════════════════════════════════════════════════════
         [Authorize(Roles = nameof(UserRole.Administrator))]
         [HttpPatch("{id:guid}/activate")]
@@ -854,7 +854,7 @@ namespace MAI.Api.Controllers
         /// <summary>
         /// True dacă operația ar lăsa sistemul fără niciun Administrator activ.
         ///
-        /// Nu e o măsură de securitate împotriva unui atacator — cine e deja
+        /// Nu e o măsură de securitate împotriva unui atacator - cine e deja
         /// administrator poate face oricum daune. E o măsură împotriva accidentului:
         /// un sistem fără administrator nu se mai poate repara din interfață, iar
         /// recuperarea cere acces direct la baza de date.

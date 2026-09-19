@@ -197,7 +197,7 @@ namespace MAI.DataAccessLayer.Migrations
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             // Department se reface din denumirea subdiviziunii. Ierarhia și șefii
-            // se pierd — modelul vechi nu avea unde să-i țină.
+            // se pierd - modelul vechi nu avea unde să-i țină.
             migrationBuilder.Sql(
                 """
                 DROP TABLE IF EXISTS "InternalDocumentRecipients";

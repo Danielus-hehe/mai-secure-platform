@@ -130,7 +130,7 @@ namespace MAI.Api.Services
 
             // Issuer și Audience sunt emise explicit pentru că sunt și validate
             // explicit la primire (vezi Program.cs). Un token fără ele ar fi
-            // respins de propriul server — de aceea cele două locuri citesc
+            // respins de propriul server - de aceea cele două locuri citesc
             // aceleași JwtOptions.
             var token = new JwtSecurityToken(
                 issuer:             _jwt.Issuer,

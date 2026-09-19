@@ -135,7 +135,7 @@ export default function KeysGate() {
                         <p className="text-xs leading-relaxed text-amber-800 dark:text-amber-300">
                             <strong>Important.</strong> Folosiți exact parola cu care v-ați
                             autentificat. Dacă vă pierdeți parola, fișierele primite până atunci
-                            devin imposibil de deschis — nici administratorul nu le poate
+                            devin imposibil de deschis - nici administratorul nu le poate
                             recupera, pentru că nici el nu are cheile.
                         </p>
                     </div>

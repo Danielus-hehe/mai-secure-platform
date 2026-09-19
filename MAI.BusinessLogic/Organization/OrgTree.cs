@@ -2,7 +2,7 @@ using MAI.Domain.Enums;
 
 namespace MAI.BusinessLogic.Organization
 {
-    /// <summary>Nodul minim al arborelui — fără EF, ca regulile să se poată testa.</summary>
+    /// <summary>Nodul minim al arborelui - fără EF, ca regulile să se poată testa.</summary>
     public sealed record OrgUnitNode(Guid Id, Guid? ParentId, Guid? HeadUserId, OrgUnitType Type, bool IsActive, string Name = "");
 
     /// <summary>
@@ -94,8 +94,9 @@ namespace MAI.BusinessLogic.Organization
 
         /// <summary>
         /// Verifică dacă o subdiviziune poate sta sub părintele propus:
-        /// fără cicluri, iar nivelul copilului e strict mai mare decât al
-        /// părintelui (Direcție → Secție → Serviciu).
+        /// fără cicluri, iar rangul nivelului copilului e strict mai mare decât al
+        /// părintelui. Nivelurile pot fi sărite (un Serviciu direct sub o
+        /// Direcție e permis), dar nu inversate.
         /// </summary>
         /// <returns>Null dacă plasarea e validă, altfel mesajul de eroare.</returns>
         public string? ValidatePlacement(Guid? unitId, OrgUnitType type, Guid? parentId)
@@ -109,8 +110,8 @@ namespace MAI.BusinessLogic.Organization
                 return "O subdiviziune nu poate fi mutată sub ea însăși sau sub una dintre subunitățile ei.";
 
             if (type <= parent.Type)
-                return $"Un nivel {type} nu poate sta sub un nivel {parent.Type}. " +
-                       "Ordinea este Direcție → Secție → Serviciu.";
+                return "Nivelul ales trebuie să fie inferior nivelului subdiviziunii-părinte " +
+                       $"(„{parent.Name}”). Ordinea nivelurilor se vede și se modifică din „Niveluri”.";
 
             if (unitId.HasValue)
             {

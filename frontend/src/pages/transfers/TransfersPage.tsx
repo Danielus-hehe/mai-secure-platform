@@ -3,7 +3,7 @@
  *
  * Fluxul complet, cu locul unde se face fiecare operație:
  *
- *   TRIMITERE (browserul expeditorului) — SendTransferModal
+ *   TRIMITERE (browserul expeditorului) - SendTransferModal
  *     1. se iau cheile publice ale destinatarilor aleși (unul sau mai mulți)
  *     2. se generează o cheie AES-256-GCM aleatorie, unică pentru transferul ăsta
  *     3. fișierul se criptează O DATĂ cu ea
@@ -12,15 +12,15 @@
  *     5. SHA-256 al conținutului în clar se semnează RSA-PSS
  *     6. spre server pleacă doar cifrotextul și plicul
  *
- *   PRIMIRE (browserul destinatarului) — handleDownload
+ *   PRIMIRE (browserul destinatarului) - handleDownload
  *     1. se cere plicul de la API (autorizare + audit se fac acolo)
  *     2. cifrotextul se ia din depozit (URL presemnat sau prin API)
  *     3. cheia de fișier se despachetează cu cheia privată proprie
- *     4. se decriptează — tagul GCM garantează că niciun bit nu s-a schimbat
+ *     4. se decriptează - tagul GCM garantează că niciun bit nu s-a schimbat
  *     5. se verifică semnătura expeditorului
- *     6. abia atunci se confirmă primirea — pe rândul PROPRIU de destinatar
+ *     6. abia atunci se confirmă primirea - pe rândul PROPRIU de destinatar
  *
- *   REDIRECȚIONARE — ForwardTransferModal (doar dacă serverul o permite:
+ *   REDIRECȚIONARE - ForwardTransferModal (doar dacă serverul o permite:
  *   expeditorul întotdeauna, destinatarii doar cu „Permite redistribuirea”).
  *
  * Serverul nu participă la niciun pas criptografic. Dacă ar participa, garanția
@@ -45,18 +45,21 @@ import TransferReceipts, { ReceiptSummary } from '../../components/transfers/Tra
 import SendTransferModal from '../../components/transfers/SendTransferModal';
 import ForwardTransferModal from '../../components/transfers/ForwardTransferModal';
 import { apiErrorMessage } from '../../api/errors';
+import OrgUnitSelect from '../../components/org/OrgUnitSelect';
+import { listOrgUnits, type OrgUnit } from '../../api/orgUnits';
 import { useToast } from '../../context/ToastContext';
 import { useKeys } from '../../context/KeysContext';
 import { formatDateTime, formatFileSize, truncateSha } from '../../utils/format';
 import {
-    listTransfers, getTransferPolicy, getEnvelope, fetchCiphertext,
+    listTransfers, getTransferPolicy, getAwaitingCount, getEnvelope, fetchCiphertext,
     confirmTransfer, deleteTransfer, revokeTransfer,
     TransferCategory, CATEGORY_LABELS, DEFAULT_TRANSFER_POLICY,
     type TransferListItem, type PagedResult, type TransferPolicy,
 } from '../../api/transfers';
 import { decryptTransfer, saveDecryptedFile, importSigningPublicKey } from '../../crypto/E2ee';
 
-type DirectionFilter = '' | 'received' | 'sent';
+/** Cele două părți ale paginii: ce am primit și ce am trimis. */
+type Box = 'received' | 'sent';
 type StatusFilter = '' | 'Pending' | 'Downloaded' | 'Expired' | 'Revoked';
 
 const EMPTY_PAGE: PagedResult<TransferListItem> = {
@@ -95,7 +98,7 @@ const counterpart = (t: TransferListItem) => {
         return { name: t.senderName, detail: t.senderDepartment };
     }
     const [first, ...rest] = t.recipients;
-    if (!first) return { name: '—', detail: '' };
+    if (!first) return { name: '-', detail: '' };
     return rest.length === 0
         ? { name: first.name, detail: first.department }
         : { name: `${first.name} +${rest.length}`, detail: `${t.recipientCount} destinatari` };
@@ -111,9 +114,12 @@ export default function TransfersPage() {
 
     const [searchInput, setSearchInput] = useState('');
     const [search, setSearch] = useState('');
-    const [direction, setDirection] = useState<DirectionFilter>('');
+    const [box, setBox] = useState<Box>('received');
+    const [awaiting, setAwaiting] = useState(0);
     const [status, setStatus] = useState<StatusFilter>('');
     const [category, setCategory] = useState<TransferCategory | ''>('');
+    const [orgUnitId, setOrgUnitId] = useState('');
+    const [orgUnits, setOrgUnits] = useState<OrgUnit[]>([]);
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(25);
     const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -125,6 +131,12 @@ export default function TransfersPage() {
     const [uploadOpen, setUploadOpen] = useState(false);
     const [forwardTarget, setForwardTarget] = useState<TransferListItem | null>(null);
     const [busyId, setBusyId] = useState<string | null>(null);
+
+    useEffect(() => {
+        listOrgUnits()
+            .then(setOrgUnits)
+            .catch(() => { /* filtrul pe subdiviziune rămâne ascuns */ });
+    }, []);
 
     useEffect(() => {
         getTransferPolicy()
@@ -150,7 +162,7 @@ export default function TransfersPage() {
         setLoading(true);
         try {
             const result = await listTransfers(
-                { search, direction, status, category, page, pageSize },
+                { search, direction: box, status, category, orgUnitId, page, pageSize },
                 controller.signal
             );
             setData(result);
@@ -161,12 +173,46 @@ export default function TransfersPage() {
         } finally {
             if (!controller.signal.aborted) setLoading(false);
         }
-    }, [search, direction, status, category, page, pageSize, toast]);
+    }, [search, box, status, category, orgUnitId, page, pageSize, toast]);
+
+    const loadAwaiting = useCallback(async () => {
+        try {
+            setAwaiting(await getAwaitingCount());
+        } catch {
+            /* contorul e informativ */
+        }
+    }, []);
 
     useEffect(() => {
         void load();
+        void loadAwaiting();
         return () => abortRef.current?.abort();
-    }, [load]);
+    }, [load, loadAwaiting]);
+
+    // Lista se actualizează singură: la revenirea în fereastră și, cât pagina
+    // e vizibilă, o dată pe minut. Un fișier nou primit apare fără reîncărcare,
+    // iar la „Trimise” se vede când destinatarii confirmă primirea.
+    useEffect(() => {
+        const refresh = () => {
+            if (document.visibilityState !== 'visible') return;
+            void load();
+            void loadAwaiting();
+        };
+        const timer = window.setInterval(refresh, 60_000);
+        window.addEventListener('focus', refresh);
+        return () => {
+            window.clearInterval(timer);
+            window.removeEventListener('focus', refresh);
+        };
+    }, [load, loadAwaiting]);
+
+    const switchBox = (next: Box) => {
+        if (next === box) return;
+        setBox(next);
+        setPage(1);
+        setStatus('');
+        setExpanded(new Set());
+    };
 
     const toggleExpanded = (id: string) =>
         setExpanded((prev) => {
@@ -293,7 +339,14 @@ export default function TransfersPage() {
 
     // ── Render ───────────────────────────────────────────────────────────────
 
-    const hasFilters = Boolean(search || direction || status || category !== '');
+    const hasFilters = Boolean(search || status || category !== '' || orgUnitId);
+
+    const tabCls = (active: boolean) =>
+        `inline-flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+            active
+                ? 'border-mai-600 text-mai-900 dark:border-mai-300 dark:text-white'
+                : 'border-transparent text-mai-400 hover:text-mai-700 dark:hover:text-mai-200'
+        }`;
 
     return (
         <div className="space-y-5">
@@ -315,7 +368,7 @@ export default function TransfersPage() {
                     <p className="text-xs text-mai-500 dark:text-mai-400">
                         Amprenta cheii dumneavoastră publice:{' '}
                         <KeyFingerprint value={fingerprint} />
-                        {' '}— comparați-o cu colegii pe alt canal pentru a exclude substituirea cheilor.
+                        {' '}- comparați-o cu colegii pe alt canal pentru a exclude substituirea cheilor.
                     </p>
                 </div>
             )}
@@ -325,10 +378,28 @@ export default function TransfersPage() {
                 <AlertTriangle size={15} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
                 <p className="text-xs leading-relaxed text-amber-800 dark:text-amber-300">
                     <span className="font-semibold">Limitare cunoscută:</span> conținutul fișierelor
-                    este criptat end-to-end, dar <strong>numele fișierelor nu sunt criptate</strong> — serverul
+                    este criptat end-to-end, dar <strong>numele fișierelor nu sunt criptate</strong> - serverul
                     le vede în clar, pentru a permite căutarea pe partea de server.
                     Evitați includerea informațiilor sensibile în numele fișierelor.
                 </p>
+            </div>
+
+            {/* ── Primite / Trimise ─────────────────────────────────────── */}
+            <div className="flex border-b border-mai-100 dark:border-mai-700" role="tablist">
+                <button type="button" role="tab" aria-selected={box === 'received'}
+                        className={tabCls(box === 'received')} onClick={() => switchBox('received')}>
+                    <Inbox size={15} /> Primite
+                    {awaiting > 0 && (
+                        <span className="rounded-full bg-gold-500 px-2 py-0.5 text-[10px] font-bold text-mai-900"
+                              title={`${awaiting} fișiere nedescărcate`}>
+                            {awaiting} {awaiting === 1 ? 'nou' : 'noi'}
+                        </span>
+                    )}
+                </button>
+                <button type="button" role="tab" aria-selected={box === 'sent'}
+                        className={tabCls(box === 'sent')} onClick={() => switchBox('sent')}>
+                    <Send size={15} /> Trimise
+                </button>
             </div>
 
             {/* ── Filtre ────────────────────────────────────────────────── */}
@@ -345,17 +416,6 @@ export default function TransfersPage() {
                                    dark:text-mai-100 dark:placeholder:text-mai-500 dark:focus:ring-mai-400/20"
                     />
                 </div>
-
-                <select
-                    value={direction}
-                    onChange={(e) => { setDirection(e.target.value as DirectionFilter); setPage(1); }}
-                    className={selectClass}
-                    aria-label="Direcție"
-                >
-                    <option value="">Toate</option>
-                    <option value="received">Primite</option>
-                    <option value="sent">Trimise</option>
-                </select>
 
                 <select
                     value={status}
@@ -384,6 +444,18 @@ export default function TransfersPage() {
                         <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>
                     ))}
                 </select>
+
+                {orgUnits.length > 0 && (
+                    <div className="w-full sm:w-64">
+                        <OrgUnitSelect
+                            units={orgUnits}
+                            value={orgUnitId}
+                            onChange={(v) => { setOrgUnitId(v); setPage(1); }}
+                            emptyLabel="Orice subdiviziune"
+                            className={selectClass + ' w-full'}
+                        />
+                    </div>
+                )}
             </div>
 
             {/* ── Tabel ─────────────────────────────────────────────────── */}
@@ -414,8 +486,7 @@ export default function TransfersPage() {
                                     text-mai-400 dark:border-mai-700">
                                     <th className="w-8 px-3 py-3" aria-label="Detalii" />
                                     <th className="px-4 py-3 font-semibold">Fișier</th>
-                                    <th className="px-4 py-3 font-semibold">Direcție</th>
-                                    <th className="px-4 py-3 font-semibold">Contraparte</th>
+                                    <th className="px-4 py-3 font-semibold">{box === 'received' ? 'De la' : 'Către'}</th>
                                     <th className="px-4 py-3 font-semibold">Data</th>
                                     <th className="px-4 py-3 font-semibold">Categorie</th>
                                     <th className="px-4 py-3 font-semibold">Stare</th>
@@ -452,7 +523,12 @@ export default function TransfersPage() {
                                                             ? <Lock size={14} className="mt-0.5 shrink-0 text-green-600 dark:text-green-400" />
                                                             : <FileWarning size={14} className="mt-0.5 shrink-0 text-amber-500 dark:text-amber-400" />}
                                                         <div className="min-w-0">
-                                                            <p className="truncate font-medium text-mai-900 dark:text-mai-100">{t.fileName}</p>
+                                                            <p className="flex items-center gap-2 truncate font-medium text-mai-900 dark:text-mai-100">
+                                                                {t.fileName}
+                                                                {!t.isMine && !t.myDownloadedAt && t.status === 'Pending' && (
+                                                                    <span className="rounded bg-gold-500 px-1.5 py-0.5 text-[10px] font-bold uppercase text-mai-900">Nou</span>
+                                                                )}
+                                                            </p>
                                                             <p className="text-xs text-mai-400">
                                                                 {formatFileSize(t.fileSize)}
                                                                 {t.sha256 && (
@@ -466,12 +542,6 @@ export default function TransfersPage() {
                                                             )}
                                                         </div>
                                                     </div>
-                                                </td>
-
-                                                <td className="px-4 py-3">
-                                                    <span className="inline-flex items-center gap-1.5 text-xs text-mai-500 dark:text-mai-300">
-                                                        {t.isMine ? <><Send size={13} /> Trimis</> : <><Inbox size={13} /> Primit</>}
-                                                    </span>
                                                 </td>
 
                                                 <td className="px-4 py-3">
@@ -555,7 +625,7 @@ export default function TransfersPage() {
                                             {isOpen && (
                                                 <tr className="border-b border-mai-100 bg-mai-50/30 dark:border-mai-700 dark:bg-mai-900/20">
                                                     <td />
-                                                    <td colSpan={7} className="px-4 py-3">
+                                                    <td colSpan={6} className="px-4 py-3">
                                                         <TransferReceipts transfer={t} />
                                                     </td>
                                                 </tr>

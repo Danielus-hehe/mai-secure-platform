@@ -43,7 +43,7 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // GET api/Stats — pagina principală (orice utilizator autentificat)
+        // GET api/Stats - pagina principală (orice utilizator autentificat)
         // ═════════════════════════════════════════════════════════════════════
         /// <summary>
         /// Cifrele paginii principale, din perspectiva utilizatorului curent.
@@ -138,7 +138,7 @@ namespace MAI.Api.Controllers
         /// <summary>Numele afișat al unui cont: numele complet, altfel username-ul.</summary>
         private static string DisplayName(User? user) =>
             user is null
-                ? "—"
+                ? "-"
                 : string.IsNullOrWhiteSpace(user.FullName) ? user.Username : user.FullName;
 
         /// <summary>„Ion Popescu”, „Ion Popescu, Ana Rusu” sau „Ion Popescu +3”.</summary>
@@ -151,7 +151,7 @@ namespace MAI.Api.Controllers
 
             return names.Count switch
             {
-                0 => "—",
+                0 => "-",
                 1 => names[0],
                 2 => $"{names[0]}, {names[1]}",
                 _ => $"{names[0]} +{names.Count - 1}",
@@ -159,7 +159,7 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // GET api/Stats/alerts — semnale de securitate (SefDirectie + Administrator)
+        // GET api/Stats/alerts - semnale de securitate (SefDirectie + Administrator)
         // ═════════════════════════════════════════════════════════════════════
         /// <summary>
         /// Transformă jurnalul de audit din arhivă pasivă în instrument de
@@ -364,11 +364,11 @@ namespace MAI.Api.Controllers
         private const int MaxAlertsPerCategory = 10;
 
         // ═════════════════════════════════════════════════════════════════════
-        // GET api/Stats/admin — panoul de administrare
+        // GET api/Stats/admin - panoul de administrare
         // ═════════════════════════════════════════════════════════════════════
         /// <summary>
         /// Toate cifrele de pe /admin, intr-un singur apel. Un singur round-trip
-        /// in loc de sase: pagina fie se incarca intreaga, fie afiseaza o eroare —
+        /// in loc de sase: pagina fie se incarca intreaga, fie afiseaza o eroare -
         /// nu ajunge in starea hibrida in care doua carduri au date si patru arata
         /// zero fara explicatie.
         /// </summary>
@@ -686,7 +686,7 @@ namespace MAI.Api.Controllers
         /// Durata maximă a unei sonde; aceeași valoare ca în HealthController.
         ///
         /// Fără limită, o sondă către un depozit oprit sau inaccesibil aștepta cât
-        /// îi permiteau reîncercările clientului S3 — pe Windows, zeci de secunde.
+        /// îi permiteau reîncercările clientului S3 - pe Windows, zeci de secunde.
         /// Tot răspunsul /api/Stats/admin aștepta după ea, iar browserul renunța
         /// după 30 de secunde cu „Serverul nu răspunde”, deși API-ul funcționa.
         /// Acum pagina se încarcă, iar modulul afectat apare ca indisponibil.

@@ -1,4 +1,4 @@
-﻿// Import din api/transfers — nu din @/types/transfer (alias @/ nu e configurat)
+﻿// Import din api/transfers - nu din @/types/transfer (alias @/ nu e configurat)
 import { TransferCategory, CATEGORY_LABELS } from '../../api/transfers';
 
 interface Props {

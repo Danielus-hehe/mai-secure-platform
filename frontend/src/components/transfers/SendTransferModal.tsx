@@ -41,7 +41,7 @@ export const fieldClass =
  */
 /**
  * Pagina montează componenta doar cât fereastra e deschisă, deci fiecare
- * deschidere pornește cu un formular gol — fără resetări manuale ale stării.
+ * deschidere pornește cu un formular gol - fără resetări manuale ale stării.
  */
 export default function SendTransferModal({ policy, onClose, onSent }: Props) {
     const toast = useToast();
@@ -186,7 +186,7 @@ export default function SendTransferModal({ policy, onClose, onSent }: Props) {
                     />
                     {file && (
                         <p className="mt-1.5 text-xs text-mai-400">
-                            {file.name} — {formatFileSize(file.size)}
+                            {file.name} - {formatFileSize(file.size)}
                         </p>
                     )}
                 </div>

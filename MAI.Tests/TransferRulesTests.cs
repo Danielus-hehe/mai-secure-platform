@@ -8,7 +8,7 @@ namespace MAI.Tests;
 /// <summary>
 /// Regulile de stare ale transferurilor: dovada de primire per destinatar,
 /// expirarea, politica de forward și validarea datelor venite din formular.
-/// Toate sunt funcții pure — nu cer bază de date.
+/// Toate sunt funcții pure - nu cer bază de date.
 /// </summary>
 public class TransferRulesTests
 {

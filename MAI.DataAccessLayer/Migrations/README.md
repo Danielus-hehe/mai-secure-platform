@@ -52,10 +52,11 @@ deci îl poți rula pe o bază parțial actualizată fără să se repete nimic.
 | `20260918120000_AddCategoryRecipientsInvitation` | Categoria transferului, `TransferRecipients` (forward), invitația de activare (`EmailConfirmed`, `InvitationToken`) |
 | `20260919120000_PerRecipientReceiptsAndSoftDelete` | Dovada de primire per destinatar (`TransferRecipients.DownloadedAt/SignatureValid`), eliminarea destinatarului unic de pe `FileTransfers`, `AllowForward`, ștergere logică (`DeletedAt`, `DeletedById`), repararea stărilor suprascrise de jobul de expirare |
 | `20260920120000_OrgStructureInternalDocsPasswordReset` | `OrgUnits` (Direcție/Secție/Serviciu, cu șef), `Users.OrgUnitId` în locul lui `Department` (convertit automat), `Users.PasswordResetToken*`, documente interne cu destinatari și confirmare „Luat la cunoștință” |
+| `20260921120000_OrgLevels` | Niveluri configurabile ale structurii (`OrgLevels`); rangurile subdiviziunilor trec de la 1/2/3 la 100/200/300, ca niveluri noi să poată fi inserate între cele existente |
 
 ---
 
-## `OrgStructureInternalDocsPasswordReset` — ce se întâmplă cu datele existente
+## `OrgStructureInternalDocsPasswordReset` - ce se întâmplă cu datele existente
 
 Coloana text `Users.Department` dispare. Înainte, migrarea:
 
@@ -81,7 +82,7 @@ SELECT o."Name", o."Type", h."Username" AS sef,
 
 ---
 
-## `PerRecipientReceiptsAndSoftDelete` — înainte de aplicare
+## `PerRecipientReceiptsAndSoftDelete` - înainte de aplicare
 
 Migrarea **elimină coloane** din `FileTransfers` (`RecipientId`,
 `EncryptedKeyForRecipient`, `DownloadedAt`, `RecipientSignatureValid`), după ce
@@ -98,8 +99,8 @@ Ce face, în ordine:
    `Expired` descărcat de toți → `Downloaded`; un `Downloaded` cu destinatari de
    forward care nu l-au deschis revine în `Pending`;
 4. elimină coloanele vechi (cheia străină și indexul lor dispar odată cu ele);
-5. adaugă `AllowForward` (TRUE pentru transferurile existente — așa se comportau
-   —, FALSE implicit pentru cele noi), `DeletedAt`, `DeletedById`;
+5. adaugă `AllowForward` (TRUE pentru transferurile existente - așa se comportau
+   -, FALSE implicit pentru cele noi), `DeletedAt`, `DeletedById`;
 6. înlocuiește indexul `IX_TransferRecipients_UserId` cu
    `IX_TransferRecipients_UserId_DownloadedAt`.
 
@@ -119,7 +120,7 @@ WHERE NOT EXISTS (SELECT 1 FROM "TransferRecipients" r
 
 ---
 
-## `AddCategoryRecipientsInvitation` — dacă ai rulat scripturile 008–010
+## `AddCategoryRecipientsInvitation` - dacă ai rulat scripturile 008–010
 
 Migrarea înlocuiește patru migrări scrise fără `.Designer.cs`
 (`AddExpiryAndCategory`, `AddTransferCategory`, `AddTransferRecipients`,

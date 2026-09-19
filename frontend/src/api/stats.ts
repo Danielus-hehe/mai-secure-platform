@@ -43,7 +43,7 @@ export interface AdminUserStats {
     active: number;
     inactive: number;
     locked: number;
-    /** Conturi active fara chei generate — nu pot primi fisiere criptate. */
+    /** Conturi active fara chei generate - nu pot primi fisiere criptate. */
     withoutKeys: number;
     byRole: RoleCount[];
 }
@@ -56,7 +56,7 @@ export interface AdminTransferStats {
     encrypted: number;
     /** Procentul de transferuri care trec prin plicul E2E. */
     encryptedPercent: number;
-    /** Expirate dar inca nepurjate — coada jobului de fundal. */
+    /** Expirate dar inca nepurjate - coada jobului de fundal. */
     awaitingPurge: number;
     expiringNext24h: number;
 }

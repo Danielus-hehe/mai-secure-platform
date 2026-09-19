@@ -7,13 +7,13 @@ import ErrorBoundary from './ErrorBoundary';
  * încărcare pentru chunk-ul lazy.
  *
  * De ce per pagină și nu doar la nivel de AppLayout: un ErrorBoundary așezat în
- * jurul întregului layout prinde orice crash, dar înlocuiește tot ecranul —
+ * jurul întregului layout prinde orice crash, dar înlocuiește tot ecranul -
  * inclusiv sidebar-ul și butonul de deconectare. Utilizatorul rămâne blocat pe
  * un ecran de eroare din care singura ieșire e F5. Cu bariera aici, o pagină
  * care crapă lasă navigația intactă: se poate merge pe altă rută.
  *
- * `key` pe ErrorBoundary nu e necesar — starea de eroare se resetează prin
- * butonul de reîncercare — dar remontarea la schimbarea rutei ar fi o adăugire
+ * `key` pe ErrorBoundary nu e necesar - starea de eroare se resetează prin
+ * butonul de reîncercare - dar remontarea la schimbarea rutei ar fi o adăugire
  * naturală dacă apar cazuri în care eroarea persistă între pagini.
  */
 export function RouteBoundary({ children }: { children?: ReactNode }) {

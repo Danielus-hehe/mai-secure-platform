@@ -17,7 +17,7 @@ namespace MAI.Api.Controllers
     /// Rolul se cere pe CLASĂ, spre deosebire de UsersController: aici nu există
     /// niciun endpoint pe care un utilizator obișnuit să aibă motiv să îl apeleze.
     /// Până în 2026-09-10 clasa avea doar [Authorize], iar lista și dropdown-ul
-    /// de utilizatori erau citibile de orice cont autentificat — pagina /audit
+    /// de utilizatori erau citibile de orice cont autentificat - pagina /audit
     /// era ascunsă doar în meniul frontend-ului, nu și în API.
     /// </summary>
     [Authorize(Roles = "Administrator,SefDirectie")]
@@ -56,7 +56,7 @@ namespace MAI.Api.Controllers
             var pagination = new PaginationQuery { Page = page, PageSize = pageSize };
             var query      = BuildQuery(username, action, result, search, from, to);
 
-            // Count înainte de Skip/Take — altfel numărăm doar pagina curentă.
+            // Count înainte de Skip/Take - altfel numărăm doar pagina curentă.
             var total = await query.CountAsync(ct);
 
             var raw = await query
@@ -128,7 +128,7 @@ namespace MAI.Api.Controllers
                 $"jurnal_audit_{stamp}.xlsx");
         }
 
-        // GET api/AuditLogs/usernames — pentru dropdown-ul de filtrare
+        // GET api/AuditLogs/usernames - pentru dropdown-ul de filtrare
         [Authorize(Roles = "Administrator,SefDirectie")]
         [HttpGet("usernames")]
         public async Task<IActionResult> GetUsernames(CancellationToken ct)
@@ -142,7 +142,7 @@ namespace MAI.Api.Controllers
         }
 
         // ─────────────────────────────────────────────────────────────────────
-        // Construirea query-ului — o singură sursă de adevăr pentru listă și export
+        // Construirea query-ului - o singură sursă de adevăr pentru listă și export
         // ─────────────────────────────────────────────────────────────────────
         private IQueryable<AuditLog> BuildQuery(
             string? username, string? action, string? result,
@@ -299,7 +299,7 @@ namespace MAI.Api.Controllers
             var sheet = workbook.Worksheets.Add("Jurnal audit");
 
             // Antet cu context: un raport exportat trebuie să spună singur ce conține.
-            sheet.Cell(1, 1).Value = "MAI — Jurnal de audit SGDM";
+            sheet.Cell(1, 1).Value = "MAI - Jurnal de audit SGDM";
             sheet.Cell(1, 1).Style.Font.Bold = true;
             sheet.Cell(1, 1).Style.Font.FontSize = 14;
             sheet.Range(1, 1, 1, 6).Merge();

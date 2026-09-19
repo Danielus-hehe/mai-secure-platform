@@ -18,7 +18,7 @@ namespace MAI.BusinessLogic.Dtos
         }
 
         /// <summary>
-        /// Câte înregistrări pe pagină. Plafonat la 100 — fără plafon, un client
+        /// Câte înregistrări pe pagină. Plafonat la 100 - fără plafon, un client
         /// poate cere pageSize=1000000 și transforma endpointul într-un vector de DoS.
         /// </summary>
         public int PageSize

@@ -72,7 +72,7 @@ export default function ResetPasswordModal({ target, onClose, onDone }: Props) {
     };
 
     return (
-        <Modal open title={`Resetare parolă — ${target.fullName || '@' + target.username}`} onClose={() => { if (!busy) onClose(); }}>
+        <Modal open title={`Resetare parolă - ${target.fullName || '@' + target.username}`} onClose={() => { if (!busy) onClose(); }}>
             <div className="space-y-5">
                 {!target.isActive && (
                     <p className="rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-800
@@ -97,7 +97,7 @@ export default function ResetPasswordModal({ target, onClose, onDone }: Props) {
                                         rămâne valabilă până atunci. După schimbare primește și un email de confirmare.
                                     </>
                                 ) : (
-                                    'Contul nu are adresă de email — folosiți parola temporară de mai jos.'
+                                    'Contul nu are adresă de email - folosiți parola temporară de mai jos.'
                                 )}
                             </p>
                         </div>
@@ -119,7 +119,7 @@ export default function ResetPasswordModal({ target, onClose, onDone }: Props) {
                     <p className="text-xs leading-relaxed text-amber-800 dark:text-amber-300">
                         Cheile de criptare ale contului sunt protejate cu parola actuală. După resetare se
                         generează chei noi, iar fișierele criptate primite anterior nu vor mai putea fi
-                        deschise de acest cont — expeditorii le pot retrimite. Toate sesiunile se închid.
+                        deschise de acest cont - expeditorii le pot retrimite. Toate sesiunile se închid.
                     </p>
                 </div>
 

@@ -168,7 +168,7 @@ export default function DocumentEditorModal({ existing, onClose, onSaved }: Prop
                             maxLength={2000}
                             rows={3}
                             onChange={(e) => setSummary(e.target.value)}
-                            placeholder="Pe scurt, despre ce este documentul — apare în lista destinatarilor."
+                            placeholder="Pe scurt, despre ce este documentul - apare în lista destinatarilor."
                             className="w-full rounded-lg border border-mai-200 bg-white px-3.5 py-2.5 text-sm dark:border-mai-600
                                 dark:bg-mai-800 dark:text-mai-100 focus:border-mai-500 focus:outline-none focus:ring-2 focus:ring-mai-500"
                         />
@@ -176,7 +176,7 @@ export default function DocumentEditorModal({ existing, onClose, onSaved }: Prop
 
                     <div>
                         <label htmlFor="doc-file" className="mb-1.5 block text-sm font-medium text-mai-800 dark:text-mai-200">
-                            Fișier {existing ? '(opțional — înlocuiește fișierul actual)' : '*'}
+                            Fișier {existing ? '(opțional - înlocuiește fișierul actual)' : '*'}
                         </label>
                         <input
                             id="doc-file"
@@ -189,7 +189,7 @@ export default function DocumentEditorModal({ existing, onClose, onSaved }: Prop
                         />
                         {existing && !file && (
                             <p className="mt-1.5 text-xs text-mai-400">
-                                Fișier actual: {existing.fileName} — {formatFileSize(existing.fileSize)}
+                                Fișier actual: {existing.fileName} - {formatFileSize(existing.fileSize)}
                             </p>
                         )}
                     </div>

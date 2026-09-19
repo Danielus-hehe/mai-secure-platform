@@ -10,7 +10,7 @@ import PasswordChangeGate from '../components/security/PasswordChangeGate';
  * Încărcare leneșă pe rute.
  *
  * Înainte, toate paginile intrau în bundle-ul inițial. Consecința practică: cine
- * deschidea /login descărca și AdminDashboardPage cu tot Recharts-ul după el —
+ * deschidea /login descărca și AdminDashboardPage cu tot Recharts-ul după el -
  * cel mai mare chunk din aplicație, folosit de un singur rol, pe o singură rută.
  * Pe o rețea de intranet asta se vede mai puțin, dar tot se plătește la fiecare
  * deploy, când cache-ul e invalidat.
@@ -41,9 +41,9 @@ export function AppRoutes() {
         <Routes>
             <Route path="/"      element={<Navigate to="/login" replace />} />
             <Route path="/login" element={<LoginPage />} />
-            {/* Activare cont — publică, nu necesită autentificare */}
+            {/* Activare cont - publică, nu necesită autentificare */}
             <Route path="/confirm-account" element={<RouteBoundary><ConfirmAccountPage /></RouteBoundary>} />
-            {/* Resetare parolă din linkul trimis de administrator — publică */}
+            {/* Resetare parolă din linkul trimis de administrator - publică */}
             <Route path="/reset-password" element={<RouteBoundary><ResetPasswordPage /></RouteBoundary>} />
 
             {/* Toate rutele protejate învelite în AppLayout (sidebar + topbar) */}

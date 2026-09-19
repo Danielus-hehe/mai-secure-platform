@@ -17,7 +17,7 @@ namespace MAI.Api.Services
                 .Replace('/', '_')
                 .TrimEnd('=');
 
-        /// <summary>SHA-256 hex (minuscule) — forma stocată în bază.</summary>
+        /// <summary>SHA-256 hex (minuscule) - forma stocată în bază.</summary>
         public static string Hash(string raw) =>
             Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(raw))).ToLowerInvariant();
     }

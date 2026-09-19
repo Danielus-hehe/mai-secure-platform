@@ -52,7 +52,7 @@ export interface TransferRecipientItem {
     /**
      * False când utilizatorul curent nu are dreptul să vadă confirmarea
      * acestui rând (e doar un alt destinatar). Atunci downloadedAt și
-     * signatureValid vin null — „necunoscut”, nu „nedescărcat”.
+     * signatureValid vin null - „necunoscut”, nu „nedescărcat”.
      */
     receiptVisible: boolean;
     downloadedAt: string | null;
@@ -183,6 +183,12 @@ export async function listTransfers(
         signal,
     });
     return data;
+}
+
+/** Câte fișiere primite nu am descărcat încă. */
+export async function getAwaitingCount(): Promise<number> {
+    const { data } = await api.get<{ count: number }>('/Transfers/awaiting-count');
+    return data.count;
 }
 
 export async function getTransferPolicy(): Promise<TransferPolicy> {

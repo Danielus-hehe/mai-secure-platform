@@ -31,7 +31,7 @@ function resolveInitial(): Theme {
         const stored = localStorage.getItem(STORAGE_KEY);
         if (stored === 'dark' || stored === 'light') return stored;
     } catch {
-        /* localStorage inaccesibil — continuăm cu fallback */
+        /* localStorage inaccesibil - continuăm cu fallback */
     }
 
     if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) return 'dark';

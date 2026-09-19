@@ -11,7 +11,7 @@
  *
  *   2. Cheile private se exporta PKCS8, se pun intr-un pachet JSON si se
  *      cripteaza cu AES-256-GCM folosind o cheie derivata din parola
- *      (PBKDF2-SHA256, 600.000 iteratii — pragul OWASP 2023). Serverul
+ *      (PBKDF2-SHA256, 600.000 iteratii - pragul OWASP 2023). Serverul
  *      primeste doar blobul criptat; nu poate scoate cheile din el.
  *
  *   3. La trimiterea unui fisier:
@@ -24,23 +24,23 @@
  *
  *   3b. La redirectionare (forward): DEK se despacheteaza cu cheia privata
  *      proprie si se re-impacheteaza pentru destinatarii noi. Cifrotextul si
- *      semnatura raman neatinse — destinatarul nou verifica semnatura
+ *      semnatura raman neatinse - destinatarul nou verifica semnatura
  *      EXPEDITORULUI ORIGINAL, nu a celui care a facut forward.
  *
  *   4. La primire: se despacheteaza DEK cu cheia privata proprie, se decripteaza,
  *      se recalculeaza SHA-256 si se verifica semnatura.
  *
  * Cele trei proprietati obtinute, cu numele lor:
- *   - CONFIDENTIALITATE — AES-256-GCM; serverul stocheaza doar cifrotext
- *   - INTEGRITATE       — tag-ul de autentificare GCM; orice bit modificat
+ *   - CONFIDENTIALITATE - AES-256-GCM; serverul stocheaza doar cifrotext
+ *   - INTEGRITATE       - tag-ul de autentificare GCM; orice bit modificat
  *                         face decriptarea sa esueze, nu sa produca gunoi
- *   - AUTENTICITATE si NON-REPUDIERE — semnatura RSA-PSS; dovedeste cine a
+ *   - AUTENTICITATE si NON-REPUDIERE - semnatura RSA-PSS; dovedeste cine a
  *                         trimis si ca nu s-a schimbat nimic pe drum
  *
  * LIMITARE, de mentionat in raport: la login parola ajunge la server (unde e
  * verificata cu Argon2id). Un server compromis ar putea, teoretic, sa derive
  * cheia de impachetare din ea in acel moment. Varianta completa foloseste
- * derivari separate — un authHash trimis la server si o cheie de impachetare
+ * derivari separate - un authHash trimis la server si o cheie de impachetare
  * care nu pleaca niciodata din browser. Vezi sectiunea de upgrade din README.
  */
 
@@ -49,7 +49,7 @@
 const PBKDF2_ITERATIONS = 600_000;   // OWASP 2023 pentru PBKDF2-HMAC-SHA256
 const RSA_MODULUS_BITS = 3072;       // ~128 biti de securitate simetrica
 const AES_KEY_BITS = 256;
-const IV_BYTES = 12;                 // 96 biti — dimensiunea recomandata pentru GCM
+const IV_BYTES = 12;                 // 96 biti - dimensiunea recomandata pentru GCM
 const SALT_BYTES = 16;
 
 export const CRYPTO_SUITE = 'AES-256-GCM+RSA-OAEP-3072+RSA-PSS-3072';
@@ -164,7 +164,7 @@ async function deriveWrappingKey(
 /**
  * Genereaza ambele perechi de chei si produce pachetul care se trimite la server.
  * Se apeleaza o singura data per utilizator, la prima autentificare.
- * Dureaza cateva secunde — generarea RSA-3072 nu e instantanee.
+ * Dureaza cateva secunde - generarea RSA-3072 nu e instantanee.
  */
 export async function generateKeyBundle(password: string): Promise<PublishedKeyBundle> {
     assertSecureContext();
@@ -228,7 +228,7 @@ export async function generateKeyBundle(password: string): Promise<PublishedKeyB
 }
 
 /**
- * Descuie cheile private folosind parola. Esueaza daca parola e gresita —
+ * Descuie cheile private folosind parola. Esueaza daca parola e gresita -
  * tag-ul GCM nu se verifica si decriptarea arunca, nu produce chei gresite.
  */
 export async function unlockKeys(
@@ -285,7 +285,7 @@ export async function unlockKeys(
 
 /**
  * Re-impacheteaza cheile private cu o parola noua. Se apeleaza OBLIGATORIU
- * la schimbarea parolei — altfel cheile raman incuiate cu cea veche si
+ * la schimbarea parolei - altfel cheile raman incuiate cu cea veche si
  * utilizatorul isi pierde accesul la toate fisierele primite.
  */
 export async function rewrapPrivateKeys(

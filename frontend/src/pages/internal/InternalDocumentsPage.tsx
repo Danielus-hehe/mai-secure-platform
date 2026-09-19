@@ -2,9 +2,9 @@
  * Documente interne: dispoziții, note, circulare distribuite pe structura
  * organizatorică, cu confirmare „Luat la cunoștință”.
  *
- *   • „Primite” — documentele publicate care mi-au fost distribuite;
+ *   • „Primite” - documentele publicate care mi-au fost distribuite;
  *     filtrul „De confirmat” le arată doar pe cele care îmi cer confirmarea.
- *   • „Create de mine” — ciornele și documentele publicate de mine, cu
+ *   • „Create de mine” - ciornele și documentele publicate de mine, cu
  *     progresul confirmărilor.
  */
 
@@ -40,7 +40,7 @@ const statusBadge = (d: InternalDocumentListItem) => {
 /** Starea mea (la primite) sau progresul confirmărilor (la create de mine). */
 function Progress({ d, box }: { d: InternalDocumentListItem; box: Box }) {
     if (box === 'authored') {
-        if (d.status === InternalDocumentStatus.Draft || d.recipientCount === null) return <span className="text-xs text-mai-400">—</span>;
+        if (d.status === InternalDocumentStatus.Draft || d.recipientCount === null) return <span className="text-xs text-mai-400">-</span>;
         const done = d.requiresAcknowledgement ? d.acknowledgedCount ?? 0 : d.openedCount ?? 0;
         return (
             <span className={`text-xs ${done === d.recipientCount ? 'text-green-600 dark:text-green-400' : 'text-mai-600 dark:text-mai-300'}`}>

@@ -3,7 +3,7 @@ namespace MAI.Api.Middleware
     /// <summary>
     /// Antetele de securitate ale răspunsurilor API.
     ///
-    /// API-ul întoarce JSON, nu HTML, deci CSP-ul de aici nu apără o pagină —
+    /// API-ul întoarce JSON, nu HTML, deci CSP-ul de aici nu apără o pagină -
     /// apără cazul în care un răspuns ajunge să fie randat direct de browser
     /// (o eroare deschisă într-un tab, un endpoint de export cu Content-Type
     /// ghicit greșit). Politica e cea mai strictă posibilă: nimic nu se încarcă,

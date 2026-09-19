@@ -99,7 +99,7 @@ namespace MAI.Api.Controllers
         // ═════════════════════════════════════════════════════════════════════
         /// <summary>
         /// Câți destinatari ar avea distribuția aleasă și cum se împart pe
-        /// subdiviziuni — afișat în formular înainte de publicare, ca autorul să
+        /// subdiviziuni - afișat în formular înainte de publicare, ca autorul să
         /// vadă „32 de persoane în 4 subdiviziuni”, nu doar opțiunea bifată.
         /// </summary>
         [HttpPost("preview-distribution")]
@@ -185,7 +185,7 @@ namespace MAI.Api.Controllers
                     DistributionMode        = d.DistributionMode,
                     RequiresAcknowledgement = d.RequiresAcknowledgement,
                     AuthorId                = d.AuthorId,
-                    AuthorName              = d.Author != null ? (d.Author.FullName ?? d.Author.Username) : "—",
+                    AuthorName              = d.Author != null ? (d.Author.FullName ?? d.Author.Username) : "-",
                     AuthorUnitName          = d.AuthorOrgUnit != null ? d.AuthorOrgUnit.Name : null,
                     FileName                = d.FileName,
                     FileSize                = d.FileSize,
@@ -207,7 +207,7 @@ namespace MAI.Api.Controllers
         // ═════════════════════════════════════════════════════════════════════
         // GET api/InternalDocuments/pending-count
         // ═════════════════════════════════════════════════════════════════════
-        /// <summary>Documentele care îmi cer „Luat la cunoștință” — pentru insigna din meniu.</summary>
+        /// <summary>Documentele care îmi cer „Luat la cunoștință” - pentru insigna din meniu.</summary>
         [HttpGet("pending-count")]
         public async Task<IActionResult> GetPendingCount(CancellationToken ct)
         {
@@ -273,7 +273,7 @@ namespace MAI.Api.Controllers
                 summary                 = doc.Summary,
                 status                  = doc.Status,
                 authorId                = doc.AuthorId,
-                authorName              = doc.Author?.FullName ?? doc.Author?.Username ?? "—",
+                authorName              = doc.Author?.FullName ?? doc.Author?.Username ?? "-",
                 authorUnitName          = doc.AuthorOrgUnitId is { } au ? tree.PathOf(au) : null,
                 distributionMode        = doc.DistributionMode,
                 includeSubunits         = doc.IncludeSubunits,
@@ -308,7 +308,7 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // POST api/InternalDocuments — ciornă nouă
+        // POST api/InternalDocuments - ciornă nouă
         // ═════════════════════════════════════════════════════════════════════
         [HttpPost]
         [Consumes("multipart/form-data")]
@@ -366,7 +366,7 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // PUT api/InternalDocuments/{id} — editarea ciornei
+        // PUT api/InternalDocuments/{id} - editarea ciornei
         // ═════════════════════════════════════════════════════════════════════
         [HttpPut("{id:guid}")]
         [Consumes("multipart/form-data")]
@@ -427,11 +427,11 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // DELETE api/InternalDocuments/{id} — doar ciorne
+        // DELETE api/InternalDocuments/{id} - doar ciorne
         // ═════════════════════════════════════════════════════════════════════
         /// <summary>
         /// O ciornă nu a ajuns la nimeni, deci nu are valoare de dovadă și se
-        /// poate șterge definitiv. Un document publicat nu se șterge niciodată —
+        /// poate șterge definitiv. Un document publicat nu se șterge niciodată -
         /// se abrogă.
         /// </summary>
         [HttpDelete("{id:guid}")]
@@ -641,7 +641,7 @@ namespace MAI.Api.Controllers
                 .Select(r => new
                 {
                     r.UserId,
-                    Name     = r.User != null ? (r.User.FullName ?? r.User.Username) : "—",
+                    Name     = r.User != null ? (r.User.FullName ?? r.User.Username) : "-",
                     Username = r.User != null ? r.User.Username : "",
                     IsActive = r.User != null && r.User.IsActive,
                     r.OrgUnitId,

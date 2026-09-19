@@ -258,7 +258,7 @@ export async function getDocumentReport(id: string): Promise<DocumentReport> {
 
 /**
  * Descarcă documentul. Prima descărcare a unui destinatar e înregistrată de
- * server ca „deschis” — condiția pentru „Luat la cunoștință”.
+ * server ca „deschis” - condiția pentru „Luat la cunoștință”.
  */
 export async function downloadInternalDocument(id: string, fileName: string): Promise<void> {
     const { data } = await api.get<Blob>(`/InternalDocuments/${id}/download`, {

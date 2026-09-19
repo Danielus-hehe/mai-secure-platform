@@ -44,7 +44,7 @@ namespace MAI.BusinessLogic.Dtos
         public UserRole Role { get; set; } = UserRole.Utilizator;
     }
 
-    /// <summary>PATCH /api/Users/{id}/org-unit — null = scoate din structură.</summary>
+    /// <summary>PATCH /api/Users/{id}/org-unit - null = scoate din structură.</summary>
     public class ChangeOrgUnitDto
     {
         public Guid? OrgUnitId { get; set; }

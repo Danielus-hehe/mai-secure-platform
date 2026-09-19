@@ -12,7 +12,7 @@ namespace MAI.Api.Controllers
     /// <summary>
     /// Structura organizatorică: Direcții → Secții → Servicii, fiecare cu șef.
     ///
-    /// Citirea e deschisă oricărui utilizator autentificat — formularul de
+    /// Citirea e deschisă oricărui utilizator autentificat - formularul de
     /// distribuție și filtrele au nevoie de arbore, iar organigrama nu e
     /// informație secretă în interiorul instituției. Orice modificare e
     /// exclusiv a administratorului și ajunge în jurnal (OrgStructureChanged).
@@ -30,7 +30,7 @@ namespace MAI.Api.Controllers
         private string CallerIp => HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
         // ═════════════════════════════════════════════════════════════════════
-        // GET api/OrgUnits — tot arborele, ca listă plată
+        // GET api/OrgUnits - tot arborele, ca listă plată
         // ═════════════════════════════════════════════════════════════════════
         [HttpGet]
         public async Task<IActionResult> GetAll([FromQuery] bool includeInactive = false, CancellationToken ct = default)
@@ -45,6 +45,7 @@ namespace MAI.Api.Controllers
                     Name        = u.Name,
                     Code        = u.Code,
                     Type        = u.Type,
+                    LevelName   = _context.OrgLevels.Where(l => l.Rank == (int)u.Type).Select(l => l.Name).FirstOrDefault() ?? "",
                     ParentId    = u.ParentId,
                     HeadUserId  = u.HeadUserId,
                     HeadName    = u.HeadUser != null ? (u.HeadUser.FullName ?? u.HeadUser.Username) : null,
@@ -157,7 +158,7 @@ namespace MAI.Api.Controllers
         /// Numește (sau eliberează) șeful subdiviziunii.
         ///
         /// Șeful este încadrat automat în subdiviziunea pe care o conduce. Dacă
-        /// persoana conducea deja altă subdiviziune, acea funcție se eliberează —
+        /// persoana conducea deja altă subdiviziune, acea funcție se eliberează -
         /// un utilizator conduce cel mult o subdiviziune (UX_OrgUnits_HeadUserId).
         /// </summary>
         [Authorize(Roles = nameof(UserRole.Administrator))]
@@ -222,6 +223,89 @@ namespace MAI.Api.Controllers
         }
 
         // ═════════════════════════════════════════════════════════════════════
+        // POST api/OrgUnits/{id}/members
+        // ═════════════════════════════════════════════════════════════════════
+        /// <summary>
+        /// Încadrează una sau mai multe persoane în subdiviziune (le mută, dacă
+        /// erau în alta). Cine conducea altă subdiviziune își pierde acea funcție,
+        /// aceeași regulă ca la PATCH /api/Users/{id}/org-unit.
+        /// </summary>
+        [Authorize(Roles = nameof(UserRole.Administrator))]
+        [HttpPost("{id:guid}/members")]
+        public async Task<IActionResult> AddMembers(Guid id, [FromBody] AddMembersDto? dto, CancellationToken ct)
+        {
+            var ids = dto?.UserIds?.Distinct().ToList() ?? [];
+            if (ids.Count == 0) return BadRequest(new { message = "Alegeți cel puțin o persoană." });
+            if (ids.Count > 200) return BadRequest(new { message = "Maxim 200 de persoane odată." });
+
+            var unit = await _context.OrgUnits.FirstOrDefaultAsync(u => u.Id == id, ct);
+            if (unit is null) return NotFound(new { message = "Subdiviziunea nu a fost găsită." });
+            if (!unit.IsActive) return BadRequest(new { message = "Subdiviziunea este desființată." });
+
+            var users = await _context.Users.Include(u => u.OrgUnit).Where(u => ids.Contains(u.Id)).ToListAsync(ct);
+            if (users.Count != ids.Count)
+                return BadRequest(new { message = "Unul dintre utilizatorii aleși nu există." });
+
+            var ledElsewhere = await _context.OrgUnits
+                .Where(o => o.HeadUserId != null && ids.Contains(o.HeadUserId.Value) && o.Id != id)
+                .ToListAsync(ct);
+
+            foreach (var led in ledElsewhere) led.HeadUserId = null;
+
+            var moved = users.Where(u => u.OrgUnitId != id).ToList();
+            foreach (var u in moved) u.OrgUnitId = id;
+
+            if (moved.Count > 0 || ledElsewhere.Count > 0)
+                Audit($"Incadrati in '{unit.Name}': " +
+                      string.Join(", ", moved.Select(u => $"@{u.Username} (din {u.OrgUnit?.Name ?? "neincadrat"})")) +
+                      (ledElsewhere.Count > 0
+                          ? $"; functii de sef eliberate: {string.Join(", ", ledElsewhere.Select(o => o.Name))}"
+                          : string.Empty));
+
+            await _context.SaveChangesAsync(ct);
+
+            return Ok(new
+            {
+                message = moved.Count == 0
+                    ? "Persoanele alese erau deja încadrate aici."
+                    : $"{moved.Count} {(moved.Count == 1 ? "persoană a fost încadrată" : "persoane au fost încadrate")} în „{unit.Name}”." +
+                      (ledElsewhere.Count > 0
+                          ? $" Funcția de șef a rămas vacantă la: {string.Join(", ", ledElsewhere.Select(o => o.Name))}."
+                          : string.Empty),
+                moved         = moved.Count,
+                headsReleased = ledElsewhere.Select(o => o.Name),
+            });
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
+        // DELETE api/OrgUnits/{id}/members/{userId}
+        // ═════════════════════════════════════════════════════════════════════
+        /// <summary>Scoate persoana din subdiviziune (rămâne neîncadrată).</summary>
+        [Authorize(Roles = nameof(UserRole.Administrator))]
+        [HttpDelete("{id:guid}/members/{userId:guid}")]
+        public async Task<IActionResult> RemoveMember(Guid id, Guid userId, CancellationToken ct)
+        {
+            var unit = await _context.OrgUnits.FirstOrDefaultAsync(u => u.Id == id, ct);
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId && u.OrgUnitId == id, ct);
+            if (unit is null || user is null)
+                return NotFound(new { message = "Persoana nu este încadrată în această subdiviziune." });
+
+            var wasHead = unit.HeadUserId == userId;
+            if (wasHead) unit.HeadUserId = null;
+            user.OrgUnitId = null;
+
+            Audit($"@{user.Username} scos din '{unit.Name}'" + (wasHead ? "; functia de sef a ramas vacanta" : string.Empty));
+            await _context.SaveChangesAsync(ct);
+
+            return Ok(new
+            {
+                message = wasHead
+                    ? $"{user.FullName ?? user.Username} a fost scos din subdiviziune. Funcția de șef a rămas vacantă."
+                    : $"{user.FullName ?? user.Username} a fost scos din subdiviziune.",
+            });
+        }
+
+        // ═════════════════════════════════════════════════════════════════════
         // DELETE api/OrgUnits/{id}
         // ═════════════════════════════════════════════════════════════════════
         /// <summary>
@@ -273,8 +357,10 @@ namespace MAI.Api.Controllers
             if (dto.Code is { Length: > 20 })
                 return "Prescurtarea are maxim 20 de caractere.";
 
-            if (!Enum.IsDefined(dto.Type))
-                return "Nivelul subdiviziunii nu există.";
+            // Nivelurile sunt configurabile (OrgLevels), deci validarea e pe
+            // tabel, nu pe enum: un nivel adăugat de administrator e valid.
+            if (!await _context.OrgLevels.AnyAsync(l => l.Rank == (int)dto.Type, ct))
+                return "Nivelul ales nu există.";
 
             var tree = await OrgStructure.LoadTreeAsync(_context, ct);
 
@@ -312,6 +398,7 @@ namespace MAI.Api.Controllers
         public string Name { get; set; } = string.Empty;
         public string? Code { get; set; }
         public OrgUnitType Type { get; set; }
+        public string LevelName { get; set; } = string.Empty;
         public Guid? ParentId { get; set; }
         public Guid? HeadUserId { get; set; }
         public string? HeadName { get; set; }
@@ -333,5 +420,10 @@ namespace MAI.Api.Controllers
     public class SetHeadDto
     {
         public Guid? UserId { get; set; }
+    }
+
+    public class AddMembersDto
+    {
+        public List<Guid> UserIds { get; set; } = [];
     }
 }
