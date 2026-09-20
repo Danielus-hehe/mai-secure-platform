@@ -290,7 +290,29 @@ namespace MAI.Api.Controllers
         ///      Content-Disposition.
         /// </summary>
         [HttpGet("{id:guid}/download")]
-        public async Task<IActionResult> Download(Guid id, CancellationToken ct)
+        public Task<IActionResult> Download(Guid id, CancellationToken ct) =>
+            DownloadVersionAsync(id, version: null, ct);
+
+        // ═════════════════════════════════════════════════════════════════════
+        // GET api/Documents/{id}/versions/{version}/download
+        // ═════════════════════════════════════════════════════════════════════
+        /// <summary>
+        /// Descărcarea unei versiuni anume, inclusiv arhivată.
+        ///
+        /// Într-un registru de acte normative, versiunile vechi nu sunt gunoi: un
+        /// act se aplică în forma valabilă la data faptei, iar un control intern
+        /// cere exact redacția de atunci. Ele erau deja păstrate în depozit și
+        /// listate în interfață, dar nu se putea ajunge la conținutul lor.
+        ///
+        /// Jurnalul consemnează ce versiune a citit fiecare - o descărcare de
+        /// versiune arhivată este o informație în sine.
+        /// </summary>
+        [HttpGet("{id:guid}/versions/{version:int}/download")]
+        public Task<IActionResult> DownloadVersion(Guid id, int version, CancellationToken ct) =>
+            DownloadVersionAsync(id, version, ct);
+
+        /// <param name="version">null = versiunea curentă.</param>
+        private async Task<IActionResult> DownloadVersionAsync(Guid id, int? version, CancellationToken ct)
         {
             var doc = await _context.Documents
                 .AsNoTracking()
@@ -299,9 +321,22 @@ namespace MAI.Api.Controllers
 
             if (doc is null) return NotFound(new { message = "Documentul nu a fost găsit." });
 
-            var ver = doc.Versions.OrderByDescending(v => v.VersionNumber).FirstOrDefault();
-            if (ver is null || string.IsNullOrWhiteSpace(ver.EncryptedStoragePath))
-                return NotFound(new { message = "Documentul nu are nicio versiune stocată." });
+            var ver = version is { } wanted
+                ? doc.Versions.FirstOrDefault(v => v.VersionNumber == wanted)
+                : doc.Versions.OrderByDescending(v => v.VersionNumber).FirstOrDefault();
+
+            if (ver is null)
+                return NotFound(new
+                {
+                    message = version is { } missing
+                        ? $"Versiunea {missing} a acestui document nu există."
+                        : "Documentul nu are nicio versiune stocată.",
+                });
+
+            if (string.IsNullOrWhiteSpace(ver.EncryptedStoragePath))
+                return NotFound(new { message = "Versiunea nu are niciun fișier în depozit." });
+
+            var isArchived = ver.VersionNumber < doc.CurrentVersion;
 
             Stream stream;
             try
@@ -339,11 +374,17 @@ namespace MAI.Api.Controllers
             }
 
             AddAudit(AuditAction.FileDownload,
-                $"Document descarcat '{doc.Title}' v{ver.VersionNumber}");
+                $"Document descarcat '{doc.Title}' v{ver.VersionNumber}" +
+                (isArchived ? " (versiune arhivata)" : string.Empty));
             await _context.SaveChangesAsync(ct);
 
-            var ext          = Path.GetExtension(ver.OriginalFileNameOrKey());
-            var downloadName = SanitizeFileName(doc.Title + ext);
+            // Numele propus browserului conține versiunea când nu e cea curentă,
+            // ca două redacții ale aceluiași act să nu ajungă cu același nume în
+            // folderul de descărcări.
+            var storedName   = ver.OriginalFileNameOrKey();
+            var ext          = Path.GetExtension(storedName);
+            var downloadName = SanitizeFileName(
+                isArchived ? $"{doc.Title} (v{ver.VersionNumber}){ext}" : doc.Title + ext);
 
             return File(stream, "application/octet-stream", downloadName);
         }

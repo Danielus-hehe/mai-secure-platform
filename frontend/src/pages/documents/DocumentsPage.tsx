@@ -73,6 +73,8 @@ export default function DocumentsPage() {
     const [updateTarget, setUpdateTarget] = useState<string | null>(null);
     const [publishing,   setPublishing]   = useState(false);
     const [updating,     setUpdating]     = useState(false);
+    // Cheia versiunii care se descarcă acum: `${docId}:${version}`.
+    const [downloading,  setDownloading]  = useState<string | null>(null);
 
     // Formular publicare
     const [title,      setTitle]      = useState('');
@@ -162,18 +164,30 @@ export default function DocumentsPage() {
         }
     };
 
-    // ── Descărcare versiune curentă, cu verificarea integrității ─────────
+    // ── Descărcare, cu verificarea integrității ──────────────────────────
     //
     // La publicare, serverul calculează SHA-256 al fișierului și îl trece în
     // registru. La descărcare, browserul recalculează amprenta și o compară. Un
     // document modificat direct în depozit (MinIO) sau pe drum nu mai ajunge pe
     // disc ca și cum ar fi autentic: e oprit aici, cu un avertisment.
-    const handleDownload = async (doc: Doc) => {
-        const current = doc.versions?.find(v => v.version === doc.currentVersion);
-        const expected = current?.sha256?.trim().toLowerCase() || null;
+    //
+    // `version` lipsă înseamnă versiunea curentă. Versiunile arhivate se descarcă
+    // de la /versions/{n}/download: un act se aplică în forma valabilă la data
+    // faptei, deci redacțiile vechi trebuie să rămână accesibile, nu doar listate.
+    const handleDownload = async (doc: Doc, version?: number) => {
+        const target = version
+            ? doc.versions?.find(v => v.version === version)
+            : doc.versions?.find(v => v.version === doc.currentVersion);
 
+        const expected   = target?.sha256?.trim().toLowerCase() || null;
+        const isArchived = target ? target.version < doc.currentVersion : false;
+        const url        = version
+            ? `/Documents/${doc.id}/versions/${version}/download`
+            : `/Documents/${doc.id}/download`;
+
+        setDownloading(`${doc.id}:${target?.version ?? doc.currentVersion}`);
         try {
-            const { data: blob } = await api.get<Blob>(`/Documents/${doc.id}/download`, {
+            const { data: blob } = await api.get<Blob>(url, {
                 responseType: 'blob',
                 timeout: 300_000,
             });
@@ -188,16 +202,18 @@ export default function DocumentsPage() {
                 return;
             }
 
-            const url = URL.createObjectURL(blob);
-            const a    = document.createElement('a');
-            a.href = url;
-            a.download = current?.fileName || doc.title;
+            const objectUrl = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = objectUrl;
+            a.download = target?.fileName || doc.title;
             a.click();
             // Revocarea imediată poate anula descărcarea în unele browsere.
-            window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+            window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+
+            const what = isArchived ? `Versiunea arhivată v${target?.version}` : 'Documentul';
 
             if (expected && actual) {
-                toast.success('Integritate verificată: amprenta SHA-256 corespunde registrului.');
+                toast.success(`${what}: integritate verificată, amprenta SHA-256 corespunde registrului.`);
             } else if (expected) {
                 toast.warning('Descărcat, dar amprenta nu a putut fi verificată: browserul nu oferă WebCrypto pe această adresă.');
             } else {
@@ -205,6 +221,8 @@ export default function DocumentsPage() {
             }
         } catch (e) {
             toast.error(apiErrorMessage(e, 'Fișierul nu a putut fi descărcat.'));
+        } finally {
+            setDownloading(null);
         }
     };
 
@@ -321,6 +339,17 @@ export default function DocumentsPage() {
                                                         ? <Archive size={13} className="text-mai-300" />
                                                         : <Badge tone="green">Curent</Badge>}
                                                     <span className="text-xs opacity-70">{formatDateTime(v.uploadedAt)}</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleDownload(d, v.version)}
+                                                        disabled={downloading !== null}
+                                                        title={`Descarcă v${v.version} (${v.fileName})`}
+                                                        aria-label={`Descarcă versiunea ${v.version}`}
+                                                        className="shrink-0 p-1.5 rounded-md hover:bg-black/10 dark:hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed">
+                                                        {downloading === `${d.id}:${v.version}`
+                                                            ? <Loader2 size={13} className="animate-spin" />
+                                                            : <Download size={13} />}
+                                                    </button>
                                                 </div>
                                             ))}
                                         </div>
@@ -329,8 +358,9 @@ export default function DocumentsPage() {
                                     {/* Acțiuni */}
                                     <div className="flex gap-2 pt-1">
                                         <Button variant="ghost" className="text-xs px-3 py-1.5"
+                                                disabled={downloading !== null}
                                                 onClick={() => handleDownload(d)}>
-                                            <Download size={13} /> Descarcă
+                                            <Download size={13} /> Descarcă versiunea curentă
                                         </Button>
                                         {canPublish && (
                                             <Button variant="secondary" className="text-xs px-3 py-1.5"
