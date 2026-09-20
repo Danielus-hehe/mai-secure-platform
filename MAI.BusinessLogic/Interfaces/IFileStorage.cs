@@ -14,8 +14,11 @@ namespace MAI.BusinessLogic.Interfaces
     /// s-ar stoca o cale de sistem, orice bug care permite scrierea acelei
     /// coloane devine citire arbitrară de fișiere de pe server.
     ///
-    /// Toate implementările primesc și returnează CIFROTEXT. Conținutul în clar
-    /// nu ajunge niciodată aici - criptarea se face în browser, înainte de upload.
+    /// Transferurile ajung aici deja criptate în browser (E2EE). Documentele
+    /// normative și interne ajung în clar, iar implementarea injectată în
+    /// aplicație (EncryptingFileStorage) le criptează înainte de depozitul real
+    /// și le decriptează la citire. Implementările de bază (S3, Local) nu știu
+    /// nimic de criptare: scriu și citesc octeții exact cum îi primesc.
     /// </summary>
     public interface IFileStorage
     {
