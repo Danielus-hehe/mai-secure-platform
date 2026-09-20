@@ -203,8 +203,8 @@ export default function DocumentsPage() {
             } else {
                 toast.warning('Descărcat. Această versiune nu are amprentă SHA-256 în registru, deci nu a putut fi verificată.');
             }
-        } catch {
-            toast.error('Fișierul nu a putut fi descărcat.');
+        } catch (e) {
+            toast.error(apiErrorMessage(e, 'Fișierul nu a putut fi descărcat.'));
         }
     };
 
