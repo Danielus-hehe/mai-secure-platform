@@ -563,6 +563,23 @@ namespace MAI.Api.Controllers
                 _logger.LogError("Document intern fara obiect in depozit: {Id} → {Key}", doc.Id, doc.StorageKey);
                 return NotFound(new { message = "Fișierul nu mai există în depozit." });
             }
+            catch (CryptographicException ex)
+            {
+                // Nu se marchează „deschis”: destinatarul nu a primit documentul.
+                _logger.LogError(ex, "Document intern refuzat la descarcare (integritate): {Id} → {Key}", doc.Id, doc.StorageKey);
+
+                AddAudit(AuditAction.StorageIntegrityFailure,
+                    $"Descarcare refuzata: documentul intern '{doc.Title}' (id {doc.Id}) nu a trecut " +
+                    "verificarea de integritate a depozitului",
+                    AuditResult.Failure);
+                await _context.SaveChangesAsync(CancellationToken.None);
+
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    message = "Fișierul din depozit nu a trecut verificarea de integritate și nu a fost livrat. " +
+                              "Incidentul a fost înregistrat în jurnal; anunțați administratorul.",
+                });
+            }
 
             // Prima deschidere a unui destinatar e condiția pentru „Luat la cunoștință”.
             if (mine is not null && mine.FirstOpenedAt is null && doc.Status != InternalDocumentStatus.Draft)

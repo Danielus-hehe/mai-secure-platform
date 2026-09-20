@@ -8,7 +8,9 @@ using MAI.BusinessLogic.Interfaces;
 using MAI.BusinessLogic.Security;
 using MAI.BusinessLogic.Services;
 using MAI.BusinessLogic.Storage;
+using MAI.BusinessLogic.Storage.Encryption;
 using MAI.BusinessLogic.Transfers;
+using MAI.Api.Tools;
 using MAI.DataAccessLayer;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http.Features;
@@ -39,6 +41,21 @@ Log.Logger = new LoggerConfiguration()
 
 try
 {
+    // ─── Comenzi de întreținere fără server web ────────────────────────────────
+    // storage:generate-key nu are nevoie de nicio configurare: doar generează o
+    // cheie principală și o afișează, gata de pus în .env.
+    if (StorageMaintenanceCommand.IsGenerateKey(args))
+    {
+        Environment.ExitCode = StorageMaintenanceCommand.GenerateKey(args);
+        return;
+    }
+
+    // storage:recrypt are nevoie de configurarea completă (bază, depozit, chei),
+    // deci trece prin construirea host-ului, dar nu pornește Kestrel. Argumentele
+    // comenzii nu ajung la CreateBuilder: „--dry-run” ar fi interpretat ca cheie
+    // de configurare.
+    var isRecryptCommand = StorageMaintenanceCommand.IsRecrypt(args);
+
     // ─── .env local (o singură sursă de configurare cu Docker Compose) ─────────
     // Rulat înainte de CreateBuilder: provider-ul de variabile de mediu își face
     // instantaneul la construire. În container nu face nimic (vezi DotEnvLoader).
@@ -51,7 +68,7 @@ try
             dotEnv.Path, dotEnv.Applied, string.Join(", ", dotEnv.Keys));
     }
 
-    var builder = WebApplication.CreateBuilder(args);
+    var builder = WebApplication.CreateBuilder(isRecryptCommand ? Array.Empty<string>() : args);
 
     // ─── Loguri structurate (Serilog, JSON pe consolă) ─────────────────────────
     // Un eveniment = o linie JSON, cu proprietățile separate de mesaj:
@@ -188,10 +205,46 @@ try
 
     builder.Services.AddSingleton(storageOptions);
 
+    // ─── Criptarea depozitului la nivel de aplicație ───────────────────────────
+    // Documentele normative (documents/) și interne (internal/) nu sunt E2EE, deci
+    // fără pasul acesta ar sta în clar în MinIO. Fiecare fișier primește o cheie
+    // AES-256-GCM proprie, împachetată cu o cheie principală din .env
+    // (MAI_STORAGE_MASTER_KEYS), identificată prin STORAGE_ENCRYPTION_ACTIVE_KEY.
+    // Transferurile nu trec prin criptarea asta: sunt deja criptate în browser.
+    var storageEncryption = new StorageEncryptionOptions();
+    builder.Configuration.GetSection("StorageEncryption").Bind(storageEncryption);
+
+    var masterKeysFromEnv = Environment.GetEnvironmentVariable("MAI_STORAGE_MASTER_KEYS");
+    if (!string.IsNullOrWhiteSpace(masterKeysFromEnv))
+        storageEncryption.MasterKeys = masterKeysFromEnv;
+
+    // Cu criptarea dezactivată, o valoare-șablon rămasă în .env înseamnă „fără
+    // chei”, nu o eroare. Cu criptarea activă, Parse o respinge explicit.
+    if (!storageEncryption.Enabled && PlaceholderSecrets.IsPlaceholder(storageEncryption.MasterKeys))
+        storageEncryption.MasterKeys = string.Empty;
+
+    storageEncryption.Validate();
+
+    var masterKeyRing = storageEncryption.HasKeys
+        ? MasterKeyRing.Parse(storageEncryption.MasterKeys, storageEncryption.ActiveKeyId)
+        : null;
+
+    builder.Services.AddSingleton(storageEncryption);
+
     if (storageOptions.IsS3)
-        builder.Services.AddSingleton<IFileStorage, S3FileStorage>();
+        builder.Services.AddSingleton<S3FileStorage>();
     else
-        builder.Services.AddSingleton<IFileStorage, LocalFileStorage>();
+        builder.Services.AddSingleton<LocalFileStorage>();
+
+    // Restul aplicației primește decoratorul; depozitul real rămâne înregistrat
+    // separat doar ca să fie construit (și eliberat) de containerul DI.
+    builder.Services.AddSingleton<IFileStorage>(sp => new EncryptingFileStorage(
+        storageOptions.IsS3
+            ? sp.GetRequiredService<S3FileStorage>()
+            : sp.GetRequiredService<LocalFileStorage>(),
+        storageEncryption,
+        masterKeyRing,
+        sp.GetRequiredService<ILogger<EncryptingFileStorage>>()));
 
     // ─── Kestrel și multipart - limitele corpului cererii ──────────────────────
     // Limita GLOBALĂ e mică: toate endpointurile JSON (login, chei, 2FA,
@@ -535,6 +588,12 @@ try
 
     var app = builder.Build();
 
+    if (isRecryptCommand)
+    {
+        Environment.ExitCode = await StorageMaintenanceCommand.RunRecryptAsync(app.Services, args);
+        return;
+    }
+
     // Raport de pornire - util ca să vezi ce buget de memorie ai setat.
     app.Logger.LogInformation(
         "Argon2id: profil implicit={Default}, privilegiat={Privileged}, max concurent={Max}, memorie de varf={Mem} MiB",
@@ -548,6 +607,14 @@ try
         app.Services.GetRequiredService<IFileStorage>().ProviderName,
         storageOptions.MaxFileSizeMb,
         storageOptions.UsePresignedDownload ? "activat" : "dezactivat");
+
+    app.Logger.LogInformation(
+        "Criptare depozit ({Prefixes}): {State}, cheia activa {ActiveKey}, chei configurate {KeyCount}, citire in clar {Plaintext}",
+        string.Join(", ", storageEncryption.PrefixList),
+        storageEncryption.Enabled ? "activata" : "DEZACTIVATA",
+        masterKeyRing?.ActiveKeyId ?? "-",
+        masterKeyRing?.KeyIds.Count ?? 0,
+        storageEncryption.AllowPlaintextRead ? "permisa (fisiere vechi)" : "refuzata");
 
     app.Logger.LogInformation(
         "Expirare transferuri: {State}, la fiecare {Interval} min, purjare obiecte {Purge}",

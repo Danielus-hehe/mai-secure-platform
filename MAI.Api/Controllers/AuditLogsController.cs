@@ -401,7 +401,8 @@ namespace MAI.Api.Controllers
             AuditAction.FileDeleted or AuditAction.TransferExpired or
             AuditAction.TransferRevoked or AuditAction.TransferForwarded      => "TRANSFER",
             AuditAction.SessionRevoked or AuditAction.PasswordResetRequested or
-            AuditAction.PasswordResetCompleted                                => "SECURITATE",
+            AuditAction.PasswordResetCompleted or AuditAction.StorageIntegrityFailure or
+            AuditAction.StorageRecrypted                                      => "SECURITATE",
             AuditAction.OrgStructureChanged                                   => "STRUCTURA",
             AuditAction.InternalDocumentCreated or AuditAction.InternalDocumentPublished or
             AuditAction.InternalDocumentOpened or AuditAction.InternalDocumentAcknowledged or
@@ -420,7 +421,8 @@ namespace MAI.Api.Controllers
             "TRANSFER"       => [AuditAction.FileDeleted, AuditAction.TransferExpired,
                                  AuditAction.TransferRevoked, AuditAction.TransferForwarded],
             "SECURITATE"     => [AuditAction.SessionRevoked, AuditAction.PasswordResetRequested,
-                                 AuditAction.PasswordResetCompleted],
+                                 AuditAction.PasswordResetCompleted, AuditAction.StorageIntegrityFailure,
+                                 AuditAction.StorageRecrypted],
             "STRUCTURA"      => [AuditAction.OrgStructureChanged],
             "DOC_INTERN"     => [AuditAction.InternalDocumentCreated, AuditAction.InternalDocumentPublished,
                                  AuditAction.InternalDocumentOpened, AuditAction.InternalDocumentAcknowledged,

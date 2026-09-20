@@ -477,6 +477,15 @@ export default function AdminDashboardPage() {
                             </div>
                             <div className="pt-2 text-xs text-mai-500 dark:text-mai-400 space-y-1">
                                 <p>Descărcare prin URL presemnat: {stats.storage.presignedDownload ? 'activată' : 'dezactivată'}</p>
+                                <p>
+                                    Criptare documente în depozit:{' '}
+                                    {stats.storage.encryption?.enabled
+                                        ? `AES-256-GCM, cheia activă ${stats.storage.encryption.activeKeyId ?? '-'} ` +
+                                          `(${stats.storage.encryption.keyCount} ${stats.storage.encryption.keyCount === 1 ? 'cheie' : 'chei'}), ` +
+                                          `${stats.storage.encryption.prefixes.join(', ')}` +
+                                          (stats.storage.encryption.allowPlaintextRead ? ' - fișierele vechi necriptate se citesc încă' : '')
+                                        : <span className="text-amber-600 dark:text-amber-400">dezactivată</span>}
+                                </p>
                                 <p>Limită fișier: {stats.storage.maxFileSizeMb} MB</p>
                                 <p>Documente normative: {stats.documents.total} ({stats.documents.versions} versiuni)</p>
                             </div>
