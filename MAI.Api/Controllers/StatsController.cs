@@ -3,6 +3,7 @@ using System.Security.Claims;
 using MAI.Api.BackgroundJobs;
 using MAI.BusinessLogic.Interfaces;
 using MAI.BusinessLogic.Storage;
+using MAI.BusinessLogic.Storage.Encryption;
 using MAI.BusinessLogic.Transfers;
 using MAI.DataAccessLayer;
 using MAI.Domain.Entities;
@@ -591,6 +592,20 @@ namespace MAI.Api.Controllers
                     maxFileSizeMb         = _storageOptions.MaxFileSizeMb,
                     storedCiphertextBytes,
                     totalCiphertextBytes,
+                    // Criptarea la nivel de aplicație a documentelor (nu a
+                    // transferurilor, care sunt E2EE). Doar identificatorii
+                    // cheilor, niciodată valorile.
+                    encryption = _storage is EncryptingFileStorage enc
+                        ? new
+                        {
+                            enabled               = enc.WritesEncrypted,
+                            activeKeyId           = enc.KeyRing?.ActiveKeyId,
+                            keyCount              = enc.KeyRing?.KeyIds.Count ?? 0,
+                            prefixes              = enc.Options.PrefixList,
+                            allowPlaintextRead    = enc.Options.AllowPlaintextRead,
+                            verifyBeforeStreaming = enc.Options.VerifyBeforeStreaming,
+                        }
+                        : null,
                 },
 
                 documents = new

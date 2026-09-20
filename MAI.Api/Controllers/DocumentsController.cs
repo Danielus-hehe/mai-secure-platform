@@ -18,9 +18,13 @@ namespace MAI.Api.Controllers
     ///
     /// Spre deosebire de transferuri, documentele NU sunt criptate end-to-end:
     /// sunt acte interne cu circulație generală în instituție, iar căutarea
-    /// server-side după titlu și cuvinte-cheie este cerută funcțional. Ce se
-    /// schimbă față de versiunea anterioară este modul în care ajung pe disc și
-    /// modul în care se citesc înapoi.
+    /// server-side după titlu și cuvinte-cheie este cerută funcțional.
+    ///
+    /// În depozit ajung totuși criptate: IFileStorage injectat aici este
+    /// EncryptingFileStorage, care criptează AES-256-GCM tot ce se scrie sub
+    /// documents/ și verifică integritatea la citire. Controllerul lucrează cu
+    /// octeți în clar și nu știe de criptare; amprenta SHA-256 din registru este
+    /// a documentului original.
     /// </summary>
     [Authorize]
     [ApiController]
@@ -311,6 +315,27 @@ namespace MAI.Api.Controllers
                     doc.Id, ver.VersionNumber, ver.EncryptedStoragePath);
 
                 return NotFound(new { message = "Fișierul nu mai există în depozit." });
+            }
+            catch (CryptographicException ex)
+            {
+                // Fișier alterat în depozit, cheie principală lipsă sau obiect în
+                // clar strecurat în locul celui criptat. Nimic nu se livrează, iar
+                // incidentul ajunge în jurnal ca eșec de securitate.
+                _logger.LogError(ex,
+                    "Document refuzat la descarcare (integritate): {Doc} v{Ver} → {Key}",
+                    doc.Id, ver.VersionNumber, ver.EncryptedStoragePath);
+
+                AddAudit(AuditAction.StorageIntegrityFailure,
+                    $"Descarcare refuzata: documentul '{doc.Title}' v{ver.VersionNumber} nu a trecut " +
+                    "verificarea de integritate a depozitului",
+                    AuditResult.Failure);
+                await _context.SaveChangesAsync(CancellationToken.None);
+
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    message = "Fișierul din depozit nu a trecut verificarea de integritate și nu a fost livrat. " +
+                              "Incidentul a fost înregistrat în jurnal; anunțați administratorul.",
+                });
             }
 
             AddAudit(AuditAction.FileDownload,

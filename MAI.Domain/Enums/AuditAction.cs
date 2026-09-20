@@ -50,5 +50,16 @@ namespace MAI.Domain.Enums
         InternalDocumentOpened = 18,
         InternalDocumentAcknowledged = 19,
         InternalDocumentRepealed = 20,
+
+        /// <summary>
+        /// Un document din depozit nu a trecut verificarea de integritate la
+        /// descărcare (etichetă GCM invalidă, antet alterat, cheie principală
+        /// lipsă sau obiect în clar strecurat în locul celui criptat). Fișierul
+        /// NU a fost livrat.
+        /// </summary>
+        StorageIntegrityFailure = 21,
+
+        /// <summary>Rularea scriptului de recriptare a depozitului (storage:recrypt).</summary>
+        StorageRecrypted = 22,
     }
 }
