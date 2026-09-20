@@ -20,12 +20,16 @@
 # Stergere:  docker compose down -v       (STERGE si datele!)
 # Consola:   http://localhost:9001
 #
-# ── Structura cheilor (Feature #4) ───────────────────────────────────────────
-# Transferuri:  {dept-slug}/{yyyy}/{MM}/{transferId:N}.enc
-#               ex. directia-it/2026/09/a1b2c3...enc
+# ── Structura cheilor ────────────────────────────────────────────────────────
+# Transferuri:  transfers/{yyyy}/{MM}/{transferId:N}.enc
+#               (cele vechi pot avea inca prefixul departamentului)
 # Documente:    documents/{docId:N}/v{n}.{ext}
+# Interne:      internal/{yyyy}/{MM}/{docId:N}-{id}.{ext}
 #
-# Ambele tipuri stau in acelasi bucket ("mai-secure").
+# Toate stau in acelasi bucket ("mai-secure"). Transferurile sunt criptate in
+# browser (E2EE); documents/ si internal/ sunt criptate de API inainte de
+# MinIO (AES-256-GCM, cheie per fisier, cheia principala din .env). In MinIO
+# nu exista niciun fisier in clar (dupa storage:recrypt pentru cele vechi).
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
@@ -184,6 +188,14 @@ services:
       Storage__UsePresignedDownload: "false"
       MAI_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER}
       MAI_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+
+      # Criptarea la nivel de aplicatie a documentelor (documents/, internal/).
+      # Cheile principale raman in .env; in imagine si in Git nu ajung niciodata.
+      # Recriptare / rotire:  docker compose run --rm api storage:recrypt --dry-run
+      MAI_STORAGE_MASTER_KEYS: ${MAI_STORAGE_MASTER_KEYS:-}
+      StorageEncryption__ActiveKeyId: ${STORAGE_ENCRYPTION_ACTIVE_KEY:-}
+      StorageEncryption__Enabled: ${STORAGE_ENCRYPTION_ENABLED:-true}
+      StorageEncryption__AllowPlaintextRead: ${STORAGE_ENCRYPTION_ALLOW_PLAINTEXT:-true}
 
       # Originile frontend-ului. Fara ele, browserul refuza fiecare raspuns.
       Cors__AllowedOrigins__0: ${FRONTEND_ORIGIN:-http://localhost:5173}

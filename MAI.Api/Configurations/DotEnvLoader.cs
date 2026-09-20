@@ -54,6 +54,9 @@ namespace MAI.Api.Configuration
                 ["TRANSFER_MAX_EXPIRY_DAYS"]     = new[] { "Transfers__MaxExpiryDays" },
                 ["TRANSFER_MAX_RECIPIENTS"]      = new[] { "Transfers__MaxRecipients" },
                 ["PASSWORD_RESET_TOKEN_MINUTES"] = new[] { "PasswordReset__TokenMinutes" },
+                ["STORAGE_ENCRYPTION_ENABLED"]         = new[] { "StorageEncryption__Enabled" },
+                ["STORAGE_ENCRYPTION_ACTIVE_KEY"]      = new[] { "StorageEncryption__ActiveKeyId" },
+                ["STORAGE_ENCRYPTION_ALLOW_PLAINTEXT"] = new[] { "StorageEncryption__AllowPlaintextRead" },
             };
 
         /// <summary>Rezultatul încărcării, pentru mesajul din log (fără valori).</summary>
