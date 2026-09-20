@@ -1,20 +1,21 @@
-\xef\xbb\xbf<#
-.SYNOPSIS
-    Criptează documentele vechi din depozit și le mută pe cheia principală activă.
+# SGDM - recriptarea documentelor din depozit (documents/, internal/).
+#
+# Invelitoare peste comanda API-ului "storage:recrypt". Foloseste aceeasi
+# configurare (.env) ca aplicatia. Detalii: docs/STORAGE-ENCRYPTION.md
+#
+# Fisierul este intentionat doar ASCII (fara diacritice, fara BOM): Windows
+# PowerShell 5.1 citeste un .ps1 fara BOM in codificarea ANSI, iar orice
+# caracter non-ASCII strica interpretarea scriptului.
+#
+# Exemple (din radacina repo-ului):
+#   .\scripts\storage-recrypt.ps1 -DryRun
+#   .\scripts\storage-recrypt.ps1
+#   .\scripts\storage-recrypt.ps1 -Docker -DryRun
 
-.DESCRIPTION
-    Învelitoare peste comanda API-ului "storage:recrypt". Folosește aceeași
-    configurare (.env) ca aplicația. Vezi docs/STORAGE-ENCRYPTION.md.
-
-.EXAMPLE
-    .\scripts\storage-recrypt.ps1 -DryRun
-    .\scripts\storage-recrypt.ps1
-    .\scripts\storage-recrypt.ps1 -Docker -DryRun
-#>
 param(
-    # Doar raportează ce s-ar face; nu scrie nimic în depozit.
+    # Doar raporteaza ce s-ar face; nu scrie nimic in depozit.
     [switch]$DryRun,
-    # Rulează în containerul api (docker compose run), nu cu dotnet run.
+    # Ruleaza in containerul api (docker compose run), nu cu dotnet run.
     [switch]$Docker
 )
 
@@ -30,13 +31,16 @@ try {
     } else {
         dotnet run --project MAI.Api -- @toolArgs
     }
+    $code = $LASTEXITCODE
 
-    switch ($LASTEXITCODE) {
-        0 { Write-Host 'Recriptare terminata fara probleme.' -ForegroundColor Green }
-        1 { Write-Host 'Unele obiecte au probleme - vedeti lista de mai sus. Ele au ramas neatinse.' -ForegroundColor Yellow }
-        default { Write-Host "Configurare incompleta (cod $LASTEXITCODE)." -ForegroundColor Red }
+    if ($code -eq 0) {
+        Write-Host 'Recriptare terminata fara probleme.' -ForegroundColor Green
+    } elseif ($code -eq 1) {
+        Write-Host 'Unele obiecte au probleme - vedeti lista de mai sus. Ele au ramas neatinse.' -ForegroundColor Yellow
+    } else {
+        Write-Host "Oprit cu codul $code (configurare incompleta sau eroare la pornire)." -ForegroundColor Red
     }
-    exit $LASTEXITCODE
+    exit $code
 }
 finally {
     Pop-Location
