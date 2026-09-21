@@ -33,6 +33,7 @@ const ProfilePage        = lazy(() => import('../pages/profile/ProfilePage'));
 const AuditPage          = lazy(() => import('../pages/audit/AuditPage'));
 const UsersPage          = lazy(() => import('../pages/users/UsersPage'));
 const AdminDashboardPage = lazy(() => import('../pages/admin/AdminDashboardPage'));
+const DirectoryPage      = lazy(() => import('../pages/directory/DirectoryPage'));
 
 // UserRole enum backend: Utilizator=1, SefDirectie=2, Administrator=3
 
@@ -91,6 +92,7 @@ export function AppRoutes() {
                                     <Route path="/users" element={<UsersPage />} />
                                     <Route path="/admin" element={<AdminDashboardPage />} />
                                     <Route path="/org-units" element={<OrgUnitsPage />} />
+                                    <Route path="/directory" element={<DirectoryPage />} />
                                 </Route>
 
                             </Route>

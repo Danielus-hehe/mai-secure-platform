@@ -123,9 +123,10 @@ Apoi creează OU-urile, grupurile, conturile de test și scoate certificatul:
 .\scripts\samba-ad-setup.ps1
 ```
 
-Scriptul afișează la final amprenta SHA-256 a certificatului. Pune în `.env`
-**una** dintre variante (`LDAP_CA_FILE` sau `LDAP_CERT_THUMBPRINT`), pune
-`LDAP_ENABLED=true` și repornește API-ul:
+Scriptul afișează la final numele din certificat (trebuie să fie
+`dc.sgdm.local`) și ce să pui în `.env`: `LDAP_ENABLED=true`,
+`LDAP_CA_FILE=/app/certs/ad-ca.pem`, parola contului de serviciu. Apoi
+repornește API-ul:
 
 ```powershell
 docker compose up -d --build api
@@ -147,23 +148,40 @@ interpună pe rețea (DNS otrăvit, ARP spoofing) primește parolele de domeniu 
 tuturor celor care se autentifică - inclusiv ale administratorilor. Validarea
 certificatului este singurul lucru care împiedică asta.
 
-Trei moduri, în ordinea strictaței:
+Cum se validează depinde de unde rulează API-ul, pentru că biblioteca LDAP de
+dedesubt diferă.
 
-1. **Amprentă fixată** (`LDAP_CERT_THUMBPRINT`) - cea mai strictă și cea
-   recomandată pentru un DC cu certificat autosemnat. Se schimbă doar când se
-   reemite certificatul.
-2. **CA propriu** (`LDAP_CA_FILE`) - certificatul serverului trebuie să ducă
-   exact la CA-ul dat, nu la unul din magazinul sistemului.
-3. **Magazinul de încredere al sistemului** - implicit, potrivit când DC-ul are
-   un certificat emis de o autoritate recunoscută.
+**API-ul în Docker (Linux) - cazul obișnuit.** `System.DirectoryServices.Protocols`
+folosește OpenLDAP (`libldap`, instalat în imagine de Dockerfile). OpenLDAP nu
+acceptă callbackul .NET de validare, deci certificatul îl verifică el însuși,
+după două variabile de mediu puse de `docker-compose.yml`:
 
-`LDAP_ALLOW_UNTRUSTED_CERT=true` acceptă orice și scrie un avertisment în log la
-fiecare conexiune. Există pentru prima jumătate de oră de laborator; în afara
-mediului Development, API-ul nu pornește cu el.
+- `LDAPTLS_CACERT` - CA-ul în care are încredere. Ia valoarea din
+  `LDAP_CA_FILE`; fără ea, magazinul de încredere al sistemului;
+- `LDAPTLS_REQCERT=demand` - certificatul **și numele din el** se verifică
+  obligatoriu. Numele trebuie să fie exact `LDAP_HOST`, de aceea acolo se pune
+  `dc.sgdm.local`, nu o adresă IP.
+
+Pentru Samba AD autosemnat: `LDAP_CA_FILE=/app/certs/ad-ca.pem` (scriptul de
+setup copiază CA-ul în `./certs`, montat în container).
+
+**API-ul pornit cu `dotnet run` pe Windows.** Aici biblioteca e `wldap32`, care
+acceptă callbackul, deci sunt disponibile trei moduri: amprentă fixată
+(`LDAP_CERT_THUMBPRINT`, cea mai strictă), CA propriu (`LDAP_CA_FILE`) sau
+magazinul sistemului. În modurile cu CA se verifică și numele din certificat.
+
+API-ul **refuză să pornească** dacă configurarea ar părea sigură, dar n-ar fi
+aplicată: amprentă fixată în container, `LDAP_CA_FILE` diferit de
+`LDAPTLS_CACERT`, fișierul CA lipsă, sau `LDAPTLS_REQCERT` relaxat (`never`,
+`allow`, `try`) în afara mediului Development.
+
+Relaxarea de laborator („acceptă orice certificat”) cere, în container, ambele
+variabile: `LDAP_ALLOW_UNTRUSTED_CERT=true` și `LDAP_TLS_REQCERT=never`. Cu doar
+una dintre ele, API-ul fie refuză pornirea, fie avertizează că nu are efect.
 
 Butonul **Testează** din pagina „Active Directory” afișează subiectul și
-amprenta certificatului prezentat de server, cu un buton de copiere - nu trebuie
-căutat pe server.
+amprenta certificatului prezentat de server - util ca să verifici că numele din
+certificat corespunde cu `LDAP_HOST`.
 
 ## Roluri din grupuri AD
 
@@ -272,7 +290,8 @@ consultă niciodată.
 | Simptom | Cauză probabilă |
 |---|---|
 | „Serviciul de domeniu nu răspunde” (503) | Numele din `LDAP_HOST` nu se rezolvă din container, portul e închis sau certificatul e respins. Logul API-ului spune care |
-| Certificat respins | Amprenta din `LDAP_CERT_THUMBPRINT` nu corespunde, CA-ul din `LDAP_CA_FILE` nu se potrivește, sau `LDAP_HOST` e o adresă IP în loc de nume |
+| Certificat respins | CA-ul din `LDAP_CA_FILE` nu e cel al DC-ului, sau `LDAP_HOST` nu e numele din certificat (de exemplu o adresă IP) |
+| `DllNotFoundException: libldap` | Imaginea API-ului e veche. `docker compose build --no-cache api` |
 | Utilizatorul intră, dar cu rol greșit | Grupul nu e în `LDAP_GROUP_ROLE_MAPPINGS`, sau apartenența e indirectă și serverul nu suportă regula de potrivire în lanț (apare un avertisment în log) |
 | Contul rămâne neîncadrat | `department` din AD nu corespunde exact denumirii sau prescurtării vreunei subdiviziuni active |
 | „Există deja un cont local cu acest nume” | Cont local nelegat. Legați-l explicit din pagina de utilizatori |

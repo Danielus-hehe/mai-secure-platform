@@ -264,7 +264,7 @@ export default function DirectoryPage() {
                                     className="inline-flex items-center gap-1 text-xs text-mai-600 hover:underline dark:text-mai-300"
                                     onClick={() => {
                                         void navigator.clipboard?.writeText(probe.serverCertificateThumbprint ?? '');
-                                        toast.success('Amprenta a fost copiată. Puneți-o în LDAP_CERT_THUMBPRINT.');
+                                        toast.success('Amprenta a fost copiată.');
                                     }}
                                 >
                                     <Copy size={12} />

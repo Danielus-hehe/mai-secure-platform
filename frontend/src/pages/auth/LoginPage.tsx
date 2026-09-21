@@ -207,16 +207,6 @@ export default function LoginPage() {
                                         </div>
                                     </div>
 
-                                    {directory && (
-                                        <p className="rounded-lg bg-mai-50 px-3 py-2 text-xs leading-relaxed
-                                                      text-mai-500 dark:bg-mai-900/40 dark:text-mai-300">
-                                            Se acceptă și contul de domeniu
-                                            {directory.domain ? ` ${directory.domain}` : ''}: scrieți doar numele
-                                            scurt (<code>nume.prenume</code>). Parola contului de domeniu se
-                                            schimbă în Active Directory, nu aici.
-                                        </p>
-                                    )}
-
                                     <div className="relative">
                                         <Lock size={16} className="absolute left-3.5 top-[42px] text-mai-300 dark:text-mai-500 z-10" />
                                         <button
@@ -240,6 +230,22 @@ export default function LoginPage() {
                                             />
                                         </div>
                                     </div>
+
+                                    {/*
+                                      Indicația stă sub parolă, lângă butonul de trimitere:
+                                      e citită exact când utilizatorul decide ce parolă
+                                      tastează, iar numele de utilizator rămâne primul
+                                      câmp, fără nimic între el și eticheta lui.
+                                    */}
+                                    {directory && (
+                                        <p className="rounded-lg bg-mai-50 px-3 py-2 text-xs leading-relaxed
+                                                      text-mai-500 dark:bg-mai-900/40 dark:text-mai-300">
+                                            Se acceptă și contul de domeniu
+                                            {directory.domain ? ` ${directory.domain}` : ''}: scrieți doar numele
+                                            scurt (<code>nume.prenume</code>). Parola contului de domeniu se
+                                            schimbă în Active Directory, nu aici.
+                                        </p>
+                                    )}
 
                                     <Button type="submit" disabled={loading} className="w-full mt-2">
                                         {loading ? 'Se autentifică…' : 'Autentificare'}
