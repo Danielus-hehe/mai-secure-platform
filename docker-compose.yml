@@ -11,14 +11,25 @@
 #   Dezvoltare - doar stocarea in Docker, API-ul cu 'dotnet run':
 #     docker compose up -d minio minio-init
 #
-#   Tot in Docker - MinIO + API construit din Dockerfile:
+#   Tot in Docker - MinIO + API + web (nginx cu HTTPS si frontend-ul):
 #     docker compose up -d --build
+#     Aplicatia: https://<SGDM_SERVER_NAME>  (implicit https://sgdm.local)
 #     (.env trebuie completat cu secrete reale: in afara mediului Development,
 #      API-ul refuza sa porneasca daca vreunul a ramas pe valoarea-sablon)
 #
+#   Backup (la cerere sau programat):
+#     docker compose --profile backup run --rm backup
+#
 # Oprire:    docker compose down          (datele raman in volum)
 # Stergere:  docker compose down -v       (STERGE si datele!)
-# Consola:   http://localhost:9001
+# Consola:   http://localhost:9001        (doar de pe masina gazda)
+#
+# ── Ce e expus in afara masinii ──────────────────────────────────────────────
+# Doar porturile 80 si 443 ale serviciului web. API-ul nu mai are port pe
+# gazda (ajunge la el doar nginx, prin reteaua interna), iar MinIO asculta
+# doar pe 127.0.0.1: API-ul pornit cu 'dotnet run' il gaseste, un alt
+# calculator din retea nu. Fara asta, oricine din LAN putea incerca parole
+# direct pe consola MinIO sau ocoli nginx cu totul.
 #
 # ── Structura cheilor ────────────────────────────────────────────────────────
 # Transferuri:  transfers/{yyyy}/{MM}/{transferId:N}.enc
@@ -60,8 +71,11 @@ services:
       MINIO_REGION_NAME: us-east-1
 
     ports:
-      - "9000:9000"   # API S3 - aici vorbeste .NET si browserul
-      - "9001:9001"   # Consola web de administrare
+      # 127.0.0.1: accesibile doar de pe gazda. In modul de dezvoltare API-ul
+      # (dotnet run) se conecteaza la localhost:9000; in modul Docker, la
+      # minio:9000 prin reteaua interna. Niciunul nu are nevoie de LAN.
+      - "127.0.0.1:9000:9000"   # API S3
+      - "127.0.0.1:9001:9001"   # Consola web de administrare
 
     volumes:
       - minio-data:/data
@@ -197,12 +211,14 @@ services:
       StorageEncryption__Enabled: ${STORAGE_ENCRYPTION_ENABLED:-true}
       StorageEncryption__AllowPlaintextRead: ${STORAGE_ENCRYPTION_ALLOW_PLAINTEXT:-true}
 
-      # Originile frontend-ului. Fara ele, browserul refuza fiecare raspuns.
-      Cors__AllowedOrigins__0: ${FRONTEND_ORIGIN:-http://localhost:5173}
+      # Originea frontend-ului. In spatele nginx, pagina si /api au aceeasi
+      # origine si CORS nu mai intervine; valoarea ramane corecta pentru cazul
+      # in care cineva deschide frontend-ul de dezvoltare spre acest API.
+      Cors__AllowedOrigins__0: ${SGDM_PUBLIC_ORIGIN:-https://sgdm.local}
 
-      # Adresa din linkul de activare trimis pe email. Trebuie sa fie adresa la
-      # care utilizatorii deschid efectiv frontend-ul.
-      Frontend__BaseUrl: ${FRONTEND_ORIGIN:-http://localhost:5173}
+      # Adresa din linkurile trimise pe email (activare cont, resetare parola).
+      # Trebuie sa fie exact adresa la care utilizatorii deschid aplicatia.
+      Frontend__BaseUrl: ${SGDM_PUBLIC_ORIGIN:-https://sgdm.local}
 
       # SMTP pentru notificari si invitatii. Lasate goale, API-ul porneste fara
       # email: conturile noi primesc parola temporara, transferurile nu notifica.
@@ -253,23 +269,54 @@ services:
       # fixata (LDAP_CERT_THUMBPRINT) merge doar cand API-ul ruleaza pe Windows;
       # in container se foloseste CA-ul (LDAP_CA_FILE), iar API-ul refuza sa
       # porneasca daca cele doua variabile de mai jos nu corespund.
+      #
+      # LDAP_CONTAINER_CA_FILE are prioritate fata de LDAP_CA_FILE. Motivul: cu
+      # API-ul pornit prin 'dotnet run' pe Windows, LDAP_CA_FILE e o cale
+      # Windows (C:\...\ad-ca.pem), care in container nu exista. Cu doua
+      # variabile, acelasi .env serveste ambele moduri fara editari la comutare.
       Ldap__ServerCertificateThumbprint: ${LDAP_CERT_THUMBPRINT:-}
-      Ldap__CaCertificatePath: ${LDAP_CA_FILE:-}
+      Ldap__CaCertificatePath: ${LDAP_CONTAINER_CA_FILE:-${LDAP_CA_FILE:-}}
       Ldap__AllowUntrustedCertificate: ${LDAP_ALLOW_UNTRUSTED_CERT:-false}
 
       # Fara LDAP_CA_FILE, OpenLDAP foloseste magazinul de incredere al
       # sistemului (potrivit pentru un DC cu certificat emis de o autoritate
       # recunoscuta). "demand" = certificatul si numele din el se verifica
       # obligatoriu; orice alta valoare e refuzata de API in Production.
-      LDAPTLS_CACERT: ${LDAP_CA_FILE:-/etc/ssl/certs/ca-certificates.crt}
+      LDAPTLS_CACERT: ${LDAP_CONTAINER_CA_FILE:-${LDAP_CA_FILE:-/etc/ssl/certs/ca-certificates.crt}}
       LDAPTLS_REQCERT: ${LDAP_TLS_REQCERT:-demand}
 
-      # In spatele unui reverse proxy: fara asta, toti utilizatorii ajung in
-      # aceeasi galeata de rate limit, fiindca RemoteIpAddress e IP-ul proxy-ului.
-      RateLimit__BehindReverseProxy: "false"
+      # ── In spatele nginx ─────────────────────────────────────────────────
+      # Fara BehindReverseProxy, RemoteIpAddress ar fi IP-ul nginx pentru TOATE
+      # cererile: un singur utilizator care greseste parola de 10 ori ar bloca
+      # autentificarea pentru toata institutia, iar jurnalul de audit ar
+      # inregistra acelasi IP pentru toata lumea.
+      #
+      # KnownProxies: API-ul crede antetul X-Forwarded-For DOAR cand cererea
+      # vine de la acest IP - cel fixat pentru serviciul web mai jos. Oricine
+      # altcineva care trimite antetul (alt container, un client direct) e
+      # ignorat. De aceea IP-ul e fix: o lista de retele intregi ar fi insemnat
+      # sa avem incredere in orice container din retea.
+      RateLimit__BehindReverseProxy: "true"
+      RateLimit__KnownProxies__0: ${SGDM_PROXY_IP:-172.28.0.10}
 
-    ports:
-      - "5000:8080"
+      # Restrictia la retele interne (RFC 1918). Dupa UseForwardedHeaders se
+      # aplica pe IP-ul real al clientului, nu pe cel al nginx.
+      Intranet__Enabled: ${INTRANET_ONLY:-false}
+      # true = doar jurnalizeaza cine AR FI fost respins. Modul in care se
+      # activeaza restrictia pe un sistem viu: o zi asa, jurnalul verificat,
+      # apoi false.
+      Intranet__AuditOnly: ${INTRANET_AUDIT_ONLY:-false}
+
+      # 2FA obligatoriu pentru Administrator si SefDirectie pe endpointurile
+      # privilegiate. Ramane false pana isi activeaza 2FA toti administratorii:
+      # pornit mai devreme, ii blocheaza exact pe cei care l-ar putea configura.
+      TwoFactor__RequiredForPrivilegedRoles: ${TWOFACTOR_REQUIRED_PRIVILEGED:-false}
+
+    # Fara port pe gazda: API-ul se acceseaza doar prin nginx (https://.../api).
+    # Un port deschis direct ar ocoli TLS, antetele si limita de marime din
+    # nginx. 'expose' documenteaza portul pentru ceilalti din retea.
+    expose:
+      - "8080"
 
     # Doar pentru Storage:Provider=Local. Cu MinIO ramane nefolosit, dar exista
     # ca sa nu se piarda fisiere daca cineva comuta providerul si reporneste.
@@ -290,6 +337,102 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Web: nginx cu HTTPS, frontend-ul React si reverse proxy spre API
+  #
+  # Construit din frontend/Dockerfile. Browserul vorbeste doar cu acest
+  # serviciu: paginile statice direct, /api/ mai departe spre containerul api.
+  #
+  # Certificatul: ./certs/tls/tls.crt + tls.key. Daca lipsesc, se genereaza
+  # unul autosemnat la prima pornire (SGDM_SELF_SIGNED=true), pastrat in
+  # acelasi director. Pe Windows, scripts/trust-dev-cert.ps1 il face de
+  # incredere in browser. In productie: certificatul institutiei si
+  # SGDM_SELF_SIGNED=false.
+  # ───────────────────────────────────────────────────────────────────────────
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Cale relativa: bundle-ul cheama /api pe aceeasi origine. Nu se ia
+        # VITE_API_URL din .env - acolo e adresa pentru 'npm run dev'.
+        VITE_API_URL: /api
+    image: sgdm-web:latest
+    container_name: sgdm-web
+    restart: unless-stopped
+
+    depends_on:
+      api:
+        condition: service_healthy
+
+    environment:
+      SGDM_SERVER_NAME: ${SGDM_SERVER_NAME:-sgdm.local}
+      SGDM_PUBLIC_ORIGIN: ${SGDM_PUBLIC_ORIGIN:-https://sgdm.local}
+      SGDM_API_UPSTREAM: api:8080
+      SGDM_SELF_SIGNED: ${SGDM_SELF_SIGNED:-true}
+
+    ports:
+      - "${SGDM_HTTP_PORT:-80}:80"
+      - "${SGDM_HTTPS_PORT:-443}:443"
+
+    volumes:
+      # Nu :ro - la prima pornire scriptul scrie aici certificatul autosemnat,
+      # ca sa fie acelasi dupa fiecare restart.
+      - ./certs/tls:/etc/nginx/tls
+
+    networks:
+      default:
+        # IP fix: e singura adresa de la care API-ul accepta X-Forwarded-For
+        # (RateLimit__KnownProxies__0). Trebuie sa fie in SGDM_DOCKER_SUBNET.
+        ipv4_address: ${SGDM_PROXY_IP:-172.28.0.10}
+
+    healthcheck:
+      # Pe HTTP, portul 80: sonda nu depinde de certificat. wget e in busybox.
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Backup: baza de date (pg_dump) + bucketul MinIO, in ./backups/
+  #
+  # Nu porneste la 'up' (profilul "backup"); ruleaza si iese:
+  #   docker compose --profile backup run --rm backup
+  #   docker compose --profile backup run --rm backup list
+  #   docker compose --profile backup run --rm backup verify <nume>
+  #   docker compose --profile backup run --rm backup restore <nume> --yes
+  #
+  # Foloseste ACELASI DB_CONNECTION_STRING ca API-ul: un backup facut dintr-o
+  # alta baza decat cea pe care ruleaza aplicatia e cel mai rau tip de backup -
+  # arata bine pana in ziua in care e nevoie de el. Detalii: docs/DEPLOYMENT.md.
+  # ───────────────────────────────────────────────────────────────────────────
+  backup:
+    build:
+      context: ./deploy/backup
+      dockerfile: Dockerfile
+    image: sgdm-backup:latest
+    container_name: sgdm-backup
+    profiles: ["backup"]
+
+    depends_on:
+      minio:
+        condition: service_healthy
+
+    environment:
+      DB_CONNECTION_STRING: ${DB_CONNECTION_STRING}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-mai-secure}
+      STORAGE_ENCRYPTION_ACTIVE_KEY: ${STORAGE_ENCRYPTION_ACTIVE_KEY:-}
+      BACKUP_PASSPHRASE: ${BACKUP_PASSPHRASE:-}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_PG_SCHEMA: ${BACKUP_PG_SCHEMA:-public}
+
+    volumes:
+      - ./backups:/backups
 
   # ───────────────────────────────────────────────────────────────────────────
   # Controler de domeniu Samba AD - DOAR pentru laborator
@@ -353,6 +496,23 @@ services:
       - samba-data:/var/lib/samba
       - samba-config:/etc/samba/external
       - /etc/localtime:/etc/localtime:ro
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Reteaua interna
+#
+# Subretea fixa, ca serviciul web sa poata avea IP fix (vezi KnownProxies).
+# Daca 172.28.0.0/24 se suprapune cu reteaua institutiei (un calculator din
+# LAN cu 172.28.0.x n-ar mai fi accesibil de pe gazda), alegeti alta in .env
+# si mutati SGDM_PROXY_IP in ea.
+#
+# La prima pornire dupa aceasta schimbare, reteaua veche (fara subretea fixa)
+# trebuie recreata:  docker compose down   (fara -v: datele raman)
+# ─────────────────────────────────────────────────────────────────────────────
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${SGDM_DOCKER_SUBNET:-172.28.0.0/24}
 
 volumes:
   minio-data:

@@ -389,10 +389,18 @@ al tabelei nu conține sesiuni utilizabile.
 
 ### D7. MinIO auto-găzduit, cu URL-uri presemnate
 
-Fișierele nu trec prin API la descărcare. API-ul autorizează și emite un URL
-temporar (5 minute); octeții merg direct din MinIO în browser. Un URL scurs
-după 5 minute nu mai funcționează. MinIO rulează în intranet și vede doar
-cifrotext.
+În modul de dezvoltare, fișierele nu trec prin API la descărcare. API-ul
+autorizează și emite un URL temporar (5 minute); octeții merg direct din MinIO
+în browser. Un URL scurs după 5 minute nu mai funcționează. MinIO rulează în
+intranet și vede doar cifrotext.
+
+În modul publicat (totul în Docker, în spatele nginx), URL-urile presemnate
+sunt **oprite** (`Storage__UsePresignedDownload=false`), iar cifrotextul trece
+prin API. Compromisul e conștient: MinIO nu mai trebuie expus în rețea, iar CSP
+poate restrânge `connect-src` la originea aplicației (vezi D11). Costul, o
+copie în plus prin API pentru fișiere de cel mult 50 MB, e neglijabil în
+intranet. Documentele normative și interne trec oricum prin API, fiindcă sunt
+decriptate acolo (vezi `docs/STORAGE-ENCRYPTION.md`).
 
 ### D8. Retragerea nu este o ștergere
 
@@ -424,6 +432,30 @@ exportabil. Răspunde la „cine a făcut ce".
 procesul". Niciun secret, niciun corp de cerere și niciun antet `Authorization`
 nu ajunge în loguri.
 
+
+### D11. Un singur punct de intrare: nginx cu HTTPS
+
+În producție, browserul vorbește doar cu nginx (porturile 80/443). Pagina,
+fișierele statice și `/api` au aceeași origine; API-ul nu are port pe gazdă, iar
+MinIO ascultă doar pe `127.0.0.1`.
+
+- **Suprafață minimă:** un singur serviciu expus, cu TLS 1.2/1.3 și suite AEAD.
+  API-ul nu poate fi atins ocolind TLS, antetele sau limita de mărime.
+- **CSP strictă, ca antet HTTP:** `connect-src 'self'`. Chiar dacă un script
+  străin ar rula în pagină, nu poate trimite nicăieri cheile private decriptate
+  din memorie. Antetul se adaugă peste `<meta>` din `index.html` (browserul le
+  aplică pe amândouă), deci doar înăsprește politica din dezvoltare.
+- **IP-ul real al clientului:** nginx suprascrie `X-Forwarded-For`, iar API-ul îl
+  crede doar de la IP-ul fix al containerului web. Fără asta, rate limit-ul,
+  blocarea contului și jurnalul de audit ar vedea un singur IP pentru toată
+  instituția, iar un client și-ar putea falsifica adresa ca să pară din intranet.
+- **Redirecționarea HTTP → HTTPS** merge la o origine fixă din configurare, nu la
+  antetul `Host` primit: altfel ar fi o redirecționare deschisă pe numele
+  instituției.
+
+Configurația și motivarea fiecărei directive: `frontend/nginx/default.conf.template`
+și `docs/DEPLOYMENT.md`, secțiunea 4.
+
 ---
 
 ## 7. Calitate: teste, CI, loguri, audit
@@ -434,8 +466,14 @@ la fiecare push și pull request:
 - verifică că fiecare migrare EF are fișierul `.Designer.cs`;
 - `dotnet build` și `dotnet test`;
 - `npm run build` (`tsc -b` strict + `vite build`) și `oxlint`;
-- construiește imaginea Docker din `Dockerfile` (build în două etape,
-  utilizator neprivilegiat).
+- construiește cele trei imagini Docker (API, web, backup) și validează
+  `docker-compose.yml`;
+- pornește imaginea web și verifică HTTPS-ul: CSP strictă ca antet,
+  redirecționarea HTTP → HTTPS spre originea fixă (nu spre antetul `Host`),
+  refuzul TLS 1.1, refuzul unei cereri de peste 52 MB;
+- face un **backup și o restaurare completă** pe un PostgreSQL și un MinIO
+  efemere: șterge datele, restaurează, verifică numărul de rânduri, apoi
+  confirmă că un fișier alterat în backup e detectat.
 
 **Teste** (xUnit, fără bază de date - toate rulează offline):
 
@@ -479,21 +517,38 @@ MAI.BusinessLogic/       Argon2id, TOTP, politica de parole, stocare (Local / S3
 MAI.Api/                 controllere, middleware, servicii, job de expirare, Program.cs
 MAI.Tests/               teste xUnit (fără bază de date)
 frontend/                React 19 + TypeScript + Vite; src/crypto/ conține E2EE
-docker-compose.yml       MinIO + API (+ Samba AD sub profilul „ldap”, PostgreSQL opțional)
+frontend/Dockerfile      imaginea web: build Vite + nginx (HTTPS, reverse proxy spre API)
+frontend/nginx/          configurația nginx (TLS, antete, CSP) și certificatul autosemnat
+deploy/backup/           imaginea de backup: pg_dump + mc + gpg, cu verificare SHA-256
+docker-compose.yml       MinIO + API + web (+ backup, Samba AD pe profiluri, PostgreSQL opțional)
 Dockerfile               imaginea API-ului (build în două etape, utilizator neprivilegiat)
-docs/DEPLOYMENT.md       instalare completă și configurare variabile de mediu
+scripts/                 Samba AD de test, recriptarea depozitului, certificatul de demonstrație
+docs/DEPLOYMENT.md       instalare, HTTPS, backup și restaurare, probleme frecvente
 docs/LDAP-AD.md          autentificare cu contul de domeniu, roluri din grupuri AD, import structură
-.github/workflows/       CI (build + test + lint + Docker)
+docs/STORAGE-ENCRYPTION.md  criptarea documentelor normative și interne în MinIO
+.github/workflows/       CI (build + test + lint + imagini Docker + backup/restaurare)
 ```
 
 **Pornire rapidă** (detalii complete în `docs/DEPLOYMENT.md`):
 
 ```bash
 cp .env.example .env              # completați secretele: openssl rand -base64 48
-docker compose up -d minio minio-init
 dotnet ef database update --project MAI.DataAccessLayer --startup-project MAI.Api
+```
+
+Dezvoltare (API și frontend pe mașina locală):
+
+```bash
+docker compose up -d minio minio-init
 dotnet run --project MAI.Api
-cd frontend && npm ci && npm run dev
+cd frontend && npm ci && npm run dev          # http://localhost:5173
+```
+
+Totul în Docker, cu HTTPS (nginx + API + MinIO):
+
+```bash
+docker compose up -d --build                  # https://sgdm.local
+docker compose --profile backup run --rm backup
 ```
 
 Contul de administrator implicit este creat de `900_seed_demo.sql`. La prima

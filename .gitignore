@@ -88,3 +88,15 @@ migrations/*.local.sql
 *.p12
 *.key
 !frontend/**/*.key.ts
+
+# ============ PUBLICARE ============
+# Certificatul TLS al nginx (autosemnat generat la prima pornire sau cel al
+# instituției). Cheia privată e deja acoperită de *.key; și certificatul rămâne
+# în afara repo-ului, fiindcă e legat de o mașină anume, nu de cod.
+certs/tls/
+
+# Backupurile conțin baza de date (hashuri, chei private cifrate, jurnalul de
+# audit) și copia bucketului. Nu au ce căuta în Git, oricât ar fi de cifrate.
+backups/
+
+certs/

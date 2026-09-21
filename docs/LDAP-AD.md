@@ -165,6 +165,12 @@ după două variabile de mediu puse de `docker-compose.yml`:
 Pentru Samba AD autosemnat: `LDAP_CA_FILE=/app/certs/ad-ca.pem` (scriptul de
 setup copiază CA-ul în `./certs`, montat în container).
 
+**Ambele moduri din același `.env`.** Dacă `LDAP_CA_FILE` e o cale Windows
+(pentru `dotnet run`), setați în plus `LDAP_CONTAINER_CA_FILE=/app/certs/ad-ca.pem`.
+Containerul o folosește pe aceasta, pentru ambele variabile (`Ldap__CaCertificatePath`
+și `LDAPTLS_CACERT`), deci verificarea de consecvență de mai jos rămâne
+satisfăcută, iar la trecerea dintr-un mod în altul nu se editează nimic.
+
 **API-ul pornit cu `dotnet run` pe Windows.** Aici biblioteca e `wldap32`, care
 acceptă callbackul, deci sunt disponibile trei moduri: amprentă fixată
 (`LDAP_CERT_THUMBPRINT`, cea mai strictă), CA propriu (`LDAP_CA_FILE`) sau

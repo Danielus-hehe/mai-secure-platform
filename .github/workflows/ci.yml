@@ -3,12 +3,16 @@
 #
 # La fiecare push și pull request:
 #   backend  → verifică perechile de migrări EF, dotnet build, dotnet test
-#   frontend → npm ci, tsc -b
+#   frontend → npm ci, tsc -b, vite build, oxlint
+#   docker   → docker compose config, imaginile api / web / backup,
+#              nginx -t și un test HTTPS pe imaginea web, backup + restaurare
+#              cap-coadă pe un PostgreSQL și un MinIO reale (efemere)
 #
-# Cele două joburi rulează în paralel: o eroare de TypeScript nu trebuie să
-# aștepte după restaurarea pachetelor NuGet ca să fie raportată.
+# Joburile rulează în paralel: o eroare de TypeScript nu trebuie să aștepte
+# după restaurarea pachetelor NuGet ca să fie raportată.
 #
-# Nu are nevoie de secrete și nici de bază de date: testele sunt unitare.
+# Nu are nevoie de secrete: testele .NET sunt unitare, iar jobul docker își
+# ridică singur o bază și un MinIO de unică folosință, cu parole de test.
 #
 # LOCAȚIE: fișierul TREBUIE să stea în .github/workflows/ din rădăcina
 # repository-ului. GitHub nu citește workflow-uri din subfoldere; cât timp a
@@ -134,3 +138,128 @@ jobs:
 
       - name: Lint
         run: npx oxlint
+
+  docker:
+    name: Docker (imagini, nginx, backup)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    # Numele proiectului compose fixează numele rețelei (sgdmci_default), la
+    # care se atașează baza de test de mai jos.
+    env:
+      COMPOSE_PROJECT_NAME: sgdmci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # .env.example e șablonul complet; fără el, compose ar interpola cu șiruri
+      # goale și ar ascunde o variabilă scrisă greșit în docker-compose.yml.
+      - name: Configurare de test
+        run: cp .env.example .env
+
+      - name: docker compose config
+        run: docker compose --profile backup --profile ldap config --quiet
+
+      - name: Imaginea API
+        run: docker build --tag sgdm-api:ci .
+
+      - name: Imaginea web
+        run: docker build --tag sgdm-web:ci ./frontend
+
+      - name: Imaginea de backup
+        run: docker build --tag sgdm-backup:ci ./deploy/backup
+
+      # nginx -t rulează prin entrypoint-ul imaginii, deci trec și scripturile
+      # de pornire: generarea certificatului și înlocuirea variabilelor din
+      # șablon. O variabilă SGDM_* lipsă sau o directivă greșită pică aici, nu
+      # la prima pornire pe server.
+      - name: nginx -t
+        run: docker run --rm -e SGDM_SERVER_NAME=ci.local -e SGDM_PUBLIC_ORIGIN=https://ci.local sgdm-web:ci nginx -t
+
+      - name: Test HTTPS pe imaginea web
+        shell: bash
+        run: |
+          docker run -d --name ci-web -p 18080:80 -p 18443:443 \
+            -e SGDM_SERVER_NAME=ci.local -e SGDM_PUBLIC_ORIGIN=https://ci.local sgdm-web:ci
+          for i in $(seq 1 20); do curl -fs http://127.0.0.1:18080/healthz && break; sleep 1; done
+
+          C="curl -sk --resolve ci.local:18443:127.0.0.1"
+
+          # Pagina aplicației, cu CSP strictă ca antet.
+          $C https://ci.local:18443/ | grep -q '<div id="root">'
+          $C -D- -o /dev/null https://ci.local:18443/transfers | grep -qi "content-security-policy: .*connect-src 'self';"
+
+          # Redirecționarea HTTP → HTTPS merge la originea fixă, nu la Host-ul primit.
+          loc=$(curl -s -D- -o /dev/null -H 'Host: atacator.example' http://127.0.0.1:18080/x | tr -d '\r' | awk 'tolower($1)=="location:"{print $2}')
+          test "$loc" = "https://ci.local/x"
+
+          # TLS 1.1 refuzat.
+          ! $C --tls-max 1.1 -o /dev/null https://ci.local:18443/ 2>/dev/null
+
+          # Peste limita de 52 MB → 413 de la nginx, fără să ajungă la API.
+          # „|| true”: nginx închide conexiunea după 413, iar curl poate raporta
+          # eroare de trimitere; codul HTTP primit e cel care contează.
+          code=$(head -c 60000000 /dev/zero | $C -o /dev/null -w '%{http_code}' -X POST --data-binary @- https://ci.local:18443/api/Transfers || true)
+          test "$code" = "413"
+
+      - name: Jurnalul containerului web
+        if: failure()
+        run: docker logs ci-web || true
+
+      # Backup și restaurare pe servicii reale: MinIO din compose (cu bucketul
+      # creat de minio-init) și un PostgreSQL de unică folosință. Verifică
+      # exact ce contează: că un backup se poate restaura, nu doar că se face.
+      - name: Backup și restaurare cap-coadă
+        shell: bash
+        env:
+          DB_CONNECTION_STRING: Host=ci-pg;Port=5432;Database=sgdm;Username=sgdm;Password=ci-parola
+          BACKUP_PASSPHRASE: ci-parola-backup
+        run: |
+          set -euo pipefail
+          docker compose run --rm minio-init
+
+          docker run -d --name ci-pg --network sgdmci_default \
+            -e POSTGRES_USER=sgdm -e POSTGRES_PASSWORD=ci-parola -e POSTGRES_DB=sgdm postgres:16-alpine
+          for i in $(seq 1 30); do docker exec ci-pg pg_isready -U sgdm -d sgdm && break; sleep 1; done
+
+          docker exec ci-pg psql -U sgdm -d sgdm -c 'CREATE TABLE ci_probe(id int primary key, v text); INSERT INTO ci_probe VALUES (1, $$a$$), (2, $$b$$);'
+
+          # Un obiect în bucket, pe prefixul transferurilor.
+          # Doar cele trei valori necesare, citite explicit. „source .env” nu
+          # merge: valori ca LDAP_GROUP_ROLE_MAPPINGS conțin „;”, pe care bash
+          # le-ar executa ca separator de comenzi.
+          env_value() { grep -E "^$1=" .env | head -n1 | cut -d= -f2-; }
+          MINIO_ROOT_USER=$(env_value MINIO_ROOT_USER)
+          MINIO_ROOT_PASSWORD=$(env_value MINIO_ROOT_PASSWORD)
+          STORAGE_BUCKET=$(env_value STORAGE_BUCKET)
+          docker run --rm --network sgdmci_default --entrypoint sh minio/mc:latest -c \
+            "mc alias set l http://minio:9000 '$MINIO_ROOT_USER' '$MINIO_ROOT_PASSWORD' >/dev/null && echo cifrotext | mc pipe l/$STORAGE_BUCKET/transfers/ci/obiect.enc"
+
+          docker compose --profile backup run --rm backup
+          name=$(ls backups | grep '^20' | tail -n1)
+          test -n "$name"
+          echo "Backup: $name"
+
+          docker compose --profile backup run --rm backup verify "$name"
+          sudo test -f "backups/$name/database.dump.gpg"
+          sudo test -f "backups/$name/storage/transfers/ci/obiect.enc"
+
+          # Fără --yes, restaurarea trebuie refuzată.
+          ! docker compose --profile backup run --rm backup restore "$name"
+
+          # Distrugem datele, restaurăm, verificăm.
+          docker exec ci-pg psql -U sgdm -d sgdm -c 'DELETE FROM ci_probe;'
+          docker compose --profile backup run --rm backup restore "$name" --yes
+          count=$(docker exec ci-pg psql -U sgdm -d sgdm -tAc 'SELECT count(*) FROM ci_probe;')
+          test "$count" = "2"
+
+          # Un fișier alterat în backup → verificarea pică.
+          echo alterat | sudo tee -a "backups/$name/storage/transfers/ci/obiect.enc" >/dev/null
+          ! docker compose --profile backup run --rm backup verify "$name"
+
+      - name: Curățenie
+        if: always()
+        run: |
+          docker rm -f ci-web ci-pg >/dev/null 2>&1 || true
+          docker compose --profile backup down -v >/dev/null 2>&1 || true
+
