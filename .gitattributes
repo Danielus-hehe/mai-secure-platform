@@ -1,0 +1,24 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Finaluri de rând
+#
+# Fișierele care ajung în containere Linux TREBUIE să aibă LF. Cu
+# core.autocrlf=true (implicit pe Windows), Git le-ar scoate cu CRLF, iar
+# un script shell cu CRLF eșuează în container cu „/bin/sh^M: not found” -
+# o eroare care nu apare pe mașina care l-a scris, ci doar pe server.
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Doar tipurile de mai jos, intenționat. Un „* text=auto” global ar renormaliza
+# tot repo-ul și ar marca drept modificate fișierele deja salvate cu CRLF
+# (ex. scripts/storage-recrypt.ps1) - un commit uriaș, fără nicio schimbare reală.
+
+*.sh           text eol=lf
+*.template     text eol=lf
+*.conf         text eol=lf
+Dockerfile     text eol=lf
+*.yml          text eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.pdf binary
+*.zip binary
