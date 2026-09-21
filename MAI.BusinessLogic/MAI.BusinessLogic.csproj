@@ -15,6 +15,11 @@
 
         <!-- ILogger in stratul de business, fara referinta la ASP.NET Core -->
         <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
+
+        <!-- LDAP v3 brut (LDAPS / StartTLS), portabil Windows + Linux. Alternativa
+             System.DirectoryServices (ADSI) exista doar pe Windows, iar API-ul
+             ruleaza in container Linux. -->
+        <PackageReference Include="System.DirectoryServices.Protocols" Version="8.0.0" />
     </ItemGroup>
 
     <ItemGroup>

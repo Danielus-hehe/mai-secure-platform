@@ -61,6 +61,20 @@ export interface AdminTransferStats {
     expiringNext24h: number;
 }
 
+/**
+ * Criptarea la nivel de aplicatie a documentelor din depozit (documents/,
+ * internal/). Lipseste cand depozitul nu e impachetat in EncryptingFileStorage.
+ * Doar identificatorii cheilor ajung aici, niciodata valorile.
+ */
+export interface AdminStorageEncryption {
+    enabled: boolean;
+    activeKeyId: string | null;
+    keyCount: number;
+    prefixes: string[];
+    allowPlaintextRead: boolean;
+    verifyBeforeStreaming: boolean;
+}
+
 export interface AdminStorageStats {
     provider: string;
     bucket: string;
@@ -70,6 +84,7 @@ export interface AdminStorageStats {
     storedCiphertextBytes: number;
     /** Total istoric, inclusiv transferurile deja purjate. */
     totalCiphertextBytes: number;
+    encryption: AdminStorageEncryption | null;
 }
 
 export interface AdminDocumentStats {

@@ -479,9 +479,10 @@ MAI.BusinessLogic/       Argon2id, TOTP, politica de parole, stocare (Local / S3
 MAI.Api/                 controllere, middleware, servicii, job de expirare, Program.cs
 MAI.Tests/               teste xUnit (fără bază de date)
 frontend/                React 19 + TypeScript + Vite; src/crypto/ conține E2EE
-docker-compose.yml       MinIO + API (+ PostgreSQL local, opțional)
+docker-compose.yml       MinIO + API (+ Samba AD sub profilul „ldap”, PostgreSQL opțional)
 Dockerfile               imaginea API-ului (build în două etape, utilizator neprivilegiat)
 docs/DEPLOYMENT.md       instalare completă și configurare variabile de mediu
+docs/LDAP-AD.md          autentificare cu contul de domeniu, roluri din grupuri AD, import structură
 .github/workflows/       CI (build + test + lint + Docker)
 ```
 

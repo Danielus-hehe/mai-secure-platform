@@ -44,8 +44,14 @@ FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 
 # curl e folosit doar de healthcheck-ul din docker-compose.yml. Imaginea
 # aspnet nu îl include implicit.
+#
+# libldap-2.5-0: pe Linux, System.DirectoryServices.Protocols (autentificarea
+# prin Active Directory) nu are implementare proprie, ci încarcă biblioteca
+# OpenLDAP. Fără ea, primul login de domeniu arunca DllNotFoundException, chiar
+# dacă totul s-ar compila și porni normal. ca-certificates dă magazinul de
+# încredere implicit, folosit când nu se indică un CA propriu (LDAP_CA_FILE).
 RUN apt-get update \
- && apt-get install -y --no-install-recommends curl \
+ && apt-get install -y --no-install-recommends curl libldap-2.5-0 ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

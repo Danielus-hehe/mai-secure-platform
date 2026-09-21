@@ -57,6 +57,32 @@ namespace MAI.Api.Configuration
                 ["STORAGE_ENCRYPTION_ENABLED"]         = new[] { "StorageEncryption__Enabled" },
                 ["STORAGE_ENCRYPTION_ACTIVE_KEY"]      = new[] { "StorageEncryption__ActiveKeyId" },
                 ["STORAGE_ENCRYPTION_ALLOW_PLAINTEXT"] = new[] { "StorageEncryption__AllowPlaintextRead" },
+
+                // Active Directory. Parola contului de serviciu
+                // (MAI_LDAP_BIND_PASSWORD) e citita direct de Program.cs, ca si
+                // celelalte secrete, deci nu are nevoie de mapare.
+                ["LDAP_ENABLED"]              = new[] { "Ldap__Enabled" },
+                ["LDAP_HOST"]                 = new[] { "Ldap__Host" },
+                ["LDAP_PORT"]                 = new[] { "Ldap__Port" },
+                ["LDAP_USE_LDAPS"]            = new[] { "Ldap__UseLdaps" },
+                ["LDAP_USE_STARTTLS"]         = new[] { "Ldap__UseStartTls" },
+                ["LDAP_ALLOW_PLAINTEXT"]      = new[] { "Ldap__AllowInsecurePlaintext" },
+                ["LDAP_BASE_DN"]              = new[] { "Ldap__BaseDn" },
+                ["LDAP_USER_SEARCH_BASE"]     = new[] { "Ldap__UserSearchBase" },
+                ["LDAP_OU_SEARCH_BASE"]       = new[] { "Ldap__OrgUnitSearchBase" },
+                ["LDAP_USER_FILTER"]          = new[] { "Ldap__UserFilter" },
+                ["LDAP_REALM"]                = new[] { "Ldap__Realm" },
+                ["LDAP_NETBIOS_DOMAIN"]       = new[] { "Ldap__NetbiosDomain" },
+                ["LDAP_BIND_DN"]              = new[] { "Ldap__BindDn" },
+                ["LDAP_GROUP_ROLE_MAPPINGS"]  = new[] { "Ldap__GroupRoleMappings" },
+                ["LDAP_DEFAULT_ROLE"]         = new[] { "Ldap__DefaultRole" },
+                ["LDAP_AUTO_CREATE"]          = new[] { "Ldap__AutoCreateUsers" },
+                ["LDAP_SYNC_ON_LOGIN"]        = new[] { "Ldap__SyncOnLogin" },
+                ["LDAP_NESTED_GROUPS"]        = new[] { "Ldap__ResolveNestedGroups" },
+                ["LDAP_DEPARTMENT_ATTRIBUTE"] = new[] { "Ldap__DepartmentAttribute" },
+                ["LDAP_CERT_THUMBPRINT"]      = new[] { "Ldap__ServerCertificateThumbprint" },
+                ["LDAP_CA_FILE"]              = new[] { "Ldap__CaCertificatePath" },
+                ["LDAP_ALLOW_UNTRUSTED_CERT"] = new[] { "Ldap__AllowUntrustedCertificate" },
             };
 
         /// <summary>Rezultatul încărcării, pentru mesajul din log (fără valori).</summary>

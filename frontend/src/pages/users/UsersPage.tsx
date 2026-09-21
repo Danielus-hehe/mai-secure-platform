@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { UserPlus, Power, KeyRound, Loader2, Search, Unlock, Mail, Building2, Crown } from 'lucide-react';
+import {
+    UserPlus, Power, KeyRound, Loader2, Search, Unlock, Mail, Building2, Crown,
+    ServerCog, Link2, Link2Off,
+} from 'lucide-react';
 import PageHeader    from '../../components/ui/PageHeader';
 import Badge         from '../../components/ui/Badge';
 import Button        from '../../components/ui/Button';
@@ -17,6 +20,7 @@ import OrgUnitSelect from '../../components/org/OrgUnitSelect';
 import ResetPasswordModal, { type ResetTarget } from '../../components/users/ResetPasswordModal';
 import ChangeOrgUnitModal from '../../components/users/ChangeOrgUnitModal';
 import { listOrgUnits, type OrgUnit } from '../../api/orgUnits';
+import { linkAccount, unlinkAccount, syncAccount } from '../../api/directory';
 
 // Backend UserRole enum: Utilizator=1, SefDirectie=2, Administrator=3
 const ROLE_NUM: Record<number, Role> = {
@@ -38,6 +42,10 @@ interface ApiUser {
     isActive: boolean; emailConfirmed: boolean; createdAt: string;
     isLockedOut: boolean; lockoutEndsAt: string | null;
     lastLoginAt: string | null;
+    /** 0 = cont local, 1 = cont de domeniu (Active Directory). */
+    authProvider?: number;
+    directoryDn?: string | null;
+    directorySyncedAt?: string | null;
 }
 
 /** Forma reală a răspunsului: obiect paginat, nu array. */
@@ -52,6 +60,9 @@ interface PagedUsers {
 }
 
 type AppUser = User & {
+    authProvider?: number;
+    directoryDn?: string | null;
+    directorySyncedAt?: string | null;
     orgUnitId: string | null;
     ledOrgUnitId: string | null;
     ledOrgUnitName: string | null;
@@ -239,6 +250,50 @@ export default function UsersPage() {
     };
 
     /* ── Deblocare cont după prea multe încercări eșuate ─────────────── */
+    // ── Conturi de domeniu ───────────────────────────────────────────────
+    // Parola unui cont legat de AD nu e la noi, deci butoanele care o
+    // administrează dispar pentru el: lăsate pe ecran, ar scrie un hash pe care
+    // autentificarea nu îl folosește niciodată.
+
+    const handleLink = async (u: AppUser) => {
+        const account = window.prompt(
+            `Numele contului din Active Directory pentru @${u.username}:`, u.username);
+
+        if (account === null) return;
+
+        try {
+            const result = await linkAccount(u.id, account.trim() || undefined);
+            toast.success(result.message);
+            await fetchUsers();
+        } catch (e: unknown) {
+            toast.error(apiErrorMessage(e, 'Legarea de contul de domeniu a eșuat.'));
+        }
+    };
+
+    const handleUnlink = async (u: AppUser) => {
+        if (!confirm(
+            `Contul @${u.username} nu se va mai autentifica în domeniu și rămâne fără parolă ` +
+            'utilizabilă până când îi stabiliți una. Continuați?')) return;
+
+        try {
+            const result = await unlinkAccount(u.id);
+            toast.warning(result.message);
+            await fetchUsers();
+        } catch (e: unknown) {
+            toast.error(apiErrorMessage(e, 'Deconectarea de la domeniu a eșuat.'));
+        }
+    };
+
+    const handleSync = async (u: AppUser) => {
+        try {
+            const result = await syncAccount(u.id);
+            toast.success(result.message);
+            await fetchUsers();
+        } catch (e: unknown) {
+            toast.error(apiErrorMessage(e, 'Sincronizarea din AD a eșuat.'));
+        }
+    };
+
     const handleUnlock = async (u: AppUser) => {
         try {
             await api.post(`/Users/${u.id}/unlock`);
@@ -341,6 +396,10 @@ export default function UsersPage() {
                                         <td className="px-5 py-3.5">
                                             <select
                                                 value={u.role}
+                                                disabled={u.authProvider === 1}
+                                                title={u.authProvider === 1
+                                                    ? 'Rolul vine din grupurile Active Directory'
+                                                    : undefined}
                                                 onChange={e => void handleRoleChange(u, e.target.value as Role)}
                                                 className={`rounded-full px-2.5 py-1 text-[11px] font-semibold
                                                         border-0 cursor-pointer focus:outline-none focus:ring-2
@@ -368,6 +427,9 @@ export default function UsersPage() {
                                                 {u.isLockedOut && (
                                                     <Badge tone="red">Blocat</Badge>
                                                 )}
+                                                {u.authProvider === 1 && (
+                                                    <Badge tone="blue">Domeniu (AD)</Badge>
+                                                )}
                                             </div>
                                         </td>
 
@@ -391,14 +453,36 @@ export default function UsersPage() {
                                                     onClick={() => setUnitTarget(u)}>
                                                 <Building2 size={14} />
                                             </Button>
-                                            <Button variant="ghost" className="px-2 py-1.5"
-                                                    title={u.email ? 'Resetare parolă (link pe email)' : 'Resetare parolă (parolă temporară)'}
-                                                    onClick={() => setResetTarget({
-                                                        id: u.id, username: u.username, fullName: u.fullName,
-                                                        email: u.email ?? '', isActive: u.isActive,
-                                                    })}>
-                                                <KeyRound size={14} />
-                                            </Button>
+                                            {u.authProvider === 1 ? (
+                                                <>
+                                                    <Button variant="ghost" className="px-2 py-1.5"
+                                                            title={`Sincronizează din AD${u.directoryDn ? ` (${u.directoryDn})` : ''}`}
+                                                            onClick={() => void handleSync(u)}>
+                                                        <ServerCog size={14} />
+                                                    </Button>
+                                                    <Button variant="ghost" className="px-2 py-1.5 text-amber-600 dark:text-amber-400"
+                                                            title="Deconectează de la domeniu"
+                                                            onClick={() => void handleUnlink(u)}>
+                                                        <Link2Off size={14} />
+                                                    </Button>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Button variant="ghost" className="px-2 py-1.5"
+                                                            title="Leagă de un cont din Active Directory"
+                                                            onClick={() => void handleLink(u)}>
+                                                        <Link2 size={14} />
+                                                    </Button>
+                                                    <Button variant="ghost" className="px-2 py-1.5"
+                                                            title={u.email ? 'Resetare parolă (link pe email)' : 'Resetare parolă (parolă temporară)'}
+                                                            onClick={() => setResetTarget({
+                                                                id: u.id, username: u.username, fullName: u.fullName,
+                                                                email: u.email ?? '', isActive: u.isActive,
+                                                            })}>
+                                                        <KeyRound size={14} />
+                                                    </Button>
+                                                </>
+                                            )}
                                             <Button
                                                 variant={u.isActive ? 'danger' : 'secondary'}
                                                 className="px-2.5 py-1.5"

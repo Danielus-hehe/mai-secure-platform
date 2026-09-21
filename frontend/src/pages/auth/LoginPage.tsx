@@ -6,6 +6,7 @@ import { useToast } from '../../context/ToastContext';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import { apiErrorMessage } from '../../api/errors';
+import { getLoginInfo, type DirectoryLoginInfo } from '../../api/directory';
 import type { TwoFactorChallenge } from '../../api/twoFactor';
 
 export default function LoginPage() {
@@ -23,6 +24,26 @@ export default function LoginPage() {
     const [code, setCode] = useState('');
     const [useRecovery, setUseRecovery] = useState(false);
     const [secondsLeft, setSecondsLeft] = useState(0);
+
+    /**
+     * Dacă serverul acceptă conturi de domeniu, spunem asta din start. Fără
+     * indicație, oamenii încearcă formate greșite („DOMENIU\nume”, adresa de
+     * email) până își blochează singuri contul - iar blocarea noastră se
+     * aplică și conturilor AD, ca să nu folosim API-ul ca instrument de forță
+     * brută împotriva domeniului.
+     */
+    const [directory, setDirectory] = useState<DirectoryLoginInfo | null>(null);
+
+    useEffect(() => {
+        let cancelled = false;
+        getLoginInfo()
+            .then(info => { if (!cancelled && info.enabled) setDirectory(info); })
+            .catch(() => {
+                // Informație secundară: pagina de login trebuie să funcționeze
+                // și dacă endpointul nu răspunde.
+            });
+        return () => { cancelled = true; };
+    }, []);
 
     const codeInputRef = useRef<HTMLInputElement>(null);
 
@@ -185,6 +206,16 @@ export default function LoginPage() {
                                             />
                                         </div>
                                     </div>
+
+                                    {directory && (
+                                        <p className="rounded-lg bg-mai-50 px-3 py-2 text-xs leading-relaxed
+                                                      text-mai-500 dark:bg-mai-900/40 dark:text-mai-300">
+                                            Se acceptă și contul de domeniu
+                                            {directory.domain ? ` ${directory.domain}` : ''}: scrieți doar numele
+                                            scurt (<code>nume.prenume</code>). Parola contului de domeniu se
+                                            schimbă în Active Directory, nu aici.
+                                        </p>
+                                    )}
 
                                     <div className="relative">
                                         <Lock size={16} className="absolute left-3.5 top-[42px] text-mai-300 dark:text-mai-500 z-10" />

@@ -22,7 +22,13 @@ namespace MAI.Api.Services
         Task<PasswordResetResult> CompleteAsync(string token, string newPassword, CancellationToken ct = default);
     }
 
-    public enum PasswordResetRequestStatus { Sent, UserNotFound, NoEmail, Inactive, SmtpNotConfigured, SendFailed }
+    public enum PasswordResetRequestStatus
+    {
+        Sent, UserNotFound, NoEmail, Inactive, SmtpNotConfigured, SendFailed,
+
+        /// <summary>Cont de domeniu: parola se schimbă în Active Directory.</summary>
+        DirectoryAccount,
+    }
 
     public sealed record PasswordResetRequestResult(
         PasswordResetRequestStatus Status, string Username, string Email, DateTime? ExpiresAt);
@@ -89,6 +95,12 @@ namespace MAI.Api.Services
                 return new(PasswordResetRequestStatus.NoEmail, user.Username, "", null);
             if (!user.IsActive)
                 return new(PasswordResetRequestStatus.Inactive, user.Username, user.Email, null);
+
+            // Un cont de domeniu nu are parolă la noi. Un link de resetare i-ar
+            // scrie un hash local pe care autentificarea nu îl consultă
+            // niciodată: utilizatorul ar stabili o parolă care nu funcționează.
+            if (user.IsDirectoryAccount)
+                return new(PasswordResetRequestStatus.DirectoryAccount, user.Username, user.Email, null);
             if (!_email.IsConfigured)
                 return new(PasswordResetRequestStatus.SmtpNotConfigured, user.Username, user.Email, null);
 

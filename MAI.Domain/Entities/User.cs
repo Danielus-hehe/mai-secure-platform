@@ -26,6 +26,40 @@ namespace MAI.Domain.Entities
         public bool IsActive { get; set; } = true;
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+        // ── Cont de domeniu (Active Directory) ───────────────────────────────
+        // Un cont de domeniu nu are parolă la noi: PasswordHash rămâne gol, iar
+        // verificarea se face printr-un bind LDAPS. Diferența e importantă la
+        // plecarea unui angajat - contul dezactivat în AD nu mai poate intra,
+        // fără să depindă de sincronizarea unei copii locale a parolei.
+
+        /// <summary>Cine verifică parola: baza noastră (Local) sau domeniul (Ldap).</summary>
+        public AuthProvider AuthProvider { get; set; } = Enums.AuthProvider.Local;
+
+        /// <summary>
+        /// objectGUID-ul contului din AD, ca text. Este singurul identificator
+        /// stabil: sAMAccountName-ul și DN-ul se schimbă la redenumire sau la
+        /// mutarea în altă unitate organizatorică, GUID-ul nu.
+        /// </summary>
+        public string? DirectoryObjectId { get; set; }
+
+        /// <summary>DN-ul complet din AD, folosit la bind și afișat administratorului.</summary>
+        public string? DirectoryDn { get; set; }
+
+        /// <summary>
+        /// Momentul ultimei schimbări de parolă în domeniu (atributul pwdLastSet).
+        ///
+        /// Cheile private E2EE sunt încuiate cu o cheie derivată din parolă. Când
+        /// parola se schimbă în AD, noi nu suntem anunțați: utilizatorul intră cu
+        /// parola nouă, dar blobul rămâne încuiat cu cea veche. Comparat cu
+        /// <see cref="KeysWrappedAt"/>, câmpul acesta ne spune exact când s-a
+        /// întâmplat, deci putem cere reîmpachetarea în loc să lăsăm descuierea
+        /// să eșueze cu „parolă greșită”.
+        /// </summary>
+        public DateTime? DirectoryPasswordSetAt { get; set; }
+
+        /// <summary>Ultima sincronizare a atributelor din AD (nume, email, grupuri, subdiviziune).</summary>
+        public DateTime? DirectorySyncedAt { get; set; }
+
         // ── Refresh token ────────────────────────────────────────────────────
         // În DB se stochează DOAR hash-ul SHA-256 al refresh token-ului, nu tokenul.
 
@@ -123,6 +157,14 @@ namespace MAI.Domain.Entities
 
         public DateTime? KeysCreatedAt { get; set; }
 
+        /// <summary>
+        /// Când a fost încuiat ultima dată blobul de chei private cu parola
+        /// curentă (la generare sau la reîmpachetare). Separat de
+        /// <see cref="KeysCreatedAt"/>, care marchează nașterea perechilor RSA și
+        /// nu trebuie să se schimbe: amprenta cheii publice rămâne aceeași.
+        /// </summary>
+        public DateTime? KeysWrappedAt { get; set; }
+
         // ── Autentificare în doi pași (TOTP, RFC 6238) ───────────────────────
         //
         // Secretul TOTP este stocat CIFRAT (AES-256-GCM, cheie din variabilă de
@@ -188,6 +230,27 @@ namespace MAI.Domain.Entities
         /// <summary>True dacă utilizatorul și-a generat cheile și poate primi fișiere.</summary>
         [NotMapped]
         public bool HasKeys => !string.IsNullOrEmpty(PublicKeyEncryption);
+
+        /// <summary>Contul se autentifică în Active Directory, nu cu o parolă ținută la noi.</summary>
+        [NotMapped]
+        public bool IsDirectoryAccount => AuthProvider == Enums.AuthProvider.Ldap;
+
+        /// <summary>
+        /// Parola din domeniu s-a schimbat după ultima împachetare a cheilor,
+        /// deci blobul nu se mai poate descuia cu parola de azi. Frontend-ul
+        /// cere parola veche o singură dată și reîmpachetează.
+        ///
+        /// Fără marginea de un minut, o reîmpachetare făcută în aceeași secundă
+        /// cu schimbarea parolei (utilizatorul intră imediat după) ar putea fi
+        /// raportată la nesfârșit ca necesară, din cauza rotunjirii FILETIME.
+        /// </summary>
+        [NotMapped]
+        public bool KeyRewrapRequired =>
+            IsDirectoryAccount
+            && HasKeys
+            && DirectoryPasswordSetAt.HasValue
+            && KeysWrappedAt.HasValue
+            && DirectoryPasswordSetAt.Value > KeysWrappedAt.Value.AddMinutes(1);
 
         /// <summary>
         /// True dacă contul este blocat chiar acum. Calculată, nu stocată -

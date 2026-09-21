@@ -15,22 +15,40 @@
  * sesiunii.
  */
 
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Outlet } from 'react-router-dom';
-import { KeyRound, Loader2, ShieldCheck, ShieldAlert, LogOut } from 'lucide-react';
+import { KeyRound, Loader2, ShieldCheck, ShieldAlert, LogOut, RotateCw } from 'lucide-react';
 import Button from '../ui/Button';
 import { useKeys } from '../../context/KeysContext';
 import { useAuth } from '../../context/AuthContext';
 import { apiErrorMessage } from '../../api/errors';
 
 export default function KeysGate() {
-    const { status, generate, unlock, reload, error } = useKeys();
+    const { status, generate, unlock, rewrap, reload, error, rewrapRequired } = useKeys();
     const { logout, user } = useAuth();
 
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
+    const [oldPassword, setOldPassword] = useState('');
     const [busy, setBusy] = useState(false);
     const [localError, setLocalError] = useState('');
+
+    /**
+     * Modul „reîmpachetare”: cheile private sunt încuiate cu o parolă veche,
+     * iar parola de azi nu le mai descuie. Se întâmplă când parola contului s-a
+     * schimbat în afara aplicației - în Active Directory - sau când un cont
+     * local tocmai a fost legat de domeniu.
+     *
+     * Serverul ne spune singur când e cazul (rewrapRequired), dar lăsăm și
+     * intrarea manuală: la conturile legate de administrator, momentul
+     * schimbării parolei nu e cunoscut, deci detectarea automată nu are pe ce
+     * să se bazeze.
+     */
+    const [rewrapMode, setRewrapMode] = useState(false);
+
+    useEffect(() => {
+        if (rewrapRequired) setRewrapMode(true);
+    }, [rewrapRequired]);
 
     if (status === 'unlocked') return <Outlet />;
 
@@ -56,15 +74,23 @@ export default function KeysGate() {
             return;
         }
 
+        if (rewrapMode && !isGenerating && !oldPassword) {
+            setLocalError('Introduceți parola veche, cea cu care au fost încuiate cheile.');
+            return;
+        }
+
         setBusy(true);
         try {
             if (isGenerating) {
                 await generate(password);
+            } else if (rewrapMode) {
+                await rewrap(oldPassword, password);
             } else {
                 await unlock(password);
             }
             setPassword('');
             setConfirmPassword('');
+            setOldPassword('');
         } catch (err) {
             // apiErrorMessage citește mesajul trimis de server (ex. 403 cu parolă
             // temporară, 429 la prea multe încercări). Pentru erorile locale
@@ -105,11 +131,17 @@ export default function KeysGate() {
                     <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-mai-50 dark:bg-mai-700">
                         {isGenerating
                             ? <KeyRound size={26} className="text-mai-600 dark:text-mai-400" />
-                            : <ShieldCheck size={26} className="text-mai-600 dark:text-mai-400" />}
+                            : rewrapMode
+                                ? <RotateCw size={26} className="text-amber-600 dark:text-amber-400" />
+                                : <ShieldCheck size={26} className="text-mai-600 dark:text-mai-400" />}
                     </div>
 
                     <h1 className="text-xl font-bold text-mai-900 dark:text-white">
-                        {isGenerating ? 'Generarea cheilor criptografice' : 'Deblocarea cheilor'}
+                        {isGenerating
+                            ? 'Generarea cheilor criptografice'
+                            : rewrapMode
+                                ? 'Reîmpachetarea cheilor'
+                                : 'Deblocarea cheilor'}
                     </h1>
 
                     <p className="mt-2 text-sm leading-relaxed text-mai-400 dark:text-mai-300">
@@ -119,6 +151,14 @@ export default function KeysGate() {
                                 RSA-3072 direct în browser: una pentru criptare, una pentru
                                 semnătură. Cheile private nu părăsesc niciodată acest calculator
                                 în formă necriptată.
+                            </>
+                        ) : rewrapMode ? (
+                            <>
+                                Parola contului s-a schimbat, dar cheile private au rămas încuiate
+                                cu cea veche. Introduceți-le pe amândouă o singură dată: cheile se
+                                descuie cu parola veche și se reîncuie cu cea de acum, tot în
+                                browser. Cheile publice nu se schimbă, deci fișierele primite până
+                                acum rămân accesibile.
                             </>
                         ) : (
                             <>
@@ -141,10 +181,41 @@ export default function KeysGate() {
                     </div>
                 )}
 
+                {rewrapMode && !isGenerating && (
+                    <div className="mb-5 rounded-lg border border-amber-100 bg-amber-50 px-4 py-3 dark:border-amber-700/50 dark:bg-amber-900/20">
+                        <p className="text-xs leading-relaxed text-amber-800 dark:text-amber-300">
+                            <strong>Atenție.</strong> Dacă nu vă mai amintiți parola veche, cheile
+                            nu mai pot fi descuiate de nimeni - nici de administrator. Fișierele
+                            primite până acum vor trebui retrimise de expeditori, după ce
+                            administratorul vă resetează cheile.
+                        </p>
+                    </div>
+                )}
+
                 <form onSubmit={handleSubmit} className="space-y-4">
+                    {rewrapMode && !isGenerating && (
+                        <div>
+                            <label htmlFor="keys-old-password" className="mb-1.5 block text-sm font-medium text-mai-700 dark:text-mai-200">
+                                Parola veche (cea cu care au fost încuiate cheile)
+                            </label>
+                            <input
+                                id="keys-old-password"
+                                type="password"
+                                autoComplete="off"
+                                required
+                                disabled={busy}
+                                value={oldPassword}
+                                onChange={(e) => setOldPassword(e.target.value)}
+                                className={inputClass}
+                            />
+                        </div>
+                    )}
+
                     <div>
                         <label htmlFor="keys-password" className="mb-1.5 block text-sm font-medium text-mai-700 dark:text-mai-200">
-                            Parola contului {user?.username ? `(@${user.username})` : ''}
+                            {rewrapMode && !isGenerating ? 'Parola actuală' : 'Parola contului'}
+                            {user?.username ? ` (@${user.username})` : ''}
+                            {user?.isDirectoryAccount ? ' - cont de domeniu' : ''}
                         </label>
                         <input
                             id="keys-password"
@@ -187,10 +258,16 @@ export default function KeysGate() {
                         {busy ? (
                             <>
                                 <Loader2 size={16} className="animate-spin" />
-                                {isGenerating ? 'Se generează cheile…' : 'Se descuie…'}
+                                {isGenerating
+                                    ? 'Se generează cheile…'
+                                    : rewrapMode ? 'Se reîmpachetează…' : 'Se descuie…'}
                             </>
                         ) : (
-                            <>{isGenerating ? 'Generează cheile' : 'Deblochează'}</>
+                            <>
+                                {isGenerating
+                                    ? 'Generează cheile'
+                                    : rewrapMode ? 'Reîmpachetează cheile' : 'Deblochează'}
+                            </>
                         )}
                     </Button>
 
@@ -200,6 +277,24 @@ export default function KeysGate() {
                         </p>
                     )}
                 </form>
+
+                {!isGenerating && (
+                    <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                            setRewrapMode(!rewrapMode);
+                            setLocalError('');
+                        }}
+                        className="mt-5 w-full text-center text-xs text-mai-500 underline-offset-2
+                                   transition-colors hover:text-mai-700 hover:underline
+                                   disabled:opacity-50 dark:text-mai-400 dark:hover:text-mai-200"
+                    >
+                        {rewrapMode
+                            ? 'Înapoi la deblocarea obișnuită'
+                            : 'Parola a fost schimbată în afara aplicației (Active Directory)?'}
+                    </button>
+                )}
 
                 <button
                     type="button"

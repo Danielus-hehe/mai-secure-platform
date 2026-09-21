@@ -98,6 +98,18 @@ namespace MAI.Api.Controllers
         /// <summary>Codul PostgreSQL pentru încălcarea unui index unic.</summary>
         private const string UniqueViolation = "23505";
 
+        /// <summary>
+        /// Operațiile pe parola locală nu au sens pentru un cont de domeniu:
+        /// acolo parola nu e la noi. Executate oricum, ar scrie un hash pe care
+        /// login-ul nu îl folosește niciodată - adică administratorul ar crede
+        /// că a resetat parola cuiva, iar utilizatorul ar intra în continuare cu
+        /// cea din AD.
+        /// </summary>
+        private static string DirectoryAccountMessage(string username) =>
+            $"Contul @{username} este de domeniu (Active Directory). Parola lui se " +
+            "administrează în AD, nu în această aplicație. Pentru blocare imediată, " +
+            "dezactivați contul aici sau în domeniu.";
+
         /// <summary>Conturile privilegiate primesc profilul Argon2 cu cost mai mare.</summary>
         private string ProfileFor(UserRole role) =>
             role >= UserRole.SefDirectie ? _argon2.PrivilegedProfile : _argon2.DefaultProfile;
@@ -177,6 +189,9 @@ namespace MAI.Api.Controllers
                     IsLockedOut   = u.LockoutEndsAt.HasValue && u.LockoutEndsAt > DateTime.UtcNow,
                     LockoutEndsAt = u.LockoutEndsAt,
                     LastLoginAt   = u.LastLoginAt,
+                    AuthProvider  = u.AuthProvider,
+                    DirectoryDn   = u.DirectoryDn,
+                    DirectorySyncedAt = u.DirectorySyncedAt,
                 })
                 .ToListAsync(ct);
 
@@ -435,6 +450,9 @@ namespace MAI.Api.Controllers
             var user = await _context.Users.FindAsync([id], ct);
             if (user is null) return NotFound(new { message = "Utilizatorul nu a fost găsit." });
 
+            if (user.IsDirectoryAccount)
+                return BadRequest(new { message = DirectoryAccountMessage(user.Username) });
+
             if (user.EmailConfirmed)
                 return BadRequest(new { message = "Contul este deja activat." });
 
@@ -482,6 +500,9 @@ namespace MAI.Api.Controllers
         {
             var user = await _context.Users.FindAsync(new object?[] { id }, ct);
             if (user is null) return NotFound(new { message = "Utilizatorul nu a fost gasit." });
+
+            if (user.IsDirectoryAccount)
+                return BadRequest(new { message = DirectoryAccountMessage(user.Username) });
 
             var validation = _policy.Validate(dto.NewPassword, user.Username);
             if (!validation.IsValid)
@@ -569,6 +590,12 @@ namespace MAI.Api.Controllers
         [HttpPost("{id:guid}/send-password-reset")]
         public async Task<IActionResult> SendPasswordReset(Guid id, CancellationToken ct)
         {
+            var target = await _context.Users.AsNoTracking()
+                .FirstOrDefaultAsync(u => u.Id == id, ct);
+
+            if (target is not null && target.IsDirectoryAccount)
+                return BadRequest(new { message = DirectoryAccountMessage(target.Username) });
+
             var result = await _passwordReset.RequestAsync(id, ct);
 
             switch (result.Status)
@@ -583,6 +610,8 @@ namespace MAI.Api.Controllers
                     });
                 case PasswordResetRequestStatus.Inactive:
                     return BadRequest(new { message = "Contul este dezactivat. Activați-l înainte de resetare." });
+                case PasswordResetRequestStatus.DirectoryAccount:
+                    return BadRequest(new { message = DirectoryAccountMessage(result.Username) });
                 case PasswordResetRequestStatus.SmtpNotConfigured:
                     return StatusCode(StatusCodes.Status503ServiceUnavailable, new
                     {
@@ -732,6 +761,20 @@ namespace MAI.Api.Controllers
                 {
                     message = "Aceasta este ultima persoană cu rol de Administrator activ. " +
                               "Promovați mai întâi pe altcineva.",
+                });
+            }
+
+            // Pentru un cont de domeniu, rolul vine din grupurile AD la fiecare
+            // autentificare. O schimbare făcută aici ar fi ștearsă în tăcere la
+            // următorul login, iar administratorul ar rămâne convins că a
+            // retras un drept pe care contul îl are în continuare.
+            if (user.IsDirectoryAccount)
+            {
+                return BadRequest(new
+                {
+                    message = $"Rolul contului @{user.Username} este stabilit de grupurile din " +
+                              "Active Directory. Modificați apartenența la grupuri în AD; rolul se " +
+                              "actualizează la următoarea autentificare.",
                 });
             }
 

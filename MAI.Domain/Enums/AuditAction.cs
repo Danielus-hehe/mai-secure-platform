@@ -61,5 +61,22 @@ namespace MAI.Domain.Enums
 
         /// <summary>Rularea scriptului de recriptare a depozitului (storage:recrypt).</summary>
         StorageRecrypted = 22,
+
+        /// <summary>
+        /// Un cont local a fost creat automat la prima autentificare cu un cont
+        /// de domeniu. Se consemnează separat de UserCreated: nimeni din
+        /// instituție nu a apăsat un buton, decizia a venit din AD.
+        /// </summary>
+        DirectoryAccountProvisioned = 23,
+
+        /// <summary>
+        /// Atributele unui cont de domeniu (nume, email, rol din grupuri,
+        /// subdiviziune, stare) au fost aduse din AD la autentificare.
+        /// Se scrie doar când ceva chiar s-a schimbat.
+        /// </summary>
+        DirectoryAccountSynchronized = 24,
+
+        /// <summary>Administratorul a confirmat importul structurii din unitățile organizatorice AD.</summary>
+        DirectoryStructureImported = 25,
     }
 }
