@@ -4,8 +4,9 @@ Platformă de intranet pentru **Ministerul Afacerilor Interne al Republicii Mold
 Angajații își trimit documente criptate **end-to-end**, iar serverul care le
 transportă și le stochează **nu le poate citi**.
 
-**Stack:** .NET 8 (ASP.NET Core, EF Core) · React 19 + TypeScript · PostgreSQL
-(Supabase sau local) · MinIO (S3 auto-găzduit) · WebCrypto API în browser.
+**Stack:** .NET 8 (ASP.NET Core, EF Core) · React 19 + TypeScript · PostgreSQL 17
+· MinIO (S3 auto-găzduit) · nginx · WebCrypto API în browser. Totul rulează în
+Docker, în intranet; nicio componentă nu depinde de un serviciu extern.
 **Proiect de practică** - UTM FCIM, Securitate Informațională, 2026.
 
 > Document pentru **evaluare**: ce face sistemul, cum funcționează și de ce a
@@ -68,19 +69,19 @@ flowchart LR
         KM["Chei private<br/>(doar în memoria tabului)"]
     end
 
-    subgraph Intranet["Intranet MAI"]
+    subgraph Intranet["Intranet MAI (Docker)"]
+        NGX["nginx<br/>HTTPS, punct unic de intrare"]
         API["MAI.Api<br/>.NET 8"]
         MINIO[("MinIO<br/>cifrotext")]
+        DB[("PostgreSQL<br/>metadate, chei publice,<br/>blob-uri criptate, audit")]
     end
-
-    DB[("PostgreSQL<br/>metadate, chei publice,<br/>blob-uri criptate, audit")]
 
     UI --> CR
     CR --- KM
-    UI -- "HTTPS + JWT<br/>(plic criptografic)" --> API
+    UI -- "HTTPS + JWT<br/>(plic criptografic)" --> NGX
+    NGX -- "/api" --> API
     API -- "metadate" --> DB
-    API -- "PUT cifrotext" --> MINIO
-    UI -- "GET cifrotext<br/>(URL presemnat, 5 min)" --> MINIO
+    API -- "cifrotext" --> MINIO
 ```
 
 Backend-ul e organizat pe straturi cu o singură direcție de dependență:
@@ -93,9 +94,16 @@ Backend-ul e organizat pe straturi cu o singură direcție de dependență:
 | `MAI.Api` | Controllere, middleware, servicii de sesiune și token, job-uri | toate |
 | `MAI.Tests` | Teste unitare și de arhitectură (xUnit, fără bază de date) | Api, BusinessLogic, Domain |
 
-Fișierele nu trec prin API la descărcare. API-ul autorizează cererea, emite un
-URL temporar semnat (5 minute) către MinIO, iar browserul descarcă direct
-cifrotextul. Cine nu are dreptul nu primește niciodată un URL.
+Toate componentele stau în intranet. Până pe 22 septembrie 2026 baza de date
+era pe Supabase (cloud); a fost mutată în Docker tocmai pentru că modelul de
+amenințare de mai sus presupune că nimic nu iese din instituție: conturile,
+jurnalul de audit și metadatele transferurilor nu au ce căuta pe un server
+extern. Mutarea s-a făcut cu instrumentul de backup, cu verificare rând cu rând
+(`docs/DEPLOYMENT.md`, secțiunea 7.3).
+
+În modul publicat, browserul vorbește doar cu nginx, iar cifrotextul trece prin
+API. În modul de dezvoltare, API-ul emite un URL temporar semnat (5 minute) spre
+MinIO, iar browserul descarcă direct. Motivarea: D7 și D11.
 
 ---
 
@@ -471,9 +479,10 @@ la fiecare push și pull request:
 - pornește imaginea web și verifică HTTPS-ul: CSP strictă ca antet,
   redirecționarea HTTP → HTTPS spre originea fixă (nu spre antetul `Host`),
   refuzul TLS 1.1, refuzul unei cereri de peste 52 MB;
-- face un **backup și o restaurare completă** pe un PostgreSQL și un MinIO
-  efemere: șterge datele, restaurează, verifică numărul de rânduri, apoi
-  confirmă că un fișier alterat în backup e detectat.
+- face un **backup și o restaurare completă** pe serviciile `postgres` și
+  `minio` din compose: șterge datele, restaurează, compară numărul de rânduri
+  din fiecare tabel, verifică restaurarea unei baze cu politici RLS de tip
+  Supabase, apoi confirmă că un fișier alterat în backup e detectat.
 
 **Teste** (xUnit, fără bază de date - toate rulează offline):
 
@@ -520,9 +529,10 @@ frontend/                React 19 + TypeScript + Vite; src/crypto/ conține E2EE
 frontend/Dockerfile      imaginea web: build Vite + nginx (HTTPS, reverse proxy spre API)
 frontend/nginx/          configurația nginx (TLS, antete, CSP) și certificatul autosemnat
 deploy/backup/           imaginea de backup: pg_dump + mc + gpg, cu verificare SHA-256
-docker-compose.yml       MinIO + API + web (+ backup, Samba AD pe profiluri, PostgreSQL opțional)
+docker-compose.yml       PostgreSQL + MinIO + API + web (+ backup și Samba AD pe profiluri)
 Dockerfile               imaginea API-ului (build în două etape, utilizator neprivilegiat)
-scripts/                 Samba AD de test, recriptarea depozitului, certificatul de demonstrație
+scripts/                 Samba AD de test, recriptarea depozitului, certificatul de demonstrație,
+                         mutarea bazei de pe Supabase
 docs/DEPLOYMENT.md       instalare, HTTPS, backup și restaurare, probleme frecvente
 docs/LDAP-AD.md          autentificare cu contul de domeniu, roluri din grupuri AD, import structură
 docs/STORAGE-ENCRYPTION.md  criptarea documentelor normative și interne în MinIO
@@ -533,13 +543,14 @@ docs/STORAGE-ENCRYPTION.md  criptarea documentelor normative și interne în Min
 
 ```bash
 cp .env.example .env              # completați secretele: openssl rand -base64 48
+docker compose up -d postgres
 dotnet ef database update --project MAI.DataAccessLayer --startup-project MAI.Api
 ```
 
 Dezvoltare (API și frontend pe mașina locală):
 
 ```bash
-docker compose up -d minio minio-init
+docker compose up -d postgres minio minio-init
 dotnet run --project MAI.Api
 cd frontend && npm ci && npm run dev          # http://localhost:5173
 ```

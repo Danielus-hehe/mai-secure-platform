@@ -8,8 +8,8 @@
 #
 # Doua moduri de lucru (detalii in docs/DEPLOYMENT.md):
 #
-#   Dezvoltare - doar stocarea in Docker, API-ul cu 'dotnet run':
-#     docker compose up -d minio minio-init
+#   Dezvoltare - baza si stocarea in Docker, API-ul cu 'dotnet run':
+#     docker compose up -d postgres minio minio-init
 #
 #   Tot in Docker - MinIO + API + web (nginx cu HTTPS si frontend-ul):
 #     docker compose up -d --build
@@ -26,10 +26,10 @@
 #
 # ── Ce e expus in afara masinii ──────────────────────────────────────────────
 # Doar porturile 80 si 443 ale serviciului web. API-ul nu mai are port pe
-# gazda (ajunge la el doar nginx, prin reteaua interna), iar MinIO asculta
-# doar pe 127.0.0.1: API-ul pornit cu 'dotnet run' il gaseste, un alt
-# calculator din retea nu. Fara asta, oricine din LAN putea incerca parole
-# direct pe consola MinIO sau ocoli nginx cu totul.
+# gazda (ajunge la el doar nginx, prin reteaua interna), iar MinIO si
+# PostgreSQL asculta doar pe 127.0.0.1: API-ul pornit cu 'dotnet run' le
+# gaseste, un alt calculator din retea nu. Fara asta, oricine din LAN putea
+# incerca parole direct pe baza, pe consola MinIO, sau ocoli nginx cu totul.
 #
 # ── Structura cheilor ────────────────────────────────────────────────────────
 # Transferuri:  transfers/{yyyy}/{MM}/{transferId:N}.enc
@@ -45,11 +45,65 @@
 
 services:
 
+  # ───────────────────────────────────────────────────────────────────────────
+  # PostgreSQL - baza de date a aplicatiei
+  #
+  # Inainte, baza statea pe Supabase (cloud). Mutata aici, pentru ca platforma
+  # e pentru intranetul MAI: conturile, jurnalul de audit si metadatele
+  # transferurilor nu au ce cauta pe un server din afara institutiei. In plus,
+  # demonstratia nu mai depinde de internet.
+  #
+  # Mutarea datelor din Supabase: scripts/migrate-db-to-docker.ps1
+  # (backup din sursa, restaurare aici, comparatie rand cu rand pe tabele).
+  #
+  # Versiunea 17: aceeasi majora ca pg_dump din imaginea de backup. Un pg_dump
+  # mai vechi decat serverul refuza sa lucreze; unul mai nou merge oricand.
+  # ───────────────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:17-alpine
+    container_name: sgdm-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sgdm}
+      POSTGRES_USER: ${POSTGRES_USER:-sgdm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # scram-sha-256 si pentru conexiunile locale din container, nu doar pentru
+      # cele din retea: fara el, initdb pune „trust” pe socketul local.
+      POSTGRES_INITDB_ARGS: "--auth-local=scram-sha-256 --auth-host=scram-sha-256"
+
+    ports:
+      # Doar pe gazda: pentru 'dotnet run', 'dotnet ef' si un client (DataGrip,
+      # DBeaver). Din LAN baza nu e accesibila. Portul se schimba din .env daca
+      # pe Windows ruleaza deja un PostgreSQL instalat pe 5432.
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
+
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+
+    healthcheck:
+      # -h 127.0.0.1: verifica si ascultarea pe TCP, nu doar socketul local.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
   minio:
+    # Registrul: quay.io, NU Docker Hub. In jurul datei de 11.09.2026, MinIO a
+    # sters depozitele minio/minio si minio/mc de pe Docker Hub; orice 'pull'
+    # de acolo esueaza cu „pull access denied”, chiar si pentru versiuni fixate.
+    # Aceleasi imagini raman publicate de MinIO pe quay.io.
+    #
     # Pentru demonstratie/practica 'latest' e in regula. In productie se
-    # pineaza o versiune exacta (ex. minio/minio:RELEASE.2025-04-22T22-12-26Z)
+    # pineaza o versiune exacta (ex. quay.io/minio/minio:RELEASE.2024-11-07T00-52-20Z)
     # ca un update automat sa nu schimbe comportamentul sub picioarele tale.
-    image: minio/minio:latest
+    #
+    # Risc cunoscut: Community Edition e acum distribuita doar ca sursa, iar
+    # imaginile de pe quay.io nu mai primesc actualizari. Pe termen lung,
+    # stocarea S3 poate fi mutata pe o alternativa intretinuta (SeaweedFS,
+    # Garage); API-ul vorbeste S3 standard, deci schimbarea ar fi de configurare.
+    image: quay.io/minio/minio:latest
     container_name: sgdm-minio
     restart: unless-stopped
 
@@ -115,7 +169,7 @@ services:
   # vizibil, nu sa raporteze "MinIO pregatit" fara retentie.
   # ───────────────────────────────────────────────────────────────────────────
   minio-init:
-    image: minio/mc:latest
+    image: quay.io/minio/mc:latest
     container_name: sgdm-minio-init
     depends_on:
       minio:
@@ -168,6 +222,8 @@ services:
     # Fara conditia pe minio-init, primul upload putea ajunge intr-un bucket
     # creat de API, fara versionare si fara expirare.
     depends_on:
+      postgres:
+        condition: service_healthy
       minio:
         condition: service_healthy
       minio-init:
@@ -177,10 +233,15 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
 
-      # Conexiunea la baza de date. Daca folosesti Postgres-ul din acest compose,
-      # hostul este "postgres", nu "localhost": in reteaua Docker, localhost e
-      # containerul insusi.
-      ConnectionStrings__DefaultConnection: ${DB_CONNECTION_STRING}
+      # Conexiunea la baza, VAZUTA DIN CONTAINER. Implicit: serviciul postgres
+      # de mai sus, construita din aceleasi variabile POSTGRES_* ca baza insasi,
+      # deci nu are cum sa difere de ea.
+      #
+      # DB_CONNECTION_STRING din .env NU se foloseste aici: el e pentru
+      # 'dotnet run', unde hostul e localhost. In container, localhost e
+      # containerul insusi. Pentru o baza externa (alt server PostgreSQL al
+      # institutiei): DB_CONTAINER_CONNECTION_STRING in .env.
+      ConnectionStrings__DefaultConnection: ${DB_CONTAINER_CONNECTION_STRING:-Host=postgres;Port=5432;Database=${POSTGRES_DB:-sgdm};Username=${POSTGRES_USER:-sgdm};Password=${POSTGRES_PASSWORD}}
 
       # Secrete - generate cu:  openssl rand -base64 48
       MAI_JWT_KEY: ${MAI_JWT_KEY}
@@ -404,9 +465,10 @@ services:
   #   docker compose --profile backup run --rm backup verify <nume>
   #   docker compose --profile backup run --rm backup restore <nume> --yes
   #
-  # Foloseste ACELASI DB_CONNECTION_STRING ca API-ul: un backup facut dintr-o
-  # alta baza decat cea pe care ruleaza aplicatia e cel mai rau tip de backup -
-  # arata bine pana in ziua in care e nevoie de el. Detalii: docs/DEPLOYMENT.md.
+  # Foloseste ACEEASI conexiune ca API-ul din container (aceeasi expresie):
+  # un backup facut dintr-o alta baza decat cea pe care ruleaza aplicatia e
+  # cel mai rau tip de backup - arata bine pana in ziua in care e nevoie de el.
+  # Detalii: docs/DEPLOYMENT.md.
   # ───────────────────────────────────────────────────────────────────────────
   backup:
     build:
@@ -417,11 +479,13 @@ services:
     profiles: ["backup"]
 
     depends_on:
+      postgres:
+        condition: service_healthy
       minio:
         condition: service_healthy
 
     environment:
-      DB_CONNECTION_STRING: ${DB_CONNECTION_STRING}
+      DB_CONNECTION_STRING: ${DB_CONTAINER_CONNECTION_STRING:-Host=postgres;Port=5432;Database=${POSTGRES_DB:-sgdm};Username=${POSTGRES_USER:-sgdm};Password=${POSTGRES_PASSWORD}}
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       STORAGE_ENDPOINT: http://minio:9000
@@ -515,6 +579,8 @@ networks:
         - subnet: ${SGDM_DOCKER_SUBNET:-172.28.0.0/24}
 
 volumes:
+  pg-data:
+    driver: local
   minio-data:
     driver: local
   samba-data:
@@ -525,31 +591,3 @@ volumes:
     driver: local
   api-uploads:
     driver: local
-
-# ─────────────────────────────────────────────────────────────────────────────
-# OPTIONAL - PostgreSQL local, daca vrei sa demonstrezi ca NIMIC nu iese din
-# intranet (fara Supabase). Decomenteaza si schimba connection string-ul din
-# appsettings.json in:
-#   Host=localhost;Port=5432;Database=sgdm;Username=sgdm;Password=...
-#
-#  postgres:
-#    image: postgres:16-alpine
-#    container_name: sgdm-postgres
-#    restart: unless-stopped
-#    environment:
-#      POSTGRES_DB: sgdm
-#      POSTGRES_USER: sgdm
-#      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-#    ports:
-#      - "5432:5432"
-#    volumes:
-#      - pg-data:/var/lib/postgresql/data
-#    healthcheck:
-#      test: ["CMD-SHELL", "pg_isready -U sgdm"]
-#      interval: 10s
-#      timeout: 5s
-#      retries: 10
-#
-# si adauga in sectiunea volumes:
-#  pg-data:
-# ─────────────────────────────────────────────────────────────────────────────

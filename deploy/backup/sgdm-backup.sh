@@ -2,10 +2,12 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # SGDM - backup, verificare și restaurare
 #
-#   sgdm-backup backup                       backup complet (implicit)
+#   sgdm-backup backup [--database-only]     backup complet (implicit)
 #   sgdm-backup list                         backupurile existente
 #   sgdm-backup verify  <nume>               verifică sumele SHA-256
 #   sgdm-backup restore <nume> --yes [--database-only | --storage-only]
+#                                    [--skip-policies]
+#   sgdm-backup counts                       rânduri per tabel în baza configurată
 #
 # Rulat prin compose (din rădăcina repo-ului, un singur rând):
 #   docker compose --profile backup run --rm backup
@@ -104,8 +106,18 @@ gpg_prepare() {
 # backup
 # ═════════════════════════════════════════════════════════════════════════════
 cmd_backup() {
+    with_storage=1
+    for arg in "$@"; do
+        case "$arg" in
+            # Folosit la migrarea bazei (scripts/migrate-db-to-docker.ps1):
+            # stocarea rămâne în același MinIO, doar baza își schimbă locul.
+            --database-only) with_storage=0 ;;
+            *) fail "Optiune necunoscuta: $arg" ;;
+        esac
+    done
+
     parse_connection_string
-    storage_alias
+    if [ "$with_storage" -eq 1 ]; then storage_alias; fi
 
     name=$(date -u +%Y%m%d-%H%M%S)
     final="$BACKUP_ROOT/$name"
@@ -123,7 +135,11 @@ cmd_backup() {
     #   anon) nu există pe un Postgres local; restaurarea nu depinde de ele.
     # --schema: doar schema aplicației. Pe Supabase, restul (auth, storage,
     #   realtime) aparține platformei și nu se restaurează de mână.
+    # --no-publications / --no-subscriptions: replicarea logică ține de
+    #   serverul sursă (Supabase are publicația „supabase_realtime”); pe altă
+    #   bază ar eșua sau ar crea obiecte fără sens.
     pg_dump --format=custom --compress=6 --no-owner --no-privileges \
+            --no-publications --no-subscriptions \
             --schema="$PG_SCHEMA" --file="$work/database.dump" \
         || fail "pg_dump a esuat. Pe Supabase folositi pooler-ul in mod SESSION (port 5432), nu TRANSACTION (6543)."
 
@@ -153,11 +169,17 @@ cmd_backup() {
     # documents/ și internal/ de API, cu cheia principală. Copia lor nu mai
     # are nevoie de o a doua cifrare - dar nici nu se poate citi fără chei.
     # --preserve păstrează data modificării și metadatele obiectelor.
-    mc mirror --quiet --preserve "sgdm/$BUCKET" "$work/storage" >/dev/null \
-        || fail "Copierea bucketului $BUCKET a esuat."
-    objects=$(find "$work/storage" -type f | wc -l | tr -d ' ')
-    size=$(du -sh "$work/storage" | cut -f1)
-    log "Stocare: $objects obiecte ($size) din bucketul $BUCKET"
+    if [ "$with_storage" -eq 1 ]; then
+        mc mirror --quiet --preserve "sgdm/$BUCKET" "$work/storage" >/dev/null \
+            || fail "Copierea bucketului $BUCKET a esuat."
+        objects=$(find "$work/storage" -type f | wc -l | tr -d ' ')
+        size=$(du -sh "$work/storage" | cut -f1)
+        log "Stocare: $objects obiecte ($size) din bucketul $BUCKET"
+    else
+        rmdir "$work/storage"
+        objects="nesalvat (--database-only)"
+        log "Stocare: omisa (--database-only)"
+    fi
 
     {
         echo "SGDM backup $name"
@@ -166,7 +188,7 @@ cmd_backup() {
         echo "pg_dump:            $(pg_dump --version)"
         echo "Tabele cu date:     $tables"
         echo "Dump:               $dump_file"
-        echo "Bucket:             $BUCKET ($objects obiecte)"
+        echo "Bucket:             $BUCKET ($objects)"
         echo "Cheie stocare activa: ${STORAGE_ENCRYPTION_ACTIVE_KEY:-necunoscut}"
         echo ""
         echo "Pentru restaurare sunt necesare, din afara acestui director:"
@@ -245,12 +267,13 @@ cmd_verify() {
 cmd_restore() {
     name="${1:-}"
     [ $# -gt 0 ] && shift
-    confirm=0; do_db=1; do_storage=1
+    confirm=0; do_db=1; do_storage=1; skip_policies=0
     for arg in "$@"; do
         case "$arg" in
             --yes)           confirm=1 ;;
             --database-only) do_storage=0 ;;
             --storage-only)  do_db=0 ;;
+            --skip-policies) skip_policies=1 ;;
             *) fail "Optiune necunoscuta: $arg" ;;
         esac
     done
@@ -281,12 +304,32 @@ cmd_restore() {
         # --clean --if-exists: tabelele existente se înlocuiesc cu cele din dump.
         # --single-transaction: totul sau nimic. O restaurare care pică la
         #   jumătate nu lasă o bază cu jumătate din tabele vechi, jumătate noi.
+        # --skip-policies: la mutarea de pe Supabase. Politicile RLS de acolo
+        # sunt scrise pentru rolurile platformei (anon, authenticated), care pe
+        # un PostgreSQL obișnuit nu există; restaurarea lor ar eșua și ar anula
+        # toată tranzacția. Aplicația nu folosește RLS: accesul îl decide API-ul.
+        # Lista de conținut se editează, nu dump-ul: se omit doar intrările
+        # POLICY, restul se restaurează exact.
+        list_opt=""
+        if [ "$skip_policies" -eq 1 ]; then
+            pg_restore --list "$dump" | grep -v ' POLICY ' > /tmp/restore.list
+            skipped=$(pg_restore --list "$dump" | grep -c ' POLICY ' || true)
+            log "Omit $skipped politici RLS (--skip-policies)."
+            list_opt="--use-list=/tmp/restore.list"
+        fi
+
+        # shellcheck disable=SC2086
         pg_restore --clean --if-exists --no-owner --no-privileges \
-                   --single-transaction --exit-on-error \
+                   --single-transaction --exit-on-error $list_opt \
                    --schema="$PG_SCHEMA" --dbname="$PGDATABASE" "$dump" \
             || fail "pg_restore a esuat; baza a ramas neschimbata (tranzactie anulata)."
-        rm -f /tmp/database.dump
+        rm -f /tmp/database.dump /tmp/restore.list
         log "Baza restaurata."
+    fi
+
+    if [ "$do_storage" -eq 1 ] && [ ! -d "$dir/storage" ]; then
+        log "Backupul nu contine stocarea (facut cu --database-only); o las neatinsa."
+        do_storage=0
     fi
 
     if [ "$do_storage" -eq 1 ]; then
@@ -306,13 +349,32 @@ cmd_restore() {
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
+# counts - numărul EXACT de rânduri din fiecare tabel al schemei
+# ═════════════════════════════════════════════════════════════════════════════
+# Folosit la migrare: aceleași numere în sursă și în destinație dovedesc că
+# nu s-a pierdut nimic pe drum. count(*) exact, nu estimarea din
+# pg_stat_user_tables, care poate fi zero pe o bază abia restaurată.
+# Ieșire: „<tabel> <număr>” pe fiecare rând, ordonat după nume.
+cmd_counts() {
+    parse_connection_string
+    psql -X -At -v ON_ERROR_STOP=1 -c "
+        SELECT format('SELECT %L, count(*) FROM %I.%I;', table_name, table_schema, table_name)
+        FROM information_schema.tables
+        WHERE table_schema = '$PG_SCHEMA' AND table_type = 'BASE TABLE'
+        ORDER BY table_name" \
+    | psql -X -At -F ' ' -v ON_ERROR_STOP=1 \
+        || fail "Nu pot citi tabelele din $PGHOST/$PGDATABASE."
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
 command="${1:-backup}"
 [ $# -gt 0 ] && shift
 case "$command" in
-    backup)  cmd_backup ;;
+    backup)  cmd_backup "$@" ;;
     list)    cmd_list ;;
+    counts)  cmd_counts ;;
     verify)  cmd_verify "$@" ;;
     restore) cmd_restore "$@" ;;
-    -h|--help|help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' ;;
-    *) fail "Comanda necunoscuta: $command (backup | list | verify | restore)" ;;
+    -h|--help|help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//' ;;
+    *) fail "Comanda necunoscuta: $command (backup | list | verify | restore | counts)" ;;
 esac

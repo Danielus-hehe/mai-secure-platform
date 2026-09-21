@@ -1,0 +1,17 @@
+# Contextul de build al imaginii web (frontend/).
+#
+# node_modules: se instalează în imagine cu `npm ci`, exact după lock. Un
+# node_modules copiat de pe Windows ar aduce binare native compilate pentru
+# alt sistem (ex. @tailwindcss/oxide, rolldown) și ar strica build-ul.
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# Secretele nu au ce căuta într-un bundle JavaScript public.
+.env
+.env.*
+!.env.example
+
+Dockerfile
+.dockerignore
