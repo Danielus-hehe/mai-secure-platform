@@ -16,7 +16,7 @@ pentru PowerShell, fiecare pe un singur rând.
 4. [Totul în Docker, cu HTTPS](#4-totul-în-docker-cu-https)
 5. [Certificatul TLS](#5-certificatul-tls)
 6. [Ce este expus în rețea](#6-ce-este-expus-în-rețea)
-7. [Baza de date și migrările](#7-baza-de-date-și-migrările)
+7. [Baza de date](#7-baza-de-date)
 8. [Backup și restaurare](#8-backup-și-restaurare)
 9. [Actualizarea la o versiune nouă](#9-actualizarea-la-o-versiune-nouă)
 10. [Probleme frecvente](#10-probleme-frecvente)
@@ -32,13 +32,15 @@ pentru PowerShell, fiecare pe un singur rând.
 | API | `dotnet run` (port 5000) | imaginea `api`, fără port pe gazdă |
 | HTTPS | nu | da, terminat în nginx (porturile 80/443) |
 | MinIO | Docker, `127.0.0.1:9000` | Docker, aceeași instanță |
+| PostgreSQL | Docker, `127.0.0.1:5432` | Docker, aceeași instanță |
 | Adresa aplicației | `http://localhost:5173` | `https://sgdm.local` (configurabil) |
 | Când | scrii cod | demonstrație, server, orice acces din rețea |
 
 Ambele citesc **același `.env`**. Diferențele sunt izolate în variabile separate
 (`FRONTEND_ORIGIN` pentru dezvoltare, `SGDM_PUBLIC_ORIGIN` pentru Docker;
-`LDAP_CA_FILE` și `LDAP_CONTAINER_CA_FILE`), ca să nu fie nevoie de editări la
-trecerea dintr-un mod în altul.
+`DB_CONNECTION_STRING` spre `localhost`, iar containerele își construiesc
+singure conexiunea spre `postgres`; `LDAP_CA_FILE` și `LDAP_CONTAINER_CA_FILE`),
+ca să nu fie nevoie de editări la trecerea dintr-un mod în altul.
 
 ---
 
@@ -48,8 +50,8 @@ trecerea dintr-un mod în altul.
   (Linux). Verificare: `docker compose version`.
 - Pentru modul de dezvoltare, în plus: **.NET 8 SDK** și **Node.js 22**.
 - Pentru migrări: `dotnet tool install --global dotnet-ef`.
-- O bază PostgreSQL: Supabase (situația actuală) sau PostgreSQL local (secțiunea
-  opțională de la finalul `docker-compose.yml`).
+- Nimic pentru baza de date: PostgreSQL 17 rulează în Docker (serviciul
+  `postgres`). O instalare pe Windows nu e necesară.
 
 ---
 
@@ -60,17 +62,24 @@ Copy-Item .env.example .env
 ```
 
 Completați în `.env` secretele (`MAI_JWT_KEY`, `MAI_ARGON2_PEPPER`,
-`MAI_TWOFACTOR_KEY`, `MAI_STORAGE_MASTER_KEYS`, parola MinIO) și
-`DB_CONNECTION_STRING`. Fiecare secret se generează separat:
+`MAI_TWOFACTOR_KEY`, `MAI_STORAGE_MASTER_KEYS`, parola MinIO), apoi
+`POSTGRES_PASSWORD` și aceeași parolă în `DB_CONNECTION_STRING`. Fiecare secret
+se generează separat:
 
 ```powershell
 docker run --rm alpine/openssl rand -base64 48
 ```
 
+Parola bazei, doar litere și cifre (ajunge într-un connection string):
+
+```powershell
+-join ((48..57)+(65..90)+(97..122) | Get-Random -Count 32 | ForEach-Object {[char]$_})
+```
+
 Apoi, fiecare în terminalul lui:
 
 ```powershell
-docker compose up -d minio minio-init
+docker compose up -d postgres minio minio-init
 ```
 ```powershell
 dotnet ef database update --project MAI.DataAccessLayer --startup-project MAI.Api
@@ -100,20 +109,21 @@ Pe lângă secretele din secțiunea 3, în `.env`:
 | `SGDM_HTTP_PORT` / `SGDM_HTTPS_PORT` | `80` / `443` | Porturile publicate pe gazdă |
 | `SGDM_SELF_SIGNED` | `true` | Generează un certificat autosemnat dacă lipsește cel real |
 | `SGDM_DOCKER_SUBNET` / `SGDM_PROXY_IP` | `172.28.0.0/24` / `172.28.0.10` | Rețeaua internă și IP-ul fix al nginx |
+| `POSTGRES_PASSWORD` | - | Parola bazei din Docker; conexiunea containerelor se construiește din ea |
+| `DB_CONTAINER_CONNECTION_STRING` | gol | Doar pentru o bază externă, în locul serviciului `postgres` |
 | `INTRANET_ONLY` / `INTRANET_AUDIT_ONLY` | `false` / `false` | Acces doar din rețele private, pe IP-ul real al clientului; modul doar-jurnal |
 | `TWOFACTOR_REQUIRED_PRIVILEGED` | `false` | 2FA obligatoriu pentru Administrator și Șef de direcție |
-| `DB_CONNECTION_STRING` | - | **Obligatoriu aici**: containerul nu vede user-secrets |
 
-> Dacă până acum ați rulat API-ul cu secretele în user-secrets sau în
-> `appsettings.Development.json`, copiați **exact** aceleași valori în `.env`.
+> Containerul nu vede user-secrets și nici `appsettings.Development.json`.
+> Dacă până acum ați rulat API-ul cu secretele acolo, copiați **exact** aceleași
+> valori în `.env`.
 > Un `MAI_ARGON2_PEPPER` diferit invalidează toate parolele; o
 > `MAI_TWOFACTOR_KEY` diferită face ilizibile secretele 2FA; o cheie din
 > `MAI_STORAGE_MASTER_KEYS` lipsă face ilizibile documentele criptate cu ea.
 
-**Supabase din container.** Conexiunea directă (`db.<proiect>.supabase.co`) are
-doar adresă IPv6, iar rețelele Docker implicite nu au IPv6. Folosiți
-connection string-ul **Session pooler** din Supabase (Settings → Database →
-Connection string), portul 5432, cu `SSL Mode=Require`.
+Baza de date nu cere nicio configurare în plus: API-ul din container se
+conectează la serviciul `postgres` cu aceleași `POSTGRES_*` din `.env`. Pentru
+datele existente pe Supabase: secțiunea 7.3.
 
 ### 4.2 Numele aplicației
 
@@ -139,8 +149,8 @@ docker compose down
 docker compose up -d --build
 ```
 
-Ordinea de pornire e impusă prin `depends_on`: MinIO sănătos → `minio-init`
-(bucket, versionare, retenție) → API sănătos → web. Starea:
+Ordinea de pornire e impusă prin `depends_on`: PostgreSQL și MinIO sănătoase →
+`minio-init` (bucket, versionare, retenție) → API sănătos → web. Starea:
 
 ```powershell
 docker compose ps
@@ -164,7 +174,7 @@ flowchart LR
     N -- "/ și /assets/<br/>fișiere statice" --> B
     N -- "/api/*<br/>HTTP intern, X-Forwarded-For" --> A[api :8080]
     A --> M[(MinIO :9000)]
-    A --> P[(PostgreSQL / Supabase)]
+    A --> P[(PostgreSQL :5432)]
     A -. "LDAPS 636" .-> D[Controler de domeniu]
 ```
 
@@ -268,19 +278,48 @@ e nevoie de niciun import manual.
 |---|---|---|
 | 80, 443 | web (nginx) | rețea |
 | 9000, 9001 | MinIO (S3 și consola) | doar gazda (`127.0.0.1`) |
+| 5432 | PostgreSQL | doar gazda (`127.0.0.1`) |
 | - | api | doar rețeaua Docker (prin nginx) |
 | 389, 636, 3268, 3269 | Samba AD (profilul `ldap`) | rețea; **doar laborator** |
 
 API-ul nu mai are port pe gazdă: un port deschis direct ar ocoli TLS, antetele
-de securitate și limita de mărime din nginx. MinIO ascultă doar local: API-ul
-pornit cu `dotnet run` îl găsește la `localhost:9000`, un alt calculator din LAN
-nu îl vede.
+de securitate și limita de mărime din nginx. MinIO și PostgreSQL ascultă doar
+local: API-ul pornit cu `dotnet run` și clienții de baze de date le găsesc pe
+`localhost`, un alt calculator din LAN nu le vede.
 
 Consola MinIO, de pe gazdă: <http://localhost:9001>.
 
 ---
 
-## 7. Baza de date și migrările
+## 7. Baza de date
+
+### 7.1 Unde stă și cum o vezi
+
+PostgreSQL 17 rulează în containerul `sgdm-postgres`, cu datele în volumul
+Docker `pg-data`. `docker compose down` le păstrează; doar `down -v` le șterge.
+
+Ascultă doar pe `127.0.0.1:5432` (portul se schimbă cu `POSTGRES_HOST_PORT`).
+Pentru a o vedea în detaliu, orice client PostgreSQL de pe mașina gazdă:
+
+| Câmp | Valoare |
+|---|---|
+| Host / Port | `localhost` / `5432` |
+| Bază | `POSTGRES_DB` din `.env` (implicit `sgdm`) |
+| Utilizator / parolă | `POSTGRES_USER` / `POSTGRES_PASSWORD` din `.env` |
+| SSL | dezactivat (conexiune doar locală) |
+
+În DataGrip / Rider: Database → + → Data Source → PostgreSQL. În DBeaver: New
+Connection → PostgreSQL. Tabelele aplicației sunt în schema `public`.
+
+Din linia de comandă, fără nimic instalat:
+
+```powershell
+docker exec -it sgdm-postgres psql -U sgdm -d sgdm
+```
+
+(`\dt` listează tabelele, `\d "Users"` descrie un tabel, `\q` iese.)
+
+### 7.2 Migrările
 
 API-ul **nu aplică migrările la pornire**, intenționat: o schimbare de schemă pe
 o bază de producție se face conștient, de un om, nu ca efect secundar al unui
@@ -290,14 +329,52 @@ o bază de producție se face conștient, de un om, nu ca efect secundar al unui
 dotnet ef database update --project MAI.DataAccessLayer --startup-project MAI.Api
 ```
 
-Comanda citește `DB_CONNECTION_STRING` din `.env` (prin `DotEnvLoader`), deci
-lovește aceeași bază ca și containerul.
+Comanda citește `DB_CONNECTION_STRING` din `.env` (prin `DotEnvLoader`), adică
+`localhost:5432`, aceeași bază pe care o folosește și containerul API.
 
 Starea migrărilor aplicate:
 
 ```powershell
 dotnet ef migrations list --project MAI.DataAccessLayer --startup-project MAI.Api
 ```
+
+### 7.3 Mutarea datelor de pe Supabase
+
+Până la 22 septembrie 2026, baza stătea pe Supabase. Mutarea se face o
+singură dată, cu un script care folosește imaginea de backup:
+
+```powershell
+.\scripts\migrate-db-to-docker.ps1
+```
+
+Ce face, oprindu-se la prima eroare fără să modifice `.env`:
+
+1. verifică: niciun API pornit (scrierile din timpul mutării s-ar pierde),
+   `POSTGRES_PASSWORD` (o generează dacă lipsește), sursa accesibilă;
+2. pornește `postgres` și așteaptă să fie sănătos;
+3. face backup **doar al bazei** din Supabase, în `.\backups` (rămâne acolo ca
+   punct de revenire);
+4. îl restaurează local cu `--skip-policies`: politicile RLS de pe Supabase
+   sunt scrise pentru rolurile platformei (`anon`, `authenticated`), care aici
+   nu există, iar aplicația nu folosește RLS;
+5. compară numărul **exact** de rânduri din fiecare tabel, sursă și destinație;
+6. doar dacă totul corespunde, rescrie `DB_CONNECTION_STRING` spre
+   `localhost` și păstrează vechea valoare în `SUPABASE_CONNECTION_STRING`,
+   cu o copie a fișierului în `.env.bak-<data-ora>`.
+
+Sursa implicită e `DB_CONNECTION_STRING` din `.env`. Conexiunea directă Supabase
+(`db.<proiect>.supabase.co`) are doar IPv6, pe care containerele nu îl au;
+scriptul o refuză și cere varianta **Session pooler** (Settings → Database →
+Connection string, port 5432):
+
+```powershell
+.\scripts\migrate-db-to-docker.ps1 -Source "Host=aws-0-....pooler.supabase.com;Port=5432;Database=postgres;Username=postgres.<proiect>;Password=...;SSL Mode=Require"
+```
+
+Fișierele din MinIO nu se mută: rămân în același bucket, iar rândurile din
+bază le referă exact ca înainte. Revenirea: valoarea din
+`SUPABASE_CONNECTION_STRING` copiată în `DB_CONNECTION_STRING` (pentru
+`dotnet run`) sau în `DB_CONTAINER_CONNECTION_STRING` (pentru Docker).
 
 ---
 
@@ -322,9 +399,10 @@ Un backup se scrie într-un director temporar (`.incomplete-...`) și primește
 numele final doar la sfârșit. Un backup întrerupt nu arată niciodată ca unul
 complet, iar restaurarea refuză orice director fără `SHA256SUMS`.
 
-Backupul folosește **același** `DB_CONNECTION_STRING` ca API-ul. Un backup
-făcut dintr-o altă bază decât cea pe care rulează aplicația arată bine până în
-ziua în care e nevoie de el.
+Backupul folosește **aceeași** conexiune ca API-ul din container (serviciul
+`postgres` sau `DB_CONTAINER_CONNECTION_STRING`). Un backup făcut dintr-o altă
+bază decât cea pe care rulează aplicația arată bine până în ziua în care e
+nevoie de el.
 
 ### 8.2 Cifrarea și cheile
 
@@ -399,7 +477,14 @@ docker compose --profile backup run --rm backup restore 20260921-020000 --yes
 docker compose start api
 ```
 
-Opțiuni: `--database-only`, `--storage-only`.
+Opțiuni: `--database-only`, `--storage-only`, `--skip-policies` (omite
+politicile RLS, pentru dump-uri venite de pe Supabase).
+
+Numărul exact de rânduri din fiecare tabel, util după o restaurare:
+
+```powershell
+docker compose --profile backup run --rm backup counts
+```
 
 Comportamentul, pe scurt:
 
@@ -421,10 +506,10 @@ restaurare pe o mașină de test.
 
 ### 8.5 Limitări cunoscute
 
-- Parola din `DB_CONNECTION_STRING` nu poate conține `;` sau ghilimele (formatul
-  Npgsql e tradus în variabile `PG*`; scriptul detectează cazul și se oprește).
-- Pe Supabase, doar pooler-ul în mod **Session** (port 5432) suportă `pg_dump`;
-  modul Transaction (6543) nu.
+- Parola bazei nu poate conține `;` sau ghilimele (connection string-ul Npgsql
+  e tradus în variabile `PG*`; scriptul detectează cazul și se oprește).
+- Pentru o sursă Supabase, doar pooler-ul în mod **Session** (port 5432)
+  suportă `pg_dump`; modul Transaction (6543) nu.
 - `pg_dump` din imagine este versiunea 17. Pentru un server mai nou:
   `docker compose build --build-arg PG_MAJOR=18 backup`.
 - Se salvează doar versiunea curentă a fiecărui obiect din MinIO, nu și
@@ -468,7 +553,9 @@ paginii, fără golirea manuală a cache-ului.
 | Toți utilizatorii primesc 429 după câteva greșeli | IP-ul real nu ajunge la API | `SGDM_PROXY_IP` trebuie să fie IP-ul serviciului web: `docker inspect sgdm-web` |
 | Linkurile din email duc la `localhost:5173` | API-ul din Docker folosește `SGDM_PUBLIC_ORIGIN` | Verificați valoarea în `.env` și `docker compose up -d api` |
 | Login de domeniu eșuează doar în Docker | `LDAP_CA_FILE` e o cale Windows | `LDAP_CONTAINER_CA_FILE=/app/certs/ad-ca.pem` (vezi [`LDAP-AD.md`](LDAP-AD.md)) |
-| Backup: `pg_dump a esuat` pe Supabase | Pooler Transaction sau conexiune directă IPv6 | Session pooler, port 5432 (secțiunea 4.1) |
+| `postgres` nu pornește: port 5432 ocupat | Un PostgreSQL instalat pe Windows | `POSTGRES_HOST_PORT=5433` și același port în `DB_CONNECTION_STRING` |
+| `password authentication failed` după schimbarea `POSTGRES_PASSWORD` | Parola se aplică doar la prima inițializare a volumului | Reveniți la parola veche sau o schimbați în bază: `ALTER USER sgdm PASSWORD '...'` |
+| Migrarea: sursa refuzată sau `pg_dump a esuat` | Conexiune directă Supabase (IPv6) sau pooler Transaction (6543) | Session pooler, port 5432 (secțiunea 7.3) |
 | Backup: `server version mismatch` | Server PostgreSQL mai nou decât pg_dump 17 | `docker compose build --build-arg PG_MAJOR=18 backup` |
 | Script `.sh`: `not found` în container | Fișier cu CRLF | Imaginile convertesc automat; pentru Git, `.gitattributes` forțează LF |
 
@@ -482,7 +569,7 @@ docker compose logs --tail 200 api
 
 ## 11. Lista de verificare înainte de producție
 
-- [ ] Toate secretele generate, niciunul pe valoarea-șablon (API-ul refuză oricum să pornească)
+- [ ] Toate secretele generate, niciunul pe valoarea-șablon (API-ul refuză oricum să pornească), inclusiv `POSTGRES_PASSWORD`
 - [ ] Cheile (`MAI_STORAGE_MASTER_KEYS`, `MAI_ARGON2_PEPPER`, `MAI_TWOFACTOR_KEY`, `BACKUP_PASSPHRASE`) copiate în afara serverului
 - [ ] Certificatul instituției în `certs/tls/`, `SGDM_SELF_SIGNED=false`
 - [ ] `SGDM_SERVER_NAME` în DNS-ul intern; `SGDM_PUBLIC_ORIGIN` corect (linkurile din email)

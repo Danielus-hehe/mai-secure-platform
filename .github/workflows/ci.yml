@@ -6,13 +6,13 @@
 #   frontend → npm ci, tsc -b, vite build, oxlint
 #   docker   → docker compose config, imaginile api / web / backup,
 #              nginx -t și un test HTTPS pe imaginea web, backup + restaurare
-#              cap-coadă pe un PostgreSQL și un MinIO reale (efemere)
+#              cap-coadă pe serviciile postgres și minio din compose (efemere)
 #
 # Joburile rulează în paralel: o eroare de TypeScript nu trebuie să aștepte
 # după restaurarea pachetelor NuGet ca să fie raportată.
 #
-# Nu are nevoie de secrete: testele .NET sunt unitare, iar jobul docker își
-# ridică singur o bază și un MinIO de unică folosință, cu parole de test.
+# Nu are nevoie de secrete: testele .NET sunt unitare, iar jobul docker
+# pornește postgres și MinIO din compose, cu parolele-șablon din .env.example.
 #
 # LOCAȚIE: fișierul TREBUIE să stea în .github/workflows/ din rădăcina
 # repository-ului. GitHub nu citește workflow-uri din subfoldere; cât timp a
@@ -206,32 +206,42 @@ jobs:
         if: failure()
         run: docker logs ci-web || true
 
-      # Backup și restaurare pe servicii reale: MinIO din compose (cu bucketul
-      # creat de minio-init) și un PostgreSQL de unică folosință. Verifică
-      # exact ce contează: că un backup se poate restaura, nu doar că se face.
+      # Backup și restaurare pe serviciile REALE din compose: postgres (cu
+      # parola din .env.example) și MinIO cu bucketul creat de minio-init.
+      # Verifică exact ce contează: că un backup se poate restaura, nu doar că
+      # se face. Plus: comanda „counts” și restaurarea cu --skip-policies,
+      # folosite la mutarea bazei de pe Supabase.
       - name: Backup și restaurare cap-coadă
         shell: bash
         env:
-          DB_CONNECTION_STRING: Host=ci-pg;Port=5432;Database=sgdm;Username=sgdm;Password=ci-parola
           BACKUP_PASSPHRASE: ci-parola-backup
         run: |
           set -euo pipefail
+          docker compose up -d postgres minio
           docker compose run --rm minio-init
+          for i in $(seq 1 30); do
+            [ "$(docker inspect --format '{{.State.Health.Status}}' sgdm-postgres)" = healthy ] && break
+            sleep 2
+          done
 
-          docker run -d --name ci-pg --network sgdmci_default \
-            -e POSTGRES_USER=sgdm -e POSTGRES_PASSWORD=ci-parola -e POSTGRES_DB=sgdm postgres:16-alpine
-          for i in $(seq 1 30); do docker exec ci-pg pg_isready -U sgdm -d sgdm && break; sleep 1; done
-
-          docker exec ci-pg psql -U sgdm -d sgdm -c 'CREATE TABLE ci_probe(id int primary key, v text); INSERT INTO ci_probe VALUES (1, $$a$$), (2, $$b$$);'
-
-          # Un obiect în bucket, pe prefixul transferurilor.
-          # Doar cele trei valori necesare, citite explicit. „source .env” nu
-          # merge: valori ca LDAP_GROUP_ROLE_MAPPINGS conțin „;”, pe care bash
-          # le-ar executa ca separator de comenzi.
+          # Doar cele necesare, citite explicit. „source .env” nu merge: valori
+          # ca LDAP_GROUP_ROLE_MAPPINGS conțin „;”, pe care bash le-ar executa.
           env_value() { grep -E "^$1=" .env | head -n1 | cut -d= -f2-; }
           MINIO_ROOT_USER=$(env_value MINIO_ROOT_USER)
           MINIO_ROOT_PASSWORD=$(env_value MINIO_ROOT_PASSWORD)
           STORAGE_BUCKET=$(env_value STORAGE_BUCKET)
+          PGUSER_CI=$(env_value POSTGRES_USER)
+          PGDB_CI=$(env_value POSTGRES_DB)
+
+          psql_ci() { docker exec -e PGPASSWORD="$(env_value POSTGRES_PASSWORD)" sgdm-postgres psql -h 127.0.0.1 -U "$PGUSER_CI" -d "$PGDB_CI" -v ON_ERROR_STOP=1 "$@"; }
+
+          # Date de test, plus o politică RLS pentru un rol care nu există după
+          # restaurare - exact situația unei baze venite de pe Supabase.
+          psql_ci -c 'CREATE ROLE authenticated NOLOGIN;'
+          psql_ci -c 'CREATE TABLE ci_probe(id int primary key, v text); INSERT INTO ci_probe VALUES (1, $$a$$), (2, $$b$$);'
+          psql_ci -c 'ALTER TABLE ci_probe ENABLE ROW LEVEL SECURITY; CREATE POLICY p_ci ON ci_probe FOR SELECT TO authenticated USING (true);'
+
+          # Un obiect în bucket, pe prefixul transferurilor.
           docker run --rm --network sgdmci_default --entrypoint sh minio/mc:latest -c \
             "mc alias set l http://minio:9000 '$MINIO_ROOT_USER' '$MINIO_ROOT_PASSWORD' >/dev/null && echo cifrotext | mc pipe l/$STORAGE_BUCKET/transfers/ci/obiect.enc"
 
@@ -244,14 +254,23 @@ jobs:
           sudo test -f "backups/$name/database.dump.gpg"
           sudo test -f "backups/$name/storage/transfers/ci/obiect.enc"
 
+          before=$(docker compose --profile backup run --rm backup counts)
+          echo "$before"
+          echo "$before" | grep -qx 'ci_probe 2'
+
           # Fără --yes, restaurarea trebuie refuzată.
           ! docker compose --profile backup run --rm backup restore "$name"
 
-          # Distrugem datele, restaurăm, verificăm.
-          docker exec ci-pg psql -U sgdm -d sgdm -c 'DELETE FROM ci_probe;'
-          docker compose --profile backup run --rm backup restore "$name" --yes
-          count=$(docker exec ci-pg psql -U sgdm -d sgdm -tAc 'SELECT count(*) FROM ci_probe;')
-          test "$count" = "2"
+          # Rolul dispare, ca pe un PostgreSQL nou: fără --skip-policies,
+          # restaurarea trebuie să eșueze și să lase baza neatinsă...
+          psql_ci -c 'DROP POLICY p_ci ON ci_probe; DROP ROLE authenticated; DELETE FROM ci_probe WHERE id = 2;'
+          ! docker compose --profile backup run --rm backup restore "$name" --yes --database-only
+          test "$(psql_ci -tAc 'SELECT count(*) FROM ci_probe;')" = "1"
+
+          # ...iar cu --skip-policies trebuie să reușească, cu toate rândurile.
+          docker compose --profile backup run --rm backup restore "$name" --yes --skip-policies
+          after=$(docker compose --profile backup run --rm backup counts)
+          test "$before" = "$after"
 
           # Un fișier alterat în backup → verificarea pică.
           echo alterat | sudo tee -a "backups/$name/storage/transfers/ci/obiect.enc" >/dev/null
@@ -260,6 +279,6 @@ jobs:
       - name: Curățenie
         if: always()
         run: |
-          docker rm -f ci-web ci-pg >/dev/null 2>&1 || true
+          docker rm -f ci-web >/dev/null 2>&1 || true
           docker compose --profile backup down -v >/dev/null 2>&1 || true
 
