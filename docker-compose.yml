@@ -90,10 +90,20 @@ services:
       start_period: 10s
 
   minio:
+    # Registrul: quay.io, NU Docker Hub. In jurul datei de 11.09.2026, MinIO a
+    # sters depozitele minio/minio si minio/mc de pe Docker Hub; orice 'pull'
+    # de acolo esueaza cu „pull access denied”, chiar si pentru versiuni fixate.
+    # Aceleasi imagini raman publicate de MinIO pe quay.io.
+    #
     # Pentru demonstratie/practica 'latest' e in regula. In productie se
-    # pineaza o versiune exacta (ex. minio/minio:RELEASE.2025-04-22T22-12-26Z)
+    # pineaza o versiune exacta (ex. quay.io/minio/minio:RELEASE.2024-11-07T00-52-20Z)
     # ca un update automat sa nu schimbe comportamentul sub picioarele tale.
-    image: minio/minio:latest
+    #
+    # Risc cunoscut: Community Edition e acum distribuita doar ca sursa, iar
+    # imaginile de pe quay.io nu mai primesc actualizari. Pe termen lung,
+    # stocarea S3 poate fi mutata pe o alternativa intretinuta (SeaweedFS,
+    # Garage); API-ul vorbeste S3 standard, deci schimbarea ar fi de configurare.
+    image: quay.io/minio/minio:latest
     container_name: sgdm-minio
     restart: unless-stopped
 
@@ -159,7 +169,7 @@ services:
   # vizibil, nu sa raporteze "MinIO pregatit" fara retentie.
   # ───────────────────────────────────────────────────────────────────────────
   minio-init:
-    image: minio/mc:latest
+    image: quay.io/minio/mc:latest
     container_name: sgdm-minio-init
     depends_on:
       minio:

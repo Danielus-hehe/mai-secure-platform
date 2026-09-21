@@ -20,7 +20,10 @@ FROM postgres:${PG_MAJOR}-alpine
 # mc se copiază din imaginea oficială (binar Go static, multi-arhitectură),
 # nu se descarcă din internet la build: fără URL-uri pe care nu le verifică
 # nimeni și fără diferențe între amd64 și arm64.
-COPY --from=minio/mc:latest /usr/bin/mc /usr/local/bin/mc
+#
+# De pe quay.io: MinIO a șters minio/mc de pe Docker Hub (11.09.2026), iar
+# build-ul cu „FROM minio/mc” pica cu „pull access denied”.
+COPY --from=quay.io/minio/mc:latest /usr/bin/mc /usr/local/bin/mc
 
 RUN apk add --no-cache gnupg coreutils
 

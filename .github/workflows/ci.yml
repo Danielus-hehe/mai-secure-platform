@@ -242,7 +242,7 @@ jobs:
           psql_ci -c 'ALTER TABLE ci_probe ENABLE ROW LEVEL SECURITY; CREATE POLICY p_ci ON ci_probe FOR SELECT TO authenticated USING (true);'
 
           # Un obiect în bucket, pe prefixul transferurilor.
-          docker run --rm --network sgdmci_default --entrypoint sh minio/mc:latest -c \
+          docker run --rm --network sgdmci_default --entrypoint sh quay.io/minio/mc:latest -c \
             "mc alias set l http://minio:9000 '$MINIO_ROOT_USER' '$MINIO_ROOT_PASSWORD' >/dev/null && echo cifrotext | mc pipe l/$STORAGE_BUCKET/transfers/ci/obiect.enc"
 
           docker compose --profile backup run --rm backup

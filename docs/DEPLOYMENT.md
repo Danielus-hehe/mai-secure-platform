@@ -579,4 +579,4 @@ docker compose logs --tail 200 api
 - [ ] Backup programat, copiat în afara serverului, **o restaurare de probă reușită**
 - [ ] Porturile 9000/9001 neexpuse în afara gazdei (implicit așa sunt)
 - [ ] Samba AD de laborator oprit; `LDAP_HOST` spre controlerul de domeniu real, cu LDAPS
-- [ ] Imaginile `minio/minio` și `minio/mc` fixate pe o versiune exactă în `docker-compose.yml`
+- [ ] Imaginile `quay.io/minio/minio` și `quay.io/minio/mc` fixate pe o versiune exactă în `docker-compose.yml` (Docker Hub nu le mai are din 11.09.2026)
