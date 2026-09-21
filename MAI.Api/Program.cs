@@ -4,6 +4,7 @@ using MAI.Api.Middleware;
 using MAI.Api.Options;
 using MAI.Api.Security;
 using MAI.Api.Services;
+using MAI.BusinessLogic.Ldap;
 using MAI.BusinessLogic.Interfaces;
 using MAI.BusinessLogic.Security;
 using MAI.BusinessLogic.Services;
@@ -581,6 +582,131 @@ try
     builder.Services.AddSingleton(passwordResetOptions);
     builder.Services.AddScoped<IPasswordResetService, PasswordResetService>();
 
+    // ─── Autentificare prin Active Directory (LDAP) ────────────────────────
+    // Provider paralel cu conturile locale: un cont existent își păstrează
+    // providerul, iar conturile de domeniu nu au parolă la noi. Implicit
+    // dezactivat, ca aplicația să pornească identic fără domeniu.
+    var ldapOptions = new LdapOptions();
+    builder.Configuration.GetSection("Ldap").Bind(ldapOptions);
+
+    // Parola contului de serviciu vine din mediu, nu din fișierul versionat.
+    var ldapPasswordFromEnv = Environment.GetEnvironmentVariable("MAI_LDAP_BIND_PASSWORD");
+    if (!string.IsNullOrWhiteSpace(ldapPasswordFromEnv))
+        ldapOptions.BindPassword = ldapPasswordFromEnv;
+
+    if (PlaceholderSecrets.IsPlaceholder(ldapOptions.BindPassword))
+        ldapOptions.BindPassword = string.Empty;
+
+    ldapOptions.Validate();
+
+    if (ldapOptions.Enabled && ldapOptions.HasServiceAccount)
+    {
+        EnsureNotTemplate(
+            "Ldap:BindPassword (MAI_LDAP_BIND_PASSWORD)",
+            ldapOptions.BindPassword,
+            "Puneți parola contului de serviciu din AD în .env.");
+    }
+
+    // Cele două relaxări de securitate ale integrării LDAP sunt utile într-un
+    // laborator cu Samba AD autosemnat și inacceptabile în rest: prima lasă
+    // parolele de domeniu să circule în clar, a doua acceptă orice certificat,
+    // deci și pe cel al unui atacator care se dă drept controlerul de domeniu.
+    if (!isDevelopment && ldapOptions.Enabled && ldapOptions.AllowInsecurePlaintext)
+    {
+        throw new InvalidOperationException(
+            "Ldap:AllowInsecurePlaintext=true nu este permis în afara dezvoltării: " +
+            "parolele de domeniu ar circula necriptate prin rețea.");
+    }
+
+    if (!isDevelopment && ldapOptions.Enabled && ldapOptions.AllowUntrustedCertificate)
+    {
+        throw new InvalidOperationException(
+            "Ldap:AllowUntrustedCertificate=true nu este permis în afara dezvoltării. " +
+            "Fixați amprenta certificatului (LDAP_CERT_THUMBPRINT) sau indicați CA-ul (LDAP_CA_FILE).");
+    }
+
+    // Pe Linux (inclusiv în container), System.DirectoryServices.Protocols
+    // vorbește prin OpenLDAP, care NU acceptă callbackul .NET de validare a
+    // certificatului. Validarea o face libldap însuși, după LDAPTLS_CACERT și
+    // LDAPTLS_REQCERT din mediu. Verificările de mai jos transformă o
+    // configurare care ar părea sigură, dar n-ar fi aplicată, într-o eroare la
+    // pornire - nu într-o conexiune validată mai slab decât crede administratorul.
+    if (ldapOptions.Enabled && !OperatingSystem.IsWindows() && (ldapOptions.UseLdaps || ldapOptions.UseStartTls))
+    {
+        if (!string.IsNullOrWhiteSpace(ldapOptions.ServerCertificateThumbprint))
+        {
+            throw new InvalidOperationException(
+                "Ldap:ServerCertificateThumbprint (LDAP_CERT_THUMBPRINT) funcționează doar când API-ul " +
+                "rulează pe Windows. În container, OpenLDAP validează certificatul după CA: " +
+                "puneți LDAP_CA_FILE=/app/certs/ad-ca.pem și goliți LDAP_CERT_THUMBPRINT.");
+        }
+
+        var reqCert = Environment.GetEnvironmentVariable("LDAPTLS_REQCERT")?.Trim();
+        var relaxed = reqCert is not null &&
+                      (reqCert.Equals("never", StringComparison.OrdinalIgnoreCase) ||
+                       reqCert.Equals("allow", StringComparison.OrdinalIgnoreCase) ||
+                       reqCert.Equals("try", StringComparison.OrdinalIgnoreCase));
+
+        if (relaxed && !isDevelopment)
+        {
+            throw new InvalidOperationException(
+                $"LDAPTLS_REQCERT={reqCert} nu este permis în afara dezvoltării: certificatul " +
+                "controlerului de domeniu nu ar mai fi verificat. Folosiți LDAP_CA_FILE.");
+        }
+
+        if (relaxed && !ldapOptions.AllowUntrustedCertificate)
+        {
+            // Relaxarea trebuie cerută în ambele locuri, ca să nu apară din
+            // greșeală, dintr-o variabilă de mediu uitată pe o mașină.
+            throw new InvalidOperationException(
+                $"LDAPTLS_REQCERT={reqCert} fără LDAP_ALLOW_UNTRUSTED_CERT=true. " +
+                "Dacă chiar vreți să nu validați certificatul (doar în laborator), setați-le pe amândouă.");
+        }
+
+        if (ldapOptions.AllowUntrustedCertificate && !relaxed)
+        {
+            Console.WriteLine(
+                "Avertisment: LDAP_ALLOW_UNTRUSTED_CERT=true nu are efect pe Linux fără " +
+                "LDAP_TLS_REQCERT=never. Certificatul se validează în continuare.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(ldapOptions.CaCertificatePath))
+        {
+            var envCa = Environment.GetEnvironmentVariable("LDAPTLS_CACERT");
+
+            if (!string.Equals(envCa, ldapOptions.CaCertificatePath, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "Pe Linux, CA-ul pentru LDAPS trebuie dat prin variabila LDAPTLS_CACERT (o citește " +
+                    $"OpenLDAP, nu aplicația). Acum: LDAP_CA_FILE={ldapOptions.CaCertificatePath}, " +
+                    $"LDAPTLS_CACERT={envCa ?? "(lipsă)"}. docker-compose le setează pe amândouă din LDAP_CA_FILE.");
+            }
+
+            if (!File.Exists(ldapOptions.CaCertificatePath))
+            {
+                throw new InvalidOperationException(
+                    $"Certificatul CA {ldapOptions.CaCertificatePath} nu există în container. " +
+                    "Rulați scripts/samba-ad-setup.ps1 (îl copiază în ./certs) și verificați montarea ./certs:/app/certs.");
+            }
+        }
+    }
+
+    builder.Services.AddSingleton(ldapOptions);
+
+    // Singleton: serviciul nu ține stare între cereri, fiecare operație își
+    // deschide propria conexiune LDAP.
+    if (ldapOptions.Enabled)
+        builder.Services.AddSingleton<IDirectoryService, LdapDirectoryService>();
+    else
+        builder.Services.AddSingleton<IDirectoryService, DisabledDirectoryService>();
+
+    // Scoped: are nevoie de AppDbContext.
+    builder.Services.AddScoped<IDirectoryAccountProvisioner, DirectoryAccountProvisioner>();
+
+    // „Parola asta e a contului?” - Argon2id pentru conturile locale, bind LDAPS
+    // pentru cele de domeniu. Folosit de operațiile cu chei E2EE.
+    builder.Services.AddScoped<IUserCredentialVerifier, UserCredentialVerifier>();
+
     // Trimiterea în fundal a invitației la crearea contului. Singleton, dar
     // fiecare trimitere își creează propriul scope (deci propriul AppDbContext):
     // scope-ul cererii HTTP se închide la răspuns și nu poate fi folosit după.
@@ -625,6 +751,15 @@ try
     app.Logger.LogInformation(
         "JWT: issuer={Issuer}, audience={Audience}, acces {Minutes} min, refresh {Days} zile, validare issuer/audience ACTIVA",
         jwtOptions.Issuer, jwtOptions.Audience, jwtOptions.AccessTokenMinutes, jwtOptions.RefreshTokenDays);
+
+    app.Logger.LogInformation(
+        "Active Directory: {State}{Details}",
+        ldapOptions.Enabled ? "activat" : "dezactivat",
+        ldapOptions.Enabled
+            ? $", {ldapOptions.Endpoint}, baza {ldapOptions.BaseDn}, TLS {ldapOptions.Describe()["tls"]}, " +
+              $"certificat {ldapOptions.Describe()["certificate"]}, creare automata conturi " +
+              (ldapOptions.AutoCreateUsers ? "DA" : "nu")
+            : string.Empty);
 
     app.Logger.LogInformation(
         "Restrictie intranet: {State}{Mode}. 2FA obligatoriu pe endpointurile privilegiate: {Required}",

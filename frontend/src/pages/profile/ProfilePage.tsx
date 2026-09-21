@@ -250,7 +250,32 @@ export default function ProfilePage() {
                         </div>
                     </div>
 
-                    {/* Schimbare parolă */}
+                    {/*
+                      Schimbarea parolei există doar pentru conturile locale.
+                      Pentru un cont de domeniu, parola nu e la noi: un formular
+                      care ar părea să o schimbe ar fi o minciună de interfață -
+                      utilizatorul ar crede că a schimbat-o și s-ar autentifica
+                      în continuare cu cea din AD.
+                    */}
+                    {user.isDirectoryAccount ? (
+                        <div className="bg-white dark:bg-mai-800 rounded-xl shadow-card dark:shadow-none border border-mai-100/50 dark:border-mai-700 p-6">
+                            <h2 className="font-semibold text-mai-900 dark:text-white mb-2 flex items-center gap-2">
+                                <KeyRound size={16} className="text-mai-400" />
+                                Parola contului
+                            </h2>
+                            <p className="text-sm leading-relaxed text-mai-500 dark:text-mai-300">
+                                Contul dumneavoastră este de domeniu (Active Directory). Parola se
+                                schimbă acolo - de pe o stație din domeniu sau prin portalul
+                                instituției - nu din această aplicație.
+                            </p>
+                            <p className="mt-3 text-sm leading-relaxed text-mai-500 dark:text-mai-300">
+                                După schimbare, la prima autentificare vi se cere o singură dată
+                                parola veche, ca să se reîmpacheteze cheile private de criptare.
+                                Cheile publice rămân aceleași, deci fișierele primite până acum
+                                rămân accesibile.
+                            </p>
+                        </div>
+                    ) : (
                     <div className="bg-white dark:bg-mai-800 rounded-xl shadow-card dark:shadow-none border border-mai-100/50 dark:border-mai-700 p-6">
                         <h2 className="font-semibold text-mai-900 dark:text-white mb-4 flex items-center gap-2">
                             <KeyRound size={16} className="text-mai-400" />
@@ -307,6 +332,7 @@ export default function ProfilePage() {
                             </Button>
                         </div>
                     </div>
+                    )}
 
                     {/*
                       Sesiunile active stau lângă schimbarea parolei pentru că

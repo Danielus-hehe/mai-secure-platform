@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
     LayoutDashboard, ArrowLeftRight, Landmark, FileStack, Network,
-    Users, ScrollText, ShieldCheck, UserCircle, X,
+    Users, ScrollText, ShieldCheck, UserCircle, X, ServerCog,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { getPendingAcknowledgements } from '../../api/internalDocuments';
@@ -23,6 +23,7 @@ const NAV_SEF = [
 const NAV_ADMIN = [
     { to: '/users',      label: 'Gestiune utilizatori',    icon: Users            },
     { to: '/org-units',  label: 'Structura organizatorică', icon: Network         },
+    { to: '/directory',  label: 'Active Directory',        icon: ServerCog        },
     { to: '/admin',      label: 'Administrare & rapoarte',  icon: ShieldCheck      },
 ];
 

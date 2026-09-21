@@ -7,6 +7,7 @@ using System.Security.Cryptography;
 using System.Text;
 using MAI.Api.Security;
 using MAI.Api.Services;
+using MAI.BusinessLogic.Ldap;
 using MAI.BusinessLogic.Dtos;
 using MAI.BusinessLogic.Interfaces;
 using MAI.BusinessLogic.Security;
@@ -43,6 +44,9 @@ namespace MAI.Api.Controllers
         private readonly ILogger<AuthController> _logger;
         private readonly IInvitationService _invitation;
         private readonly IPasswordResetService _passwordReset;
+        private readonly IDirectoryService _directory;
+        private readonly IDirectoryAccountProvisioner _provisioner;
+        private readonly LdapOptions _ldap;
 
         public AuthController(
             AppDbContext context,
@@ -57,7 +61,10 @@ namespace MAI.Api.Controllers
             IAccountLockoutService lockout,
             ILogger<AuthController> logger,
             IInvitationService invitation,
-            IPasswordResetService passwordReset)
+            IPasswordResetService passwordReset,
+            IDirectoryService directory,
+            IDirectoryAccountProvisioner provisioner,
+            LdapOptions ldap)
         {
             _context   = context;
             _hasher    = hasher;
@@ -72,6 +79,9 @@ namespace MAI.Api.Controllers
             _logger     = logger;
             _invitation = invitation;
             _passwordReset = passwordReset;
+            _directory     = directory;
+            _provisioner   = provisioner;
+            _ldap          = ldap;
         }
 
         private string Ip => HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
@@ -97,6 +107,15 @@ namespace MAI.Api.Controllers
             username.Length <= AuditUsernameMaxLength ? username : username[..AuditUsernameMaxLength];
 
         /// <summary>
+        /// Taie un text la lungimea maximă a coloanei Details din audit (1024).
+        /// Listele de modificări venite din AD pot fi oricât de lungi, iar un
+        /// rând care nu intră în coloană ar face SaveChanges să arunce - adică ar
+        /// transforma o autentificare reușită într-un 500.
+        /// </summary>
+        private static string Trim(string value, int max) =>
+            value.Length <= max ? value : value[..max];
+
+        /// <summary>
         /// User-Agent-ul cererii, pentru eticheta sesiunii. Vine de la client,
         /// deci e o indicație, nu o dovadă - se afișează, nu se folosește la
         /// nicio decizie de autorizare.
@@ -117,7 +136,12 @@ namespace MAI.Api.Controllers
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginDto request, CancellationToken ct)
         {
-            var username = request.Username?.Trim() ?? string.Empty;
+            // Numele tastat poate veni în trei forme pentru același cont de
+            // domeniu: „ion.popescu”, „SGDM\ion.popescu”, „ion.popescu@sgdm.local”.
+            // Căutarea locală se face pe forma scurtă, ca cele trei să nu ajungă
+            // trei conturi diferite, fiecare cu propriile chei E2EE.
+            var typed    = request.Username?.Trim() ?? string.Empty;
+            var username = DirectoryUsername.Normalize(typed);
             var password = request.Password ?? string.Empty;
 
             // Mesaj identic pentru orice eșec - nu divulgăm dacă userul există,
@@ -148,9 +172,19 @@ namespace MAI.Api.Controllers
             var user = await _context.Users
                 .FirstOrDefaultAsync(u => u.Username.ToLower() == usernameKey, ct);
 
+            // Care provider decide dacă parola e bună:
+            //   • un cont existent păstrează providerul cu care a fost creat -
+            //     un cont local NU devine cont de domeniu fiindcă domeniul
+            //     întâmplător conține un cont cu același nume;
+            //   • un nume necunoscut ajunge la AD doar dacă e permisă crearea
+            //     automată. Altfel, conturile de domeniu trebuie legate întâi
+            //     de administrator.
+            var useDirectory = _directory.Enabled
+                && (user is null ? _ldap.AutoCreateUsers : user.IsDirectoryAccount);
+
             try
             {
-                if (user is null)
+                if (user is null && !useDirectory)
                 {
                     // Consumăm același timp ca o verificare reală, ca să nu se poată
                     // enumera conturile măsurând latența răspunsului.
@@ -162,7 +196,12 @@ namespace MAI.Api.Controllers
 
                 // Contul blocat: NU calculăm hash. Exact ăsta e scopul blocării -
                 // un atacator nu trebuie să poată consuma 19 MiB pe încercare la nesfârșit.
-                if (user.IsLockedOut)
+                //
+                // Blocarea se aplică identic conturilor de domeniu: fără ea, am
+                // transforma API-ul nostru într-un instrument de forță brută
+                // împotriva AD-ului, iar contorul de blocare al domeniului s-ar
+                // declanșa pentru oameni care nu au greșit nimic.
+                if (user is not null && user.IsLockedOut)
                 {
                     var remaining = _lockout.RemainingLockoutSeconds(user);
 
@@ -177,26 +216,116 @@ namespace MAI.Api.Controllers
                     });
                 }
 
-                var verification = await _hasher.VerifyPasswordAsync(password, user.PasswordHash, ct);
+                var verification = PasswordVerificationResult.Success;
 
-                if (verification == PasswordVerificationResult.Failed)
+                if (useDirectory)
                 {
-                    var outcome = _lockout.RegisterFailedAttempt(user);
+                    // ── Autentificare în domeniu ──────────────────────────────
+                    // Parola nu ajunge niciodată în baza noastră, nici măcar ca
+                    // hash: se trimite prin LDAPS la controlerul de domeniu, care
+                    // răspunde da sau nu.
+                    var directory = await _directory.AuthenticateAsync(typed, password, ct);
 
-                    if (outcome.LockedOut)
+                    if (!directory.Success)
                     {
-                        _logger.LogWarning("Cont blocat: {Username}, IP={Ip}, {Minutes} minute",
-                            user.Username, Ip, outcome.LockoutMinutes);
+                        // Indisponibilitatea DC-ului NU e o încercare greșită de
+                        // parolă: dacă ar crește contorul, o cădere de rețea de
+                        // câteva minute ar bloca toate conturile instituției.
+                        if (directory.Status == DirectoryAuthStatus.ServerUnavailable ||
+                            directory.Status == DirectoryAuthStatus.ServiceAccountRejected)
+                        {
+                            await WriteAuditAsync(user?.Id, AuditName(username), AuditAction.Login,
+                                $"Active Directory indisponibil: {directory.Detail}", AuditResult.Failure);
+
+                            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+                            {
+                                message = "Serviciul de domeniu nu răspunde. Încercați din nou în câteva minute.",
+                            });
+                        }
+
+                        if (user is not null)
+                        {
+                            var failed = _lockout.RegisterFailedAttempt(user);
+
+                            if (failed.LockedOut)
+                            {
+                                _logger.LogWarning("Cont de domeniu blocat local: {Username}, IP={Ip}, {Minutes} minute",
+                                    user.Username, Ip, failed.LockoutMinutes);
+                            }
+
+                            AddAudit(user.Id, user.Username, AuditAction.Login,
+                                $"{failed.AuditDetails} ({directory.Detail})", AuditResult.Failure);
+                        }
+                        else
+                        {
+                            AddAudit(null, AuditName(username), AuditAction.Login,
+                                $"Autentificare AD esuata: {directory.Detail}", AuditResult.Failure);
+                        }
+
+                        await _context.SaveChangesAsync(ct);
+                        return BadRequest(new { message = genericError });
                     }
 
-                    AddAudit(user.Id, user.Username, AuditAction.Login,
-                        outcome.AuditDetails, AuditResult.Failure);
-                    await _context.SaveChangesAsync(ct);
+                    // Bind reușit. Contul local se creează sau se aduce în acord
+                    // cu AD-ul (nume, email, rol din grupuri, subdiviziune, stare).
+                    var provision = await _provisioner.ApplyAsync(directory.User!, user, ct);
 
-                    return BadRequest(new { message = genericError });
+                    if (provision.User is null)
+                    {
+                        await WriteAuditAsync(null, AuditName(username), AuditAction.Login,
+                            $"Cont AD fara corespondent local: {provision.Blocked}", AuditResult.Warning);
+                        return BadRequest(new { message = genericError });
+                    }
+
+                    user = provision.User;
+
+                    if (provision.Created)
+                    {
+                        _logger.LogInformation("Cont local creat din AD: {Username} ({Dn})",
+                            user.Username, directory.User!.DistinguishedName);
+
+                        AddAudit(user.Id, user.Username, AuditAction.DirectoryAccountProvisioned,
+                            $"Cont creat automat la prima autentificare de domeniu, rol {user.Role}, " +
+                            $"DN {Trim(directory.User!.DistinguishedName, 200)}", AuditResult.Warning);
+                    }
+                    else if (provision.Changes.Count > 0)
+                    {
+                        AddAudit(user.Id, user.Username, AuditAction.DirectoryAccountSynchronized,
+                            "Sincronizat din AD: " + Trim(string.Join("; ", provision.Changes), 400));
+                    }
+
+                    if (provision.Blocked is not null)
+                    {
+                        AddAudit(user.Id, user.Username, AuditAction.Login,
+                            $"Autentificare refuzata: {provision.Blocked}", AuditResult.Failure);
+                        await _context.SaveChangesAsync(ct);
+
+                        return BadRequest(new { message = "Contul este dezactivat. Contactați administratorul." });
+                    }
+                }
+                else
+                {
+                    verification = await _hasher.VerifyPasswordAsync(password, user!.PasswordHash, ct);
+
+                    if (verification == PasswordVerificationResult.Failed)
+                    {
+                        var outcome = _lockout.RegisterFailedAttempt(user);
+
+                        if (outcome.LockedOut)
+                        {
+                            _logger.LogWarning("Cont blocat: {Username}, IP={Ip}, {Minutes} minute",
+                                user.Username, Ip, outcome.LockoutMinutes);
+                        }
+
+                        AddAudit(user.Id, user.Username, AuditAction.Login,
+                            outcome.AuditDetails, AuditResult.Failure);
+                        await _context.SaveChangesAsync(ct);
+
+                        return BadRequest(new { message = genericError });
+                    }
                 }
 
-                if (!user.IsActive)
+                if (!user!.IsActive)
                 {
                     await WriteAuditAsync(user.Id, user.Username, AuditAction.Login,
                         "Cont dezactivat", AuditResult.Failure);
@@ -240,7 +369,9 @@ namespace MAI.Api.Controllers
                     var challenge = _tokens.IssueTwoFactorChallenge(user);
 
                     AddAudit(user.Id, user.Username, AuditAction.Login,
-                        "Parola corecta, se asteapta codul 2FA");
+                        useDirectory
+                            ? "Parola de domeniu corecta, se asteapta codul 2FA"
+                            : "Parola corecta, se asteapta codul 2FA");
 
                     await _context.SaveChangesAsync(ct);
 
@@ -268,9 +399,9 @@ namespace MAI.Api.Controllers
                     user, issued.RefreshTokenHash, issued.RefreshTokenExpiresAt, UserAgent, Ip);
 
                 AddAudit(user.Id, user.Username, AuditAction.Login,
-                    user.MustChangePassword
-                        ? "Autentificare reusita cu parola temporara, schimbarea parolei este obligatorie"
-                        : "Autentificare reusita");
+                    (useDirectory ? "Autentificare reusita prin Active Directory" : "Autentificare reusita") +
+                    (user.MustChangePassword ? ", cu parola temporara - schimbarea parolei este obligatorie" : string.Empty) +
+                    (user.KeyRewrapRequired ? ", parola de domeniu s-a schimbat: cheile E2EE trebuie reimpachetate" : string.Empty));
                 await _context.SaveChangesAsync(ct);
 
                 return Ok(issued.Response);
@@ -483,6 +614,8 @@ namespace MAI.Api.Controllers
                 response.RefreshTokenExpiresAt,
                 response.MustChangePassword,
                 response.MfaEnrollmentRequired,
+                response.AuthProvider,
+                response.KeyRewrapRequired,
                 usedRecoveryCode,
                 remainingRecoveryCodes = user.RemainingRecoveryCodes,
             });
@@ -595,6 +728,21 @@ namespace MAI.Api.Controllers
 
             var user = await _context.Users.FindAsync(new object?[] { userId }, ct);
             if (user is null) return NotFound();
+
+            // Un cont de domeniu nu are parolă la noi, deci nu are ce schimba
+            // aici. Schimbarea se face în Active Directory (Ctrl+Alt+Del pe o
+            // stație din domeniu sau portalul de autoservire), iar la
+            // următoarea autentificare aplicația cere reîmpachetarea cheilor
+            // E2EE cu parola nouă.
+            if (user.IsDirectoryAccount)
+            {
+                return BadRequest(new
+                {
+                    code    = "DIRECTORY_ACCOUNT",
+                    message = "Contul este de domeniu. Parola se schimbă în Active Directory, " +
+                              "nu în această aplicație.",
+                });
+            }
 
             try
             {

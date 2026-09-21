@@ -37,6 +37,17 @@ export interface User {
      * fost deschisă cu al doilea factor. Paginile privilegiate primesc 403.
      */
     mfaEnrollmentRequired?: boolean;
+    /**
+     * Contul se autentifică în Active Directory. Parola nu se schimbă din
+     * aplicație, iar ecranele care o presupun locală se ascund.
+     */
+    isDirectoryAccount?: boolean;
+    /**
+     * Parola de domeniu s-a schimbat după ultima împachetare a cheilor private:
+     * descuierea cu parola de azi ar eșua. KeysGate cere o dată parola veche și
+     * reîmpachetează.
+     */
+    keyRewrapRequired?: boolean;
 }
 
 interface LoginResponse {
@@ -53,6 +64,9 @@ interface LoginResponse {
     refreshTokenExpiresAt: string;
     mustChangePassword?: boolean;
     mfaEnrollmentRequired?: boolean;
+    /** 0 = cont local (parola la noi), 1 = cont de domeniu (parola in AD). */
+    authProvider?: number;
+    keyRewrapRequired?: boolean;
     /** Prezente doar cand autentificarea s-a incheiat prin pasul 2FA. */
     usedRecoveryCode?: boolean;
     remainingRecoveryCodes?: number;
@@ -106,6 +120,8 @@ function normalizeUser(raw: LoginResponse): User {
         department: raw.department || '',
         mustChangePassword: raw.mustChangePassword === true,
         mfaEnrollmentRequired: raw.mfaEnrollmentRequired === true,
+        isDirectoryAccount: Number(raw.authProvider ?? 0) === 1,
+        keyRewrapRequired: raw.keyRewrapRequired === true,
     };
 }
 

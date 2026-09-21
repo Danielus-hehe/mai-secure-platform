@@ -40,6 +40,19 @@ namespace MAI.DataAccessLayer.Configurations
                 .HasFilter("\"PasswordResetToken\" IS NOT NULL")
                 .HasDatabaseName("IX_Users_PasswordResetToken");
 
+            // ── Cont de domeniu ──────────────────────────────────────────
+            // objectGUID din AD, unic: două conturi locale nu au voie să indice
+            // același cont de domeniu. Fără index, o legare greșită ar duce la
+            // doi utilizatori care se autentifică amândoi cu aceeași parolă de
+            // domeniu, pe conturi diferite, cu chei E2EE diferite.
+            builder.Property(u => u.DirectoryObjectId).HasMaxLength(64);
+            builder.Property(u => u.DirectoryDn).HasMaxLength(512);
+
+            builder.HasIndex(u => u.DirectoryObjectId)
+                .IsUnique()
+                .HasFilter("\"DirectoryObjectId\" IS NOT NULL")
+                .HasDatabaseName("UX_Users_DirectoryObjectId");
+
             // Încadrarea în structură. Restrict: o subdiviziune cu membri nu se
             // poate șterge; se mută întâi oamenii sau se dezactivează.
             builder.HasOne(u => u.OrgUnit)

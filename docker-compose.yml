@@ -223,6 +223,47 @@ services:
       # Valabilitatea linkului de resetare a parolei trimis pe email (minute).
       PasswordReset__TokenMinutes: ${PASSWORD_RESET_TOKEN_MINUTES:-120}
 
+      # ── Active Directory (LDAP) ──────────────────────────────────────────
+      # Implicit dezactivat: aplicatia porneste identic fara domeniu, iar
+      # conturile locale functioneaza ca inainte. Detalii si provizionarea unui
+      # Samba AD de test: docs/LDAP-AD.md
+      Ldap__Enabled: ${LDAP_ENABLED:-false}
+      Ldap__Host: ${LDAP_HOST:-}
+      Ldap__Port: ${LDAP_PORT:-636}
+      Ldap__UseLdaps: ${LDAP_USE_LDAPS:-true}
+      Ldap__UseStartTls: ${LDAP_USE_STARTTLS:-false}
+      Ldap__AllowInsecurePlaintext: ${LDAP_ALLOW_PLAINTEXT:-false}
+      Ldap__BaseDn: ${LDAP_BASE_DN:-}
+      Ldap__UserSearchBase: ${LDAP_USER_SEARCH_BASE:-}
+      Ldap__OrgUnitSearchBase: ${LDAP_OU_SEARCH_BASE:-}
+      Ldap__Realm: ${LDAP_REALM:-}
+      Ldap__NetbiosDomain: ${LDAP_NETBIOS_DOMAIN:-}
+      Ldap__BindDn: ${LDAP_BIND_DN:-}
+      MAI_LDAP_BIND_PASSWORD: ${MAI_LDAP_BIND_PASSWORD:-}
+      Ldap__GroupRoleMappings: ${LDAP_GROUP_ROLE_MAPPINGS:-}
+      Ldap__DefaultRole: ${LDAP_DEFAULT_ROLE:-Utilizator}
+      Ldap__AutoCreateUsers: ${LDAP_AUTO_CREATE:-true}
+      Ldap__SyncOnLogin: ${LDAP_SYNC_ON_LOGIN:-true}
+      Ldap__DepartmentAttribute: ${LDAP_DEPARTMENT_ATTRIBUTE:-department}
+
+      # Validarea certificatului DC-ului IN CONTAINER.
+      #
+      # Pe Linux, biblioteca LDAP de dedesubt este OpenLDAP, iar ea - nu
+      # aplicatia - verifica certificatul, dupa variabilele LDAPTLS_*. Amprenta
+      # fixata (LDAP_CERT_THUMBPRINT) merge doar cand API-ul ruleaza pe Windows;
+      # in container se foloseste CA-ul (LDAP_CA_FILE), iar API-ul refuza sa
+      # porneasca daca cele doua variabile de mai jos nu corespund.
+      Ldap__ServerCertificateThumbprint: ${LDAP_CERT_THUMBPRINT:-}
+      Ldap__CaCertificatePath: ${LDAP_CA_FILE:-}
+      Ldap__AllowUntrustedCertificate: ${LDAP_ALLOW_UNTRUSTED_CERT:-false}
+
+      # Fara LDAP_CA_FILE, OpenLDAP foloseste magazinul de incredere al
+      # sistemului (potrivit pentru un DC cu certificat emis de o autoritate
+      # recunoscuta). "demand" = certificatul si numele din el se verifica
+      # obligatoriu; orice alta valoare e refuzata de API in Production.
+      LDAPTLS_CACERT: ${LDAP_CA_FILE:-/etc/ssl/certs/ca-certificates.crt}
+      LDAPTLS_REQCERT: ${LDAP_TLS_REQCERT:-demand}
+
       # In spatele unui reverse proxy: fara asta, toti utilizatorii ajung in
       # aceeasi galeata de rate limit, fiindca RemoteIpAddress e IP-ul proxy-ului.
       RateLimit__BehindReverseProxy: "false"
@@ -239,6 +280,9 @@ services:
       # absoluta sub /app/uploads/documents si se citesc in continuare de acolo.
       # Fara volum, un 'docker compose up --build' le-ar sterge.
       - api-uploads:/app/uploads
+      # Certificatul CA al controlerului de domeniu, daca se valideaza cu CA
+      # propriu (LDAP_CA_FILE=/app/certs/ad-ca.pem). Directorul poate ramane gol.
+      - ./certs:/app/certs:ro
 
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/api/health/live"]
@@ -247,8 +291,75 @@ services:
       retries: 3
       start_period: 20s
 
+  # ───────────────────────────────────────────────────────────────────────────
+  # Controler de domeniu Samba AD - DOAR pentru laborator
+  #
+  # Nu porneste la 'docker compose up': e legat de profilul "ldap".
+  #   docker compose --profile ldap up -d samba-ad
+  #
+  # Provizionarea domeniului si crearea OU-urilor, grupurilor si conturilor de
+  # test: scripts/samba-ad-setup.ps1 (un singur rand per comanda, PowerShell).
+  #
+  # De ce e nevoie de privilegii ridicate: Samba AD ruleaza propriul DNS, isi
+  # gestioneaza cheile Kerberos si scrie in /var/lib/samba. Exact de aceea
+  # containerul asta NU are ce cauta in productie - acolo, DC-ul e un server
+  # separat, administrat de altcineva.
+  #
+  # LDAPS: Samba isi genereaza singur certificatul la provizionare, in
+  # /var/lib/samba/private/tls/ (ca.pem, cert.pem, key.pem). Scoaterea CA-ului
+  # pentru API se face tot din scripts/samba-ad-setup.ps1.
+  # ───────────────────────────────────────────────────────────────────────────
+  samba-ad:
+    image: nowsci/samba-domain:latest
+    container_name: sgdm-samba-ad
+    profiles: ["ldap"]
+    restart: unless-stopped
+
+    # Numele containerului in retea trebuie sa fie EXACT numele din certificat,
+    # altfel validarea TLS esueaza chiar daca CA-ul e corect. API-ul foloseste
+    # acelasi nume in LDAP_HOST.
+    hostname: dc
+    domainname: ${LDAP_REALM:-sgdm.local}
+
+    privileged: true
+
+    environment:
+      DOMAIN: ${SAMBA_DOMAIN:-SGDM.LOCAL}
+      DOMAINPASS: ${SAMBA_ADMIN_PASSWORD:-SCHIMBA_MA}
+      DNSFORWARDER: ${SAMBA_DNS_FORWARDER:-1.1.1.1}
+      HOSTIP: ${SAMBA_HOST_IP:-}
+
+      # LDAP in clar pe 389 ramane inchis: chiar si in laborator, obisnuinta de
+      # a lucra fara TLS se muta apoi in productie.
+      INSECURELDAP: "false"
+
+      # Politica de complexitate a parolelor ramane pornita: un domeniu de test
+      # cu parole simple ascunde exact erorile care apar la primul cont real.
+      NOCOMPLEXITY: "false"
+
+    networks:
+      default:
+        aliases:
+          # Numele pe care il pune API-ul in LDAP_HOST.
+          - dc.${LDAP_REALM:-sgdm.local}
+
+    ports:
+      - "389:389"     # LDAP (inchis pentru bind, util pentru diagnosticare)
+      - "636:636"     # LDAPS - aici vorbeste API-ul
+      - "3268:3268"   # Global Catalog
+      - "3269:3269"   # Global Catalog peste TLS
+
+    volumes:
+      - samba-data:/var/lib/samba
+      - samba-config:/etc/samba/external
+      - /etc/localtime:/etc/localtime:ro
+
 volumes:
   minio-data:
+    driver: local
+  samba-data:
+    driver: local
+  samba-config:
     driver: local
   api-storage:
     driver: local

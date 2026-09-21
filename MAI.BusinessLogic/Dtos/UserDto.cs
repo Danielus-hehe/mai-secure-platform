@@ -29,6 +29,15 @@ namespace MAI.BusinessLogic.Dtos
         public bool IsLockedOut { get; set; }
         public DateTime? LockoutEndsAt { get; set; }
         public DateTime? LastLoginAt { get; set; }
+
+        /// <summary>Local (parola la noi) sau Ldap (parola în Active Directory).</summary>
+        public AuthProvider AuthProvider { get; set; } = Domain.Enums.AuthProvider.Local;
+
+        /// <summary>DN-ul din AD, afișat administratorului pentru conturile de domeniu.</summary>
+        public string? DirectoryDn { get; set; }
+
+        /// <summary>Ultima sincronizare a atributelor din AD.</summary>
+        public DateTime? DirectorySyncedAt { get; set; }
     }
 
     public class CreateUserDto

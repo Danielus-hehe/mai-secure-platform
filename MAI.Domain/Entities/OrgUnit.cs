@@ -43,6 +43,17 @@ namespace MAI.Domain.Entities
         public User? HeadUser { get; set; }
 
         /// <summary>
+        /// DN-ul unității organizatorice corespunzătoare din Active Directory,
+        /// dacă subdiviziunea a fost importată de acolo. Null pentru cele create
+        /// manual.
+        ///
+        /// Este cheia care face importul repetabil: la a doua rulare, o OU deja
+        /// importată se recunoaște după DN și se actualizează, în loc să apară
+        /// încă o dată cu același nume.
+        /// </summary>
+        public string? DirectoryDn { get; set; }
+
+        /// <summary>
         /// O subdiviziune desființată nu se șterge dacă e referită de documente
         /// distribuite: se dezactivează. Nu mai apare la alegerea destinatarilor
         /// și nu mai primește membri noi.

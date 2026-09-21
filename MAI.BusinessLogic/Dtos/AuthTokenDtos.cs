@@ -52,5 +52,22 @@ namespace MAI.BusinessLogic.Dtos
         /// privilegiate răspund 403 până la activarea 2FA și o nouă autentificare.
         /// </summary>
         public bool MfaEnrollmentRequired { get; set; }
+
+        /// <summary>
+        /// Cine a verificat parola: baza noastră (Local) sau domeniul (Ldap).
+        /// Frontend-ul ascunde formularul de schimbare a parolei pentru
+        /// conturile de domeniu - acolo parola se schimbă în AD.
+        /// </summary>
+        public AuthProvider AuthProvider { get; set; } = Domain.Enums.AuthProvider.Local;
+
+        /// <summary>
+        /// Parola din domeniu s-a schimbat după ultima împachetare a cheilor
+        /// private E2EE, deci blobul nu se mai poate descuia cu parola de azi.
+        /// Frontend-ul cere o singură dată parola veche și reîmpachetează.
+        ///
+        /// Fără semnalul acesta, utilizatorul ar vedea doar „parolă greșită” la
+        /// descuierea cheilor, imediat după un login reușit.
+        /// </summary>
+        public bool KeyRewrapRequired { get; set; }
     }
 }

@@ -24,6 +24,7 @@ import {
 } from 'react';
 import api from '../api/client';
 import { useAuth } from './AuthContext';
+import { rewrapKeysForNewPassword } from '../crypto/passwordChange';
 import {
     generateKeyBundle,
     unlockKeys,
@@ -46,6 +47,9 @@ interface ServerBundle extends PublishedKeyBundle {
     hasKeys: boolean;
     fingerprint?: string;
     keysCreatedAt?: string;
+    /** Cont de domeniu cu parola schimbată în AD după ultima împachetare. */
+    rewrapRequired?: boolean;
+    isDirectoryAccount?: boolean;
 }
 
 interface KeysContextValue {
@@ -58,8 +62,21 @@ interface KeysContextValue {
     myEncryptionPublicKey: CryptoKey | null;
     error: string | null;
 
+    /**
+     * Serverul a constatat că parola de domeniu s-a schimbat după ultima
+     * împachetare a cheilor. Descuierea cu parola de azi ar eșua, deci ecranul
+     * de deblocare cere direct parola veche.
+     */
+    rewrapRequired: boolean;
+
     generate: (password: string) => Promise<void>;
     unlock: (password: string) => Promise<void>;
+    /**
+     * Descuie blobul cu parola veche, îl reîncuie cu cea curentă și deschide
+     * sesiunea criptografică. Cheile publice rămân aceleași, deci fișierele
+     * primite până acum rămân accesibile.
+     */
+    rewrap: (oldPassword: string, currentPassword: string) => Promise<void>;
     lock: () => void;
     reload: () => Promise<void>;
 }
@@ -74,6 +91,7 @@ export function KeysProvider({ children }: { children: ReactNode }) {
     const [fingerprint, setFingerprint] = useState('');
     const [keys, setKeys] = useState<UnlockedKeys | null>(null);
     const [myEncryptionPublicKey, setMyEncryptionPublicKey] = useState<CryptoKey | null>(null);
+    const [rewrapRequired, setRewrapRequired] = useState(false);
 
     // Pachetul criptat, ca să nu-l cerem din nou de la server la fiecare încercare
     // de descuiere. Nu conține nimic exploatabil fără parolă.
@@ -84,6 +102,7 @@ export function KeysProvider({ children }: { children: ReactNode }) {
         setKeys(null);
         setMyEncryptionPublicKey(null);
         setFingerprint('');
+        setRewrapRequired(false);
         setStatus('locked');
     }, []);
 
@@ -106,6 +125,7 @@ export function KeysProvider({ children }: { children: ReactNode }) {
             }
 
             bundleRef.current = data;
+            setRewrapRequired(data.rewrapRequired === true);
             setFingerprint(data.fingerprint ?? (await keyFingerprint(data.publicKeyEncryption)));
             setStatus('locked');
         } catch (err) {
@@ -122,6 +142,7 @@ export function KeysProvider({ children }: { children: ReactNode }) {
             setKeys(null);
             setMyEncryptionPublicKey(null);
             setFingerprint('');
+            setRewrapRequired(false);
             setStatus('locked');
             return;
         }
@@ -156,6 +177,7 @@ export function KeysProvider({ children }: { children: ReactNode }) {
         const publicKey = await importEncryptionPublicKey(bundle.publicKeyEncryption);
 
         bundleRef.current = { ...bundle, hasKeys: true };
+        setRewrapRequired(false);
         setKeys(unlocked);
         setMyEncryptionPublicKey(publicKey);
         setFingerprint(await keyFingerprint(bundle.publicKeyEncryption));
@@ -163,6 +185,44 @@ export function KeysProvider({ children }: { children: ReactNode }) {
     }, []);
 
     // ── Descuiere ────────────────────────────────────────────────────────────
+
+    // ── Reîmpachetare după o schimbare de parolă în domeniu ──────────────
+
+    const rewrap = useCallback(async (oldPassword: string, currentPassword: string) => {
+        setError(null);
+
+        let bundle = bundleRef.current;
+        if (!bundle) {
+            const { data } = await api.get<ServerBundle>('/Keys/me');
+            if (!data.hasKeys) {
+                setStatus('absent');
+                throw new Error('Contul nu are chei înregistrate.');
+            }
+            bundle = data;
+            bundleRef.current = data;
+        }
+
+        // Aruncă dacă parola veche e greșită: eticheta AES-GCM nu se verifică,
+        // deci nu ajunge niciodată pe server un blob corupt - serverul nu l-ar
+        // putea deosebi de unul valid, iar cheile s-ar pierde definitiv.
+        const payload = await rewrapKeysForNewPassword(oldPassword, currentPassword, bundle);
+
+        // Serverul cere dovada parolei CURENTE. Pentru un cont de domeniu, o
+        // verifică printr-un bind LDAPS, nu cu Argon2id.
+        await api.patch('/Keys/rewrap', { ...payload, currentPassword });
+
+        const updated: ServerBundle = { ...bundle, ...payload, rewrapRequired: false };
+        bundleRef.current = updated;
+        setRewrapRequired(false);
+
+        const unlocked = await unlockKeys(currentPassword, updated);
+        const publicKey = await importEncryptionPublicKey(updated.publicKeyEncryption);
+
+        setKeys(unlocked);
+        setMyEncryptionPublicKey(publicKey);
+        setFingerprint(updated.fingerprint ?? (await keyFingerprint(updated.publicKeyEncryption)));
+        setStatus('unlocked');
+    }, []);
 
     const unlock = useCallback(async (password: string) => {
         setError(null);
@@ -196,12 +256,15 @@ export function KeysProvider({ children }: { children: ReactNode }) {
             keys,
             myEncryptionPublicKey,
             error,
+            rewrapRequired,
             generate,
             unlock,
+            rewrap,
             lock,
             reload,
         }),
-        [status, fingerprint, keys, myEncryptionPublicKey, error, generate, unlock, lock, reload]
+        [status, fingerprint, keys, myEncryptionPublicKey, error, rewrapRequired,
+         generate, unlock, rewrap, lock, reload]
     );
 
     return <KeysContext.Provider value={value}>{children}</KeysContext.Provider>;

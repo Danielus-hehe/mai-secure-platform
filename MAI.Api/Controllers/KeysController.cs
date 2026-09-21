@@ -1,4 +1,5 @@
 ﻿using MAI.Api.Security;
+using MAI.Api.Services;
 using MAI.BusinessLogic.Interfaces;
 using MAI.DataAccessLayer;
 using MAI.Domain.Entities;
@@ -27,12 +28,16 @@ namespace MAI.Api.Controllers
     public class KeysController : ControllerBase
     {
         private readonly AppDbContext _context;
-        private readonly IPasswordHasher _passwordHasher;
+        private readonly IUserCredentialVerifier _credentials;
 
-        public KeysController(AppDbContext context, IPasswordHasher passwordHasher)
+        public KeysController(AppDbContext context, IUserCredentialVerifier credentials)
         {
-            _context        = context;
-            _passwordHasher = passwordHasher;
+            _context = context;
+
+            // Dovada parolei nu mai trece direct prin Argon2: pentru un cont de
+            // domeniu, hash-ul local nu există, iar verificarea se face printr-un
+            // bind LDAPS. Vezi IUserCredentialVerifier.
+            _credentials = credentials;
         }
 
         private Guid CurrentUserId =>
@@ -67,6 +72,12 @@ namespace MAI.Api.Controllers
                 suite                   = user.CryptoSuite,
                 keysCreatedAt           = user.KeysCreatedAt,
                 fingerprint             = Fingerprint(user.PublicKeyEncryption),
+
+                // Contul e de domeniu și parola s-a schimbat în AD după ultima
+                // împachetare: descuierea cu parola de azi ar eșua, deci
+                // frontend-ul cere direct parola veche.
+                rewrapRequired          = user.KeyRewrapRequired,
+                isDirectoryAccount      = user.IsDirectoryAccount,
             });
         }
 
@@ -99,12 +110,25 @@ namespace MAI.Api.Controllers
             if (user is null)
             {
                 // Consumă același timp de calcul ca o verificare reală.
-                await _passwordHasher.SimulateVerificationAsync(ct);
+                await _credentials.SimulateAsync(ct);
                 return Ok(new { valid = false });
             }
 
-            var result = await _passwordHasher.VerifyPasswordAsync(dto.Password, user.PasswordHash, ct);
-            return Ok(new { valid = result != PasswordVerificationResult.Failed });
+            var result = await _credentials.VerifyAsync(user, dto.Password, ct);
+
+            if (result == CredentialCheck.DirectoryUnavailable)
+            {
+                // „Nu știu” nu se raportează ca „parolă greșită”: utilizatorul ar
+                // crede că a tastat aiurea și ar încerca la nesfârșit, în loc să
+                // afle că problema e la serviciul de domeniu.
+                Response.Headers.RetryAfter = "30";
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+                {
+                    message = "Serviciul de domeniu nu răspunde, deci parola nu poate fi verificată acum.",
+                });
+            }
+
+            return Ok(new { valid = result == CredentialCheck.Valid });
         }
 
         // ─────────────────────────────────────────────────────────────────────
@@ -143,10 +167,19 @@ namespace MAI.Api.Controllers
 
             try
             {
-                var verification = await _passwordHasher.VerifyPasswordAsync(
-                    dto.CurrentPassword, user.PasswordHash, ct);
+                var verification = await _credentials.VerifyAsync(user, dto.CurrentPassword, ct);
 
-                if (verification == PasswordVerificationResult.Failed)
+                if (verification == CredentialCheck.DirectoryUnavailable)
+                {
+                    Response.Headers.RetryAfter = "30";
+                    return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+                    {
+                        message = "Serviciul de domeniu nu răspunde. Cheile nu au fost înregistrate; " +
+                                  "reîncercați în câteva minute.",
+                    });
+                }
+
+                if (verification == CredentialCheck.Invalid)
                 {
                     _context.AuditLogs.Add(new AuditLog
                     {
@@ -192,6 +225,11 @@ namespace MAI.Api.Controllers
             user.KeyWrapIv               = dto.WrapIv;
             user.CryptoSuite             = dto.Suite;
             user.KeysCreatedAt           = DateTime.UtcNow;
+
+            // Reperul față de care se compară pwdLastSet din AD. Fără el, o
+            // schimbare a parolei de domeniu nu s-ar putea deosebi de „cheile
+            // n-au existat niciodată”.
+            user.KeysWrappedAt           = DateTime.UtcNow;
 
             _context.AuditLogs.Add(new AuditLog
             {
@@ -240,10 +278,19 @@ namespace MAI.Api.Controllers
 
             try
             {
-                var verification = await _passwordHasher.VerifyPasswordAsync(
-                    dto.CurrentPassword, user.PasswordHash, ct);
+                var verification = await _credentials.VerifyAsync(user, dto.CurrentPassword, ct);
 
-                if (verification == PasswordVerificationResult.Failed)
+                if (verification == CredentialCheck.DirectoryUnavailable)
+                {
+                    Response.Headers.RetryAfter = "30";
+                    return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+                    {
+                        message = "Serviciul de domeniu nu răspunde. Cheile NU au fost modificate; " +
+                                  "reîncercați în câteva minute.",
+                    });
+                }
+
+                if (verification == CredentialCheck.Invalid)
                 {
                     _context.AuditLogs.Add(new AuditLog
                     {
@@ -282,12 +329,19 @@ namespace MAI.Api.Controllers
             user.KeyDerivationIterations = dto.KeyDerivationIterations;
             user.KeyWrapIv               = dto.WrapIv;
 
+            // Momentul noii împachetări. Pentru conturile de domeniu, asta e
+            // exact ce oprește cererea repetată de reîmpachetare la fiecare
+            // autentificare de după schimbarea parolei în AD.
+            user.KeysWrappedAt           = DateTime.UtcNow;
+
             _context.AuditLogs.Add(new AuditLog
             {
                 UserId    = user.Id,
                 Username  = CurrentUsername,
                 Action    = AuditAction.UserUpdated,
-                Details   = "Chei private reimpachetate cu parola noua",
+                Details   = user.IsDirectoryAccount
+                    ? "Chei private reimpachetate cu parola de domeniu curenta"
+                    : "Chei private reimpachetate cu parola noua",
                 IpAddress = CallerIp,
                 Timestamp = DateTime.UtcNow,
             });

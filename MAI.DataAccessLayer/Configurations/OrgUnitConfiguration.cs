@@ -14,6 +14,16 @@ namespace MAI.DataAccessLayer.Configurations
             builder.Property(u => u.Name).IsRequired().HasMaxLength(200);
             builder.Property(u => u.Code).HasMaxLength(20);
 
+            // DN-ul OU-ului din AD, dacă subdiviziunea a fost importată. Unic:
+            // același OU nu poate ajunge de două ori în structură, oricâte
+            // importuri se rulează.
+            builder.Property(u => u.DirectoryDn).HasMaxLength(512);
+
+            builder.HasIndex(u => u.DirectoryDn)
+                .IsUnique()
+                .HasFilter("\"DirectoryDn\" IS NOT NULL")
+                .HasDatabaseName("UX_OrgUnits_DirectoryDn");
+
             // Restrict: o subdiviziune cu subunități nu se poate șterge. Ștergerea
             // în cascadă a unui arbore întreg dintr-un singur click ar lăsa
             // utilizatorii neîncadrați și documentele fără raport corect.

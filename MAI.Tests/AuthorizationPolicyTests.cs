@@ -118,6 +118,13 @@ public class AuthorizationPolicyTests
             // de unică folosință, valabil PASSWORD_RESET_TOKEN_MINUTES.
             "AuthController.CheckPasswordReset",
             "AuthController.ResetPasswordWithToken",
+            // Pagina de autentificare întreabă, înainte de login, dacă se
+            // acceptă conturi de domeniu și sub ce nume NetBIOS. Răspunsul e
+            // constant (vine din configurare) și nu conține nimic despre
+            // utilizatori: nici conturi, nici DN-uri, nici starea serverului AD.
+            // Fără indicația asta, oamenii încearcă formate greșite ale numelui
+            // până își blochează singuri contul.
+            "DirectoryController.LoginInfo",
         };
 
         var anonime = Controllers()

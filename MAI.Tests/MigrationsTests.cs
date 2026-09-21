@@ -120,6 +120,31 @@ public class MigrationsTests
     }
 
     [Fact]
+    public void UltimaMigrare_ContineAutentificareaPrinDomeniu()
+    {
+        // Runda LDAP/AD: providerul, identificatorii din domeniu, reperul pentru
+        // reîmpachetarea cheilor E2EE și DN-ul OU-ului importat.
+        var last = MigrationTypes()
+            .Select(t => (Type: t, Id: t.GetCustomAttribute<MigrationAttribute>()!.Id))
+            .OrderBy(x => x.Id, StringComparer.Ordinal)
+            .Last();
+
+        var model = ((Migration)Activator.CreateInstance(last.Type)!).TargetModel;
+
+        var user = model.FindEntityType("MAI.Domain.Entities.User");
+        Assert.NotNull(user);
+        Assert.NotNull(user!.FindProperty("AuthProvider"));
+        Assert.NotNull(user.FindProperty("DirectoryObjectId"));
+        Assert.NotNull(user.FindProperty("DirectoryDn"));
+        Assert.NotNull(user.FindProperty("DirectoryPasswordSetAt"));
+        Assert.NotNull(user.FindProperty("KeysWrappedAt"));
+
+        var orgUnit = model.FindEntityType("MAI.Domain.Entities.OrgUnit");
+        Assert.NotNull(orgUnit);
+        Assert.NotNull(orgUnit!.FindProperty("DirectoryDn"));
+    }
+
+    [Fact]
     public void Snapshotul_CorespundeModeluluiCurent()
     {
         // Echivalentul lui „dotnet ef migrations has-pending-model-changes”, fără

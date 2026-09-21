@@ -62,6 +62,12 @@ namespace MAI.Api.Services
                 MfaEnrollmentRequired = _twoFactor.RequiredForPrivilegedRoles
                                         && user.Role >= UserRole.SefDirectie
                                         && !mfa,
+
+                // Calculate din entitate, deci corecte și la /refresh: dacă
+                // parola de domeniu se schimbă în timpul sesiunii, semnalul
+                // apare la prima reîmprospătare, nu abia la următorul login.
+                AuthProvider          = user.AuthProvider,
+                KeyRewrapRequired     = user.KeyRewrapRequired,
             };
 
             return new TokenIssueResult(response, HashOpaqueToken(refreshToken), refreshExpires);
