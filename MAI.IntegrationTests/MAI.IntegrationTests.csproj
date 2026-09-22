@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net8.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <IsPackable>false</IsPackable>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- xUnit + runner -->
+        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+        <PackageReference Include="xunit" Version="2.9.2" />
+        <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+            <PrivateAssets>all</PrivateAssets>
+        </PackageReference>
+
+        <!-- WebApplicationFactory - host-ul real, fara Kestrel -->
+        <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.11" />
+
+        <!-- Testcontainers: PostgreSQL real, pornit si oprit automat -->
+        <PackageReference Include="Testcontainers.PostgreSql" Version="3.10.0" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\MAI.Api\MAI.Api.csproj" />
+        <ProjectReference Include="..\MAI.BusinessLogic\MAI.BusinessLogic.csproj" />
+        <ProjectReference Include="..\MAI.Domain\MAI.Domain.csproj" />
+        <ProjectReference Include="..\MAI.DataAccessLayer\MAI.DataAccessLayer.csproj" />
+    </ItemGroup>
+
+</Project>
