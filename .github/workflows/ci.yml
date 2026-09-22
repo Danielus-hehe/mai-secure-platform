@@ -87,16 +87,27 @@ jobs:
       - name: Build
         run: dotnet build MAI-Secure-Platform.sln --no-restore -c Release
 
-      - name: Test
+      - name: Teste unitare
         run: >
-          dotnet test MAI-Secure-Platform.sln
+          dotnet test MAI.Tests/MAI.Tests.csproj
           --no-build -c Release
-          --logger "trx;LogFileName=results.trx"
+          --logger "trx;LogFileName=unit.trx"
           --results-directory TestResults
 
-      # Rezultatele rămân descărcabile din pagina rulării, inclusiv când testele
-      # pică - exact atunci sunt utile.
-      - name: Publică rezultatele testelor
+      # Testele de integrare pornesc un PostgreSQL real cu Testcontainers.
+      # Docker e disponibil pe ubuntu-latest; containerul se creeaza si se
+      # opreste automat. Rulam separat ca un esec unitar sa nu impiedice
+      # si diagnosticul de integrare.
+      - name: Teste de integrare (Testcontainers + PostgreSQL)
+        run: >
+          dotnet test MAI.IntegrationTests/MAI.IntegrationTests.csproj
+          --no-build -c Release
+          --logger "trx;LogFileName=integration.trx"
+          --results-directory TestResults
+
+      # Rezultatele raman descarcabile din pagina rularii, inclusiv cand testele
+      # pica - exact atunci sunt utile.
+      - name: Publica rezultatele testelor
         if: always()
         uses: actions/upload-artifact@v4
         with:

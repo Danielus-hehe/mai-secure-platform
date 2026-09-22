@@ -854,3 +854,8 @@ finally
     // explică de ce s-a oprit procesul - se poate pierde.
     Log.CloseAndFlush();
 }
+
+// ─── Testele de integrare au nevoie de tipul Program ca sa porneasca ────────
+// host-ul cu WebApplicationFactory<Program>. Top-level statements genereaza o
+// clasa Program interna; declaratia partiala de mai jos o face publica.
+public partial class Program { }
