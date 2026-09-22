@@ -2,7 +2,7 @@
 
 ## Scopul proiectului
 
-SGDM este o platforma de intranet dezvoltata pentru **Ministerul Afacerilor Interne al Republicii Moldova**, in cadrul **practicii de productie** la UTM FCIM, programul Securitate Informationala, anul II, 2026.
+SGDM este o platforma de intranet dezvoltata pentru **Ministerul Afacerilor Interne al Republicii Moldova**, in cadrul **practicii de productie** la UTM FCIM, programul Securitate Informationala, anul III, 2026.
 
 **Problema rezolvata:** angajatii MAI transmit documente sensibile intre subdiviziuni — rapoarte, ordine interne, procese-verbale — pe canale care nu garanteaza confidentialitatea fata de administratorii de sistem. Un server compromis sau un backup scurs expune tot continutul. SGDM rezolva asta prin criptare **end-to-end** direct in browser: serverul transporta si stocheaza cifrotext pe care nu il poate citi.
 

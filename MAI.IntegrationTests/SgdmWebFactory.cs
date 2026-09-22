@@ -24,6 +24,31 @@ namespace MAI.IntegrationTests;
 /// </summary>
 public sealed class SgdmWebFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
+    // Program.cs validates configuration before WebApplicationFactory.ConfigureWebHost()
+    // gets a chance to apply UseSetting()/ConfigureServices(). Therefore the values
+    // required only to let the real host build must be present in the environment
+    // before Program starts. ConfigureWebHost() below still replaces the actual
+    // database and storage services with the test implementations.
+    static SgdmWebFactory()
+    {
+        Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Development");
+
+        // Valid, non-production test values. The database value only has to pass
+        // Program.cs validation; the actual Testcontainers connection string is
+        // injected later in ConfigureServices().
+        Environment.SetEnvironmentVariable(
+            "ConnectionStrings__DefaultConnection",
+            "Host=127.0.0.1;Port=5432;Database=sgdm_test;Username=test;Password=test");
+        Environment.SetEnvironmentVariable(
+            "MAI_JWT_KEY",
+            "integration-test-jwt-key-0123456789-abcdefghijklmnopqrstuvwxyz");
+
+        // Prevent startup validation from requiring MinIO/master encryption keys.
+        // The registered storage is replaced with InMemoryFileStorage below.
+        Environment.SetEnvironmentVariable("Storage__Provider", "Local");
+        Environment.SetEnvironmentVariable("StorageEncryption__Enabled", "false");
+    }
+
     private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder()
         .WithImage("postgres:17-alpine")
         .WithDatabase("sgdm_test")
