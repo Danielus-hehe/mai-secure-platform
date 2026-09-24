@@ -41,7 +41,8 @@
  * verificata cu Argon2id). Un server compromis ar putea, teoretic, sa derive
  * cheia de impachetare din ea in acel moment. Varianta completa foloseste
  * derivari separate - un authHash trimis la server si o cheie de impachetare
- * care nu pleaca niciodata din browser. Vezi sectiunea de upgrade din README.
+ * care nu pleaca niciodata din browser. Limitarea si remedierea planificata:
+ * README, sectiunea 1.3.
  */
 
 // ── Parametri ────────────────────────────────────────────────────────────────

@@ -2,6 +2,7 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using MAI.Api.Security;
 using MAI.BusinessLogic.Dtos;
 using MAI.BusinessLogic.Security;
 using MAI.Domain.Entities;
@@ -133,6 +134,17 @@ namespace MAI.Api.Services
                 // când TwoFactor:RequiredForPrivilegedRoles este activ.
                 new("amr", mfa ? "mfa" : "pwd"),
             };
+
+            // Parola stabilită de administrator: PasswordChangeRequiredFilter
+            // blochează cu acest token tot API-ul, în afara ecranului de
+            // schimbare a parolei. Claim-ul lipsește complet când nu e nevoie,
+            // nu apare cu o valoare „false” - filtrul caută doar prezența lui.
+            if (user.MustChangePassword)
+            {
+                claims.Add(new Claim(
+                    PasswordChangeRequiredFilter.ClaimType,
+                    PasswordChangeRequiredFilter.ClaimValue));
+            }
 
             // Issuer și Audience sunt emise explicit pentru că sunt și validate
             // explicit la primire (vezi Program.cs). Un token fără ele ar fi

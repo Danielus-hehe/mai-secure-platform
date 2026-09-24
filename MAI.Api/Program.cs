@@ -57,6 +57,11 @@ try
     // de configurare.
     var isRecryptCommand = StorageMaintenanceCommand.IsRecrypt(args);
 
+    // demo:seed-files la fel: configurarea completă (baza, depozitul criptat),
+    // fără server web. Scrie fișierele documentelor din 900_seed_demo.sql.
+    var isDemoSeedCommand = DemoSeedFilesCommand.IsSeedFiles(args);
+    var isMaintenanceCommand = isRecryptCommand || isDemoSeedCommand;
+
     // ─── .env local (o singură sursă de configurare cu Docker Compose) ─────────
     // Rulat înainte de CreateBuilder: provider-ul de variabile de mediu își face
     // instantaneul la construire. În container nu face nimic (vezi DotEnvLoader).
@@ -69,7 +74,7 @@ try
             dotEnv.Path, dotEnv.Applied, string.Join(", ", dotEnv.Keys));
     }
 
-    var builder = WebApplication.CreateBuilder(isRecryptCommand ? Array.Empty<string>() : args);
+    var builder = WebApplication.CreateBuilder(isMaintenanceCommand ? Array.Empty<string>() : args);
 
     // ─── Loguri structurate (Serilog, JSON pe consolă) ─────────────────────────
     // Un eveniment = o linie JSON, cu proprietățile separate de mesaj:
@@ -127,6 +132,13 @@ try
 
     builder.Services.AddControllers(options =>
     {
+        // Parola temporară (stabilită de administrator) blochează tot API-ul
+        // autentificat, în afara endpointurilor de care are nevoie ecranul de
+        // schimbare a parolei. Înregistrat ÎNAINTEA filtrului 2FA: filtrele de
+        // același tip rulează în ordinea adăugării, iar un cont cu parolă
+        // temporară trebuie să afle întâi asta. Vezi PasswordChangeRequiredFilter.
+        options.Filters.Add<PasswordChangeRequiredFilter>();
+
         // 2FA obligatoriu pentru operațiile privilegiate, dacă
         // TwoFactor:RequiredForPrivilegedRoles = true. Filtrul se aplică doar
         // endpointurilor care cer explicit un rol; restul aplicației, inclusiv
@@ -224,7 +236,29 @@ try
     if (!storageEncryption.Enabled && PlaceholderSecrets.IsPlaceholder(storageEncryption.MasterKeys))
         storageEncryption.MasterKeys = string.Empty;
 
+    // Fără criptare și fără chei, citirea în clar nu e o relaxare, ci singurul
+    // mod de lucru (EncryptingFileStorage citește oricum în clar când criptarea
+    // e dezactivată). Implicitul STORAGE_ENCRYPTION_ALLOW_PLAINTEXT a devenit
+    // false; fără linia asta, STORAGE_ENCRYPTION_ENABLED=false (teste de
+    // integrare, instalări fără criptare) ar opri pornirea în Validate().
+    if (!storageEncryption.Enabled && !storageEncryption.HasKeys)
+        storageEncryption.AllowPlaintextRead = true;
+
     storageEncryption.Validate();
+
+    // Citirea în clar e o punte de migrare, nu o stare de funcționare: cât e
+    // activă, cine poate scrie în MinIO poate înlocui un document criptat cu
+    // unul în clar, iar API-ul îl livrează fără să observe. Nu oprim pornirea
+    // (pe un sistem care încă migrează, documentele vechi ar deveni ilizibile),
+    // dar în afara dezvoltării o semnalăm la fiecare pornire.
+    if (!isDevelopment && storageEncryption.Enabled && storageEncryption.AllowPlaintextRead)
+    {
+        Log.Warning(
+            "StorageEncryption:AllowPlaintextRead=true in mediul {Environment}: fisierele in clar din " +
+            "documents/ si internal/ sunt livrate fara verificare. Rulati storage:recrypt, apoi " +
+            "STORAGE_ENCRYPTION_ALLOW_PLAINTEXT=false in .env.",
+            builder.Environment.EnvironmentName);
+    }
 
     var masterKeyRing = storageEncryption.HasKeys
         ? MasterKeyRing.Parse(storageEncryption.MasterKeys, storageEncryption.ActiveKeyId)
@@ -717,6 +751,12 @@ try
     if (isRecryptCommand)
     {
         Environment.ExitCode = await StorageMaintenanceCommand.RunRecryptAsync(app.Services, args);
+        return;
+    }
+
+    if (isDemoSeedCommand)
+    {
+        Environment.ExitCode = await DemoSeedFilesCommand.RunAsync(app.Services);
         return;
     }
 

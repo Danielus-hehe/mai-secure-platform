@@ -19,14 +19,18 @@ interface PagedTransfers {
 }
 
 export default function NotificationsDropdown() {
-    const { isAuthenticated } = useAuth();
+    const { isAuthenticated, user } = useAuth();
+
+    // Cu parola temporară, lista de transferuri e refuzată de server până la
+    // schimbarea parolei (PasswordChangeRequiredFilter).
+    const canFetch = isAuthenticated && !user?.mustChangePassword;
     const [open,     setOpen]     = useState(false);
     const [notifs,   setNotifs]   = useState<Notif[]>([]);
     const [readIds,  setReadIds]  = useState<Set<string>>(new Set());
     const ref = useRef<HTMLDivElement>(null);
 
     const fetchPending = useCallback(async () => {
-        if (!isAuthenticated) return;
+        if (!canFetch) return;
         try {
             const { data } = await api.get<PagedTransfers>('/Transfers', {
                 params: {
@@ -40,7 +44,7 @@ export default function NotificationsDropdown() {
         } catch {
             // Esec silentios: o notificare lipsa nu merita un toast de eroare.
         }
-    }, [isAuthenticated]);
+    }, [canFetch]);
 
     useEffect(() => { void fetchPending(); }, [fetchPending]);
 
