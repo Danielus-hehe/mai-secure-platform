@@ -83,18 +83,21 @@ public class ConcurrencyModelTests
         Assert.Equal("\"PreviousRefreshTokenHash\" IS NOT NULL", index.GetFilter());
     }
 
-    [Fact]
-    public void UltimaMigrare_ContineControlulDeConcurenta_SiDurataSesiunii()
-    {
-        var last = typeof(AppDbContext).Assembly.GetTypes()
+    private static IReadOnlyList<(Type Type, string Id)> Migrations() =>
+        typeof(AppDbContext).Assembly.GetTypes()
             .Where(t => t is { IsClass: true, IsAbstract: false } && typeof(Migration).IsAssignableFrom(t))
             .Select(t => (Type: t, Id: t.GetCustomAttribute<MigrationAttribute>()!.Id))
             .OrderBy(x => x.Id, StringComparer.Ordinal)
-            .Last();
+            .ToList();
 
-        Assert.Equal("20260924120000_ConcurrencyAndSessionLifetime", last.Id);
+    [Fact]
+    public void MigrareaDeConcurenta_ContineTokenurile_SiDurataSesiunii()
+    {
+        // Căutată după Id, nu „ultima”: după ea mai pot veni migrări (prima a
+        // fost AddMissingDocumentKeywords), iar testul trebuie să rămână valabil.
+        var migration = Migrations().Single(m => m.Id == "20260924120000_ConcurrencyAndSessionLifetime");
 
-        var model   = ((Migration)Activator.CreateInstance(last.Type)!).TargetModel!;
+        var model   = ((Migration)Activator.CreateInstance(migration.Type)!).TargetModel!;
         var session = model.FindEntityType("MAI.Domain.Entities.UserSession")!;
 
         Assert.NotNull(session.FindProperty("AbsoluteExpiresAt"));
@@ -102,6 +105,25 @@ public class ConcurrencyModelTests
         Assert.NotNull(session.FindProperty("Version"));
         Assert.NotNull(model.FindEntityType("MAI.Domain.Entities.User")!.FindProperty("Version"));
         Assert.NotNull(model.FindEntityType("MAI.Domain.Entities.Document")!.FindProperty("Version"));
+    }
+
+    [Fact]
+    public void ColoanaKeywords_EsteCreataDeOMigrare()
+    {
+        // Documents.Keywords a stat în model fără nicio migrare care să o creeze:
+        // pe o bază nouă, publicarea unui document dădea 500. Testul fixează
+        // repararea: migrarea există și modifică tabela Documents.
+        var migration = Migrations().SingleOrDefault(m => m.Id == "20260924130000_AddMissingDocumentKeywords");
+        Assert.NotNull(migration.Type);
+
+        var instance = (Migration)Activator.CreateInstance(migration.Type)!;
+        var sql = instance.UpOperations
+            .OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.SqlOperation>()
+            .Select(o => o.Sql)
+            .Single();
+
+        Assert.Contains("\"Keywords\"", sql);
+        Assert.Contains("ADD COLUMN IF NOT EXISTS", sql);
     }
 }
 

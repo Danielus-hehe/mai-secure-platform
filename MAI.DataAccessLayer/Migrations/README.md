@@ -55,6 +55,7 @@ deci îl poți rula pe o bază parțial actualizată fără să se repete nimic.
 | `20260921120000_OrgLevels` | Niveluri configurabile ale structurii (`OrgLevels`); rangurile subdiviziunilor trec de la 1/2/3 la 100/200/300, ca niveluri noi să poată fi inserate între cele existente |
 | `20260922120000_LdapDirectoryAuthentication` | Autentificare prin Active Directory: `Users.AuthProvider`, identificatorii din domeniu, `KeysWrappedAt`; `OrgUnits.DirectoryDn` |
 | `20260924120000_ConcurrencyAndSessionLifetime` | Index unic `(DocumentId, VersionNumber)` pe `DocumentVersions`; `UserSessions.AbsoluteExpiresAt` (durata absolută a sesiunii) și `PreviousRefreshTokenHash` (detectarea refolosirii tokenului). Tokenurile de concurență folosesc coloana de sistem `xmin`, deci nu adaugă coloane. Migrarea se oprește cu mesaj explicit dacă există deja versiuni duplicate |
+| `20260924130000_AddMissingDocumentKeywords` | Coloana `Documents.Keywords`, prezentă în model din `AddRefreshToken` dar creată de nicio migrare (venea din scripturile SQL vechi). Pe o bază nouă, publicarea unui document dădea 500. Idempotentă: pe o bază unde coloana există, nu schimbă nimic |
 
 ---
 
