@@ -22,6 +22,7 @@ import {
     useState,
     type ReactNode,
 } from 'react';
+import axios from 'axios';
 import api from '../api/client';
 import { useAuth } from './AuthContext';
 import { rewrapKeysForNewPassword } from '../crypto/passwordChange';
@@ -129,6 +130,19 @@ export function KeysProvider({ children }: { children: ReactNode }) {
             setFingerprint(data.fingerprint ?? (await keyFingerprint(data.publicKeyEncryption)));
             setStatus('locked');
         } catch (err) {
+            // 401 aici nu e o eroare a cheilor: sesiunea salvată în browser nu
+            // mai e valabilă (a trecut durata absolută a sesiunii, a fost
+            // închisă din altă filă sau de administrator, ori tokenul a fost
+            // detectat ca refolosit). client.ts a încercat deja refresh-ul și a
+            // deconectat utilizatorul, care ajunge pe pagina de login. Mesajul
+            // „serverul nu a putut fi contactat” ar fi fost fals, iar eroarea
+            // roșie din consolă ar fi arătat ca o defecțiune.
+            if (axios.isAxiosError(err) && err.response?.status === 401) {
+                bundleRef.current = null;
+                setStatus('locked');
+                return;
+            }
+
             console.error('Nu s-a putut citi pachetul de chei:', err);
             setError('Serverul nu a putut fi contactat pentru pachetul de chei.');
             setStatus('error');

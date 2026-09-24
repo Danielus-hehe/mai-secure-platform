@@ -13,6 +13,7 @@ import api from '../../api/client';
 import { apiErrorMessage } from '../../api/errors';
 import { rewrapKeysForNewPassword, type RewrapPayload } from '../../crypto/passwordChange';
 import SessionsPanel from '../../components/security/SessionsPanel';
+import TwoFactorSettings from '../../components/security/TwoFactorSettings';
 import type { PublishedKeyBundle } from '../../crypto/E2ee';
 
 interface ServerBundle extends PublishedKeyBundle {
@@ -196,12 +197,17 @@ export default function ProfilePage() {
                             Parola este stocată ca hash Argon2id. Fișierele sunt criptate end-to-end:
                             serverul nu poate citi conținutul transferurilor.
                         </p>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {/*
+                          Doar mecanisme fixe, identice pentru orice cont. Starea 2FA
+                          nu mai stă aici: era scrisă de mână „dezactivat” chiar și
+                          pentru conturile care îl aveau activ. Starea reală, cu
+                          butonul de activare, e în cardul de mai jos.
+                        */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                             {[
                                 { label: 'Hash parolă',    value: 'Argon2id',            tone: 'text-green-600' },
                                 { label: 'Token acces',    value: 'JWT, 15 min',         tone: 'text-green-600' },
                                 { label: 'Criptare fișiere', value: 'AES-256-GCM + RSA', tone: 'text-green-600' },
-                                { label: 'Autentificare',  value: '2FA dezactivat',      tone: 'text-amber-600' },
                             ].map(({ label, value, tone }) => (
                                 <div key={label} className="rounded-xl bg-mai-50 dark:bg-mai-900 px-4 py-3">
                                     <p className="text-[11px] text-mai-400 uppercase tracking-wide">{label}</p>
@@ -210,6 +216,14 @@ export default function ProfilePage() {
                             ))}
                         </div>
                     </div>
+
+                    {/*
+                      Autentificarea în doi pași. Componenta exista de la runda 2FA,
+                      dar nu fusese montată în nicio pagină, deci nu avea de unde
+                      fi activată. Funcționează și pentru conturile de domeniu:
+                      al doilea factor rămâne al aplicației, oricare ar fi providerul.
+                    */}
+                    <TwoFactorSettings />
 
                     {/*
                       Schimbarea parolei există doar pentru conturile locale.

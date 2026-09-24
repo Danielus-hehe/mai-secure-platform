@@ -152,6 +152,28 @@ namespace MAI.Api.Tools
                     $"jurnal UPDATE={Yes(report.CanUpdateAudit)}, jurnal DELETE={Yes(report.CanDeleteAudit)}, " +
                     $"istoric migrari scriere={Yes(report.CanWriteMigrationHistory)}.");
 
+                if (report.RowSecurityDisabled.Count > 0)
+                {
+                    // O singură dată pe o bază venită de pe Supabase; la rulările
+                    // următoare lista e goală.
+                    Console.WriteLine(
+                        $"Row Level Security dezactivat (activ fara nicio politica, ramas de pe Supabase): " +
+                        string.Join(", ", report.RowSecurityDisabled));
+                }
+
+                if (report.RowSecurityWithPolicies.Count > 0)
+                {
+                    // Politicile se evaluează pentru rolul aplicației, care nu le
+                    // cunoaște: rezultatul ar fi rânduri invizibile sau INSERT-uri
+                    // refuzate, adică exact un login cu 500. Mai bine oprit aici,
+                    // cu numele tabelelor, decât descoperit la prima cerere.
+                    Console.Error.WriteLine(
+                        "db:migrate: tabele cu Row Level Security si politici: " +
+                        string.Join(", ", report.RowSecurityWithPolicies) +
+                        ". Aplicatia nu foloseste RLS; stergeti politicile (DROP POLICY) sau dezactivati RLS pe ele.");
+                    return 1;
+                }
+
                 // Verificarea finală se face pe drepturile efective, nu pe faptul că
                 // instrucțiunile au rulat: un rol moștenit sau un GRANT manual făcut
                 // cândva ar putea anula REVOKE-ul fără nicio eroare.

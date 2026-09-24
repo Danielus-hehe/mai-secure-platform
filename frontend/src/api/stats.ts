@@ -180,3 +180,34 @@ export async function runExpirationJob(): Promise<RunExpirationResult> {
     const { data } = await api.post<RunExpirationResult>('/Stats/expiration/run');
     return data;
 }
+// ── GET /api/Stats/two-factor (panoul de administrare) ──────────────────────
+//
+// Cine are și cine nu are al doilea factor activat, doar conturile active.
+// Un șef de direcție primește doar oamenii subdiviziunii lui.
+
+export interface TwoFactorPerson {
+    id: string;
+    username: string;
+    fullName: string | null;
+    /** Numele din backend: "Administrator" | "SefDirectie" | "Utilizator". */
+    role: string;
+    unit: string | null;
+    isDirectoryAccount: boolean;
+    enabled: boolean;
+    enrolledAt: string | null;
+}
+
+export interface TwoFactorCoverage {
+    total: number;
+    enabledCount: number;
+    disabledCount: number;
+    /** Conturi privilegiate fără 2FA: blocate dacă se activează obligația. */
+    privilegedWithoutCount: number;
+    enabled: TwoFactorPerson[];
+    disabled: TwoFactorPerson[];
+}
+
+export async function fetchTwoFactorCoverage(signal?: AbortSignal): Promise<TwoFactorCoverage> {
+    const { data } = await api.get<TwoFactorCoverage>('/Stats/two-factor', { signal });
+    return data;
+}

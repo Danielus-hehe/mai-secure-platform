@@ -26,6 +26,7 @@ import api from '../../api/client';
 import { apiErrorMessage } from '../../api/errors';
 import { fetchAdminStats, runExpirationJob, type AdminStats } from '../../api/stats';
 import SecurityAlertsPanel from '../../components/security/SecurityAlertsPanel';
+import TwoFactorCoveragePanel from '../../components/security/TwoFactorCoveragePanel';
 import axios from 'axios';
 
 // UserRole enum backend: Utilizator=1, SefDirectie=2, Administrator=3
@@ -261,7 +262,15 @@ export default function AdminDashboardPage() {
               are. Cifrele rămân disponibile mai jos, dar nu concurează pentru
               primele secunde de privire.
             */}
-            <SecurityAlertsPanel />
+            {/*
+              Alertele și acoperirea 2FA stau alături: ambele răspund la „ce trebuie
+              verificat acum” și ambele sunt liste pliabile, deci ocupă puțin loc
+              până când administratorul deschide o secțiune.
+            */}
+            <div className="grid grid-cols-1 items-start gap-4 sm:gap-6 xl:grid-cols-2">
+                <SecurityAlertsPanel />
+                <TwoFactorCoveragePanel />
+            </div>
 
             {/* Eroare de încărcare */}
             {statsError && (

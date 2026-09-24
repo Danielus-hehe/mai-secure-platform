@@ -16,7 +16,9 @@ namespace MAI.DataAccessLayer.Maintenance
         bool CanInsertAudit,
         bool CanUpdateAudit,
         bool CanDeleteAudit,
-        bool CanWriteMigrationHistory)
+        bool CanWriteMigrationHistory,
+        IReadOnlyList<string> RowSecurityDisabled,
+        IReadOnlyList<string> RowSecurityWithPolicies)
     {
         /// <summary>Jurnalul e append-only și istoricul migrărilor e doar citibil.</summary>
         public bool IsLeastPrivilege =>
@@ -128,6 +130,28 @@ namespace MAI.DataAccessLayer.Maintenance
                     "ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public " +
                     "GRANT USAGE, SELECT ON SEQUENCES TO %I", ct, owner, roleName);
 
+                // Row Level Security rămas de pe Supabase. Acolo RLS se activează
+                // pe tabele (recomandarea Supabase pentru API-ul lor public), iar
+                // politicile țin de rolurile Supabase (anon, authenticated).
+                // Restaurarea sare politicile - rolurile nu există aici - dar
+                // lasă RLS activat, adică „nimic permis” pentru orice rol care nu
+                // e proprietar. Proprietarul trece peste RLS, deci până acum nu
+                // se vedea; rolul aplicației nu trece, iar primul INSERT în
+                // AuditLogs pica cu „new row violates row-level security policy”.
+                //
+                // Se dezactivează DOAR pe tabelele fără nicio politică: acolo RLS
+                // nu protejează nimic, doar blochează. Un tabel cu politici e o
+                // decizie a cuiva; nu îl atingem, iar comanda îl raportează.
+                var disabled = new List<string>();
+                foreach (var table in await ListAsync(connection, tx, RowSecurityWithoutPoliciesSql, ct))
+                {
+                    await ExecuteFormattedAsync(connection, tx,
+                        "ALTER TABLE public.%I DISABLE ROW LEVEL SECURITY", ct, table);
+                    disabled.Add(table);
+                }
+
+                var withPolicies = await ListAsync(connection, tx, RowSecurityWithPoliciesSql, ct);
+
                 // Excepțiile, după GRANT-ul general, ca să nu fie anulate de el.
                 await ExecuteFormattedAsync(connection, tx,
                     "REVOKE UPDATE, DELETE, TRUNCATE ON \"AuditLogs\" FROM %I", ct, roleName);
@@ -144,12 +168,48 @@ namespace MAI.DataAccessLayer.Maintenance
                     CanUpdateAudit:           await HasPrivilegeAsync(connection, roleName, "\"AuditLogs\"", "UPDATE", ct),
                     CanDeleteAudit:           await HasPrivilegeAsync(connection, roleName, "\"AuditLogs\"", "DELETE", ct)
                                               || await HasPrivilegeAsync(connection, roleName, "\"AuditLogs\"", "TRUNCATE", ct),
-                    CanWriteMigrationHistory: await HasPrivilegeAsync(connection, roleName, "\"__EFMigrationsHistory\"", "INSERT", ct));
+                    CanWriteMigrationHistory: await HasPrivilegeAsync(connection, roleName, "\"__EFMigrationsHistory\"", "INSERT", ct),
+                    RowSecurityDisabled:      disabled,
+                    RowSecurityWithPolicies:  withPolicies);
             }
             finally
             {
                 if (opened) await connection.CloseAsync();
             }
+        }
+
+        private const string RowSecurityWithoutPoliciesSql = """
+            SELECT c.relname
+              FROM pg_class c
+             WHERE c.relnamespace = 'public'::regnamespace
+               AND c.relkind IN ('r', 'p')
+               AND c.relrowsecurity
+               AND NOT EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid)
+             ORDER BY c.relname
+            """;
+
+        private const string RowSecurityWithPoliciesSql = """
+            SELECT c.relname
+              FROM pg_class c
+             WHERE c.relnamespace = 'public'::regnamespace
+               AND c.relkind IN ('r', 'p')
+               AND c.relrowsecurity
+               AND EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid = c.oid)
+             ORDER BY c.relname
+            """;
+
+        private static async Task<List<string>> ListAsync(
+            DbConnection connection, DbTransaction? tx, string sql, CancellationToken ct)
+        {
+            await using var command = connection.CreateCommand();
+            command.Transaction = tx;
+            command.CommandText = sql;
+
+            var result = new List<string>();
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+                result.Add(reader.GetString(0));
+            return result;
         }
 
         private static async Task<bool> HasPrivilegeAsync(

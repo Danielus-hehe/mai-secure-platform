@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, RefreshCw, ShieldCheck } from 'lucide-react';
 import api from '../../api/client';
+import CollapsibleSection from './CollapsibleSection';
 
 /**
  * Alertele de securitate de pe panoul de administrare.
@@ -11,10 +12,18 @@ import api from '../../api/client';
  *
  * Toate interogările din spate se sprijină pe indexul Action+Result+Timestamp
  * adăugat odată cu migrarea rezultatului pe coloană.
+ *
+ * Alertele se grupează pe tip, în secțiuni pliabile, închise implicit. Înainte
+ * erau o listă plată: zece conturi fără 2FA însemnau zece rânduri, iar o alertă
+ * rară și gravă (o semnătură invalidă) ajungea sub ele, în afara ecranului.
+ * Acum fiecare tip ocupă un rând cu numărul lui, iar ordinea secțiunilor urmează
+ * gravitatea cea mai mare din fiecare.
  */
 
 interface SecurityAlert {
     severity: 'high' | 'medium' | 'low';
+    /** Cheia stabilă a tipului, după care se grupează (ex. "privileged-no-2fa"). */
+    group: string;
     category: string;
     title: string;
     detail: string;
@@ -46,10 +55,75 @@ const SEVERITY_DOT: Record<SecurityAlert['severity'], string> = {
     low: 'bg-mai-300 dark:bg-mai-500',
 };
 
+/**
+ * Titlul și explicația fiecărui tip. Un tip nou din backend, încă necunoscut
+ * aici, apare cu categoria lui ca titlu: nu se pierde, doar arată mai sec.
+ */
+const GROUPS: Record<string, { title: string; hint: string }> = {
+    'failed-logins':      { title: 'Încercări eșuate de autentificare', hint: 'Conturi cu multe parole greșite în ultimele 24 de ore' },
+    'locked-accounts':    { title: 'Conturi blocate',                    hint: 'Blocate după încercări eșuate; se deblochează automat' },
+    'privileged-no-2fa':  { title: 'Conturi privilegiate fără 2FA',      hint: 'Administratori și șefi protejați doar de parolă' },
+    'recovery-codes':     { title: 'Autentificări cu cod de recuperare', hint: 'Posibil telefon pierdut sau aplicație 2FA ștearsă' },
+    'bad-signatures':     { title: 'Semnături invalide la descărcare',   hint: 'Autenticitatea expeditorului nu a putut fi dovedită' },
+    'token-reuse':        { title: 'Sesiuni folosite de două părți',     hint: 'Refresh token refolosit; sesiunea a fost închisă automat' },
+    'concurrency-bursts': { title: 'Cereri simultane respinse',          hint: 'Rafale de cereri paralele de la aceeași adresă' },
+    'missing-keys':       { title: 'Utilizatori fără chei de criptare',  hint: 'Nu pot primi fișiere până la prima autentificare' },
+};
+
+const SEVERITY_ORDER: Record<SecurityAlert['severity'], number> = { high: 0, medium: 1, low: 2 };
+
+interface AlertGroup {
+    key: string;
+    title: string;
+    hint: string;
+    severity: SecurityAlert['severity'];
+    alerts: SecurityAlert[];
+}
+
+function groupAlerts(alerts: SecurityAlert[]): AlertGroup[] {
+    const byKey = new Map<string, AlertGroup>();
+
+    for (const alert of alerts) {
+        const key = alert.group || alert.category;
+        let group = byKey.get(key);
+        if (!group) {
+            const meta = GROUPS[key];
+            group = {
+                key,
+                title: meta?.title ?? alert.category,
+                hint: meta?.hint ?? '',
+                severity: alert.severity,
+                alerts: [],
+            };
+            byKey.set(key, group);
+        }
+        group.alerts.push(alert);
+        if (SEVERITY_ORDER[alert.severity] < SEVERITY_ORDER[group.severity]) group.severity = alert.severity;
+    }
+
+    // Gravitatea maximă întâi; la egalitate, grupul mai mare întâi.
+    return [...byKey.values()].sort((a, b) =>
+        SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity] || b.alerts.length - a.alerts.length);
+}
+
 export default function SecurityAlertsPanel() {
     const [data, setData] = useState<AlertsResponse | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+
+    // Secțiunile deschise, după cheie: rămân deschise și după „Reîncarcă”.
+    const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set());
+
+    const groups = useMemo(() => groupAlerts(data?.alerts ?? []), [data]);
+
+    const toggle = useCallback((key: string) => {
+        setOpenGroups(current => {
+            const next = new Set(current);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
+            return next;
+        });
+    }, []);
 
     const load = useCallback(async () => {
         setError(null);
@@ -127,36 +201,39 @@ export default function SecurityAlertsPanel() {
             )}
 
             {!loading && !error && data && data.alerts.length > 0 && (
-                <ul className="space-y-2">
-                    {data.alerts.map((alert, index) => (
-                        <li
-                            // Alertele nu au id propriu: sunt calculate la fiecare
-                            // cerere, nu stocate. Indexul e stabil pentru o listă
-                            // care se reîncarcă întreagă și nu se reordonează local.
-                            key={`${alert.category}-${alert.username ?? 'global'}-${index}`}
-                            className={`rounded-lg border p-3 ${SEVERITY_STYLE[alert.severity]}`}
+                <div className="space-y-2">
+                    {groups.map(group => (
+                        <CollapsibleSection
+                            key={group.key}
+                            open={openGroups.has(group.key)}
+                            onToggle={() => toggle(group.key)}
+                            dotClassName={SEVERITY_DOT[group.severity]}
+                            title={group.title}
+                            hint={group.hint}
+                            meta={SEVERITY_LABEL[group.severity]}
+                            count={group.alerts.length}
                         >
-                            <div className="flex items-start gap-2.5">
-                                <span
-                                    className={`mt-1.5 h-2 w-2 shrink-0 rounded-full
-                                        ${SEVERITY_DOT[alert.severity]}`}
-                                    aria-hidden
-                                />
-                                <div className="min-w-0">
-                                    <p className="text-sm font-semibold text-mai-800 dark:text-mai-100">
-                                        {alert.title}
-                                    </p>
-                                    <p className="mt-0.5 text-xs text-mai-600 dark:text-mai-300">
-                                        {alert.detail}
-                                    </p>
-                                    <p className="mt-1 text-[11px] uppercase tracking-wide text-mai-400">
-                                        {alert.category} · {SEVERITY_LABEL[alert.severity]}
-                                    </p>
-                                </div>
-                            </div>
-                        </li>
+                            <ul className="space-y-2">
+                                {group.alerts.map((alert, index) => (
+                                    <li
+                                        // Alertele nu au id propriu: sunt calculate la fiecare
+                                        // cerere, nu stocate. Indexul e stabil pentru o listă
+                                        // care se reîncarcă întreagă și nu se reordonează local.
+                                        key={`${alert.username ?? 'global'}-${index}`}
+                                        className={`rounded-lg border p-3 ${SEVERITY_STYLE[alert.severity]}`}
+                                    >
+                                        <p className="text-sm font-semibold text-mai-800 dark:text-mai-100">
+                                            {alert.title}
+                                        </p>
+                                        <p className="mt-0.5 text-xs text-mai-600 dark:text-mai-300">
+                                            {alert.detail}
+                                        </p>
+                                    </li>
+                                ))}
+                            </ul>
+                        </CollapsibleSection>
                     ))}
-                </ul>
+                </div>
             )}
 
             {data && (
