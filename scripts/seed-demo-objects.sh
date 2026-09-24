@@ -1,12 +1,12 @@
 #!/bin/sh
 # ═══════════════════════════════════════════════════════════════════════════
-# seed-demo-objects.sh — Creeaza fisiere demonstrative in MinIO
+# seed-demo-objects.sh - Creeaza fisiere demonstrative in MinIO
 #
 # Ruleaza DUPA 900_seed_demo.sql si populeaza bucketul cu obiecte reale,
 # astfel incat documentele normative sa se poata descarca efectiv.
 #
 # Transferurile E2EE raman fara obiecte reale (cele in Pending au chei de
-# referinta, dar fara criptare reala — vezi comentariile din seed SQL).
+# referinta, dar fara criptare reala - vezi comentariile din seed SQL).
 #
 # Utilizare:
 #   docker compose run --rm minio-init sh /scripts/seed-demo-objects.sh
@@ -28,9 +28,10 @@ echo "=== Seed obiecte demonstrative in $BUCKET ==="
 # Fisiere text simple (.txt) care se pot deschide si descarca.
 # In productie ar fi .pdf/.docx; aici e suficient sa demonstreze fluxul.
 #
-# NOTA: Daca StorageEncryption este activ, aceste fisiere trebuie criptate
-# de API (storage:recrypt). Cu AllowPlaintextRead=true (implicit), API-ul
-# le livreaza si in clar.
+# NOTA: fisierele de aici se scriu IN CLAR. Cu StorageEncryption activ si
+# STORAGE_ENCRYPTION_ALLOW_PLAINTEXT=false (implicit), API-ul le refuza la
+# descarcare ca alterate. Dupa seed, criptati-le cu API-ul:
+#   STORAGE_ENCRYPTION_ALLOW_PLAINTEXT=true, storage:recrypt, apoi inapoi false.
 
 create_doc() {
     local path="$1"

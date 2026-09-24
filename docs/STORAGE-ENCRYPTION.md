@@ -42,8 +42,15 @@ Formatul exact este descris în `MAI.BusinessLogic/Storage/Encryption/StorageEnv
 MAI_STORAGE_MASTER_KEYS=k1:<32 de octeti base64>
 STORAGE_ENCRYPTION_ACTIVE_KEY=k1
 STORAGE_ENCRYPTION_ENABLED=true
-STORAGE_ENCRYPTION_ALLOW_PLAINTEXT=true
+STORAGE_ENCRYPTION_ALLOW_PLAINTEXT=false
 ```
+
+`STORAGE_ENCRYPTION_ALLOW_PLAINTEXT` este implicit `false`: un obiect în clar pus
+în MinIO în locul celui criptat e refuzat la descărcare și consemnat în audit
+(`StorageIntegrityFailure`). Se pune pe `true` doar temporar, pe durata migrării
+de mai jos. Fișierele demonstrative nu au nevoie de ea: comanda
+`demo:seed-files` le scrie direct criptate. În afara mediului Development, API-ul scrie un
+avertisment la fiecare pornire cât timp valoarea e `true`.
 
 Generarea unei chei (afișează liniile gata completate):
 
@@ -57,8 +64,8 @@ documentele criptate nu mai pot fi citite de nimeni.
 
 ## Prima activare (fișiere scrise înainte de criptare)
 
-Fișierele vechi rămân citibile (`STORAGE_ENCRYPTION_ALLOW_PLAINTEXT=true`). Pentru
-a le cripta:
+Fișierele vechi rămân citibile doar cu `STORAGE_ENCRYPTION_ALLOW_PLAINTEXT=true`,
+setat temporar. Pentru a le cripta:
 
 ```
 dotnet run --project MAI.Api -- storage:recrypt --dry-run

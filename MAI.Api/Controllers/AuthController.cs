@@ -718,6 +718,7 @@ namespace MAI.Api.Controllers
         // PATCH api/Auth/change-password
         // ═════════════════════════════════════════════════════════════════════
         [Authorize]
+        [AllowDuringPasswordChange]   // exact operația pe care o cere filtrul
         [EnableRateLimiting(RateLimitPolicies.PasswordWrite)]
         [HttpPatch("change-password")]
         public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordDto dto, CancellationToken ct)

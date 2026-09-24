@@ -40,7 +40,10 @@ export default function Sidebar({ open, onClose }: { open: boolean; onClose: () 
     const location = useLocation();
     const [badges, setBadges] = useState<Record<string, number>>({});
     useEffect(() => {
-        if (!user) return;
+        // Cu parola temporară serverul refuză aceste cereri (403
+        // PASSWORD_CHANGE_REQUIRED); nu are rost să le trimitem doar ca să
+        // producem avertismente în log.
+        if (!user || user.mustChangePassword) return;
         let cancelled = false;
         Promise.allSettled([getAwaitingCount(), getPendingAcknowledgements()])
             .then(([transfers, docs]) => {

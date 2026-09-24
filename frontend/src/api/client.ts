@@ -31,10 +31,29 @@ export interface RefreshResponse {
     refreshTokenExpiresAt: string;
 }
 
-// ── Refresh single-flight ────────────────────────────────────────────────────
-// Daca 5 cereri primesc 401 in acelasi timp, se face UN singur apel /refresh
-// si toate cele 5 asteapta acelasi rezultat. Fara asta, fiecare ar consuma
-// refresh token-ul, iar rotatia din backend le-ar invalida pe celelalte patru.
+// ── Refresh: o singura rotatie odata, in toata aplicatia ────────────────────
+//
+// Doua niveluri de serializare, pentru doua probleme diferite:
+//
+//   1. In aceeasi fila (refreshPromise): daca 5 cereri primesc 401 simultan,
+//      se face UN singur apel /refresh si toate asteapta acelasi rezultat.
+//
+//   2. Intre file (navigator.locks): tokenurile stau in localStorage, comun
+//      tuturor filelor aceleiasi origini. Inainte, doua file care expirau in
+//      acelasi minut trimiteau ACELASI refresh token. Serverul il roteste la
+//      prima cerere, deci a doua primea 401, iar handleSessionExpired() golea
+//      localStorage - stergand si tokenurile proaspete ale primei file. Rezultat:
+//      ambele file deconectate, exact cand utilizatorul avea mai multe deschise
+//      (de exemplu, in timpul unei demonstratii).
+//
+//      Cu lacatul, filele se rotesc pe rand, iar fiecare citeste refresh
+//      token-ul DUPA ce a obtinut lacatul. Daca intre timp alta fila a rotit
+//      deja sesiunea, fila curenta foloseste direct tokenul ei, fara un apel nou.
+//
+// Browserele fara Web Locks (foarte vechi) raman pe comportamentul de dinainte,
+// serializat doar in fila curenta.
+
+const REFRESH_LOCK = 'sgdm-token-refresh';
 
 let refreshPromise: Promise<string> | null = null;
 
@@ -54,23 +73,45 @@ function handleSessionExpired(): void {
     }
 }
 
+/**
+ * Rotatia propriu-zisa. Ruleaza sub lacat, deci citirea tokenului si
+ * inlocuirea lui nu se intrepatrund cu ale altei file.
+ *
+ * @param seenRefreshToken refresh token-ul vazut INAINTE de asteptarea
+ *        lacatului. Daca in storage e acum altul, alta fila a rotit sesiunea.
+ */
+async function rotateTokens(seenRefreshToken: string | null): Promise<string> {
+    const refreshToken = tokenStorage.getRefreshToken();
+    if (!refreshToken) throw new Error('Nu exista refresh token.');
+
+    if (seenRefreshToken && refreshToken !== seenRefreshToken) {
+        const accessToken = tokenStorage.getAccessToken();
+        // Tokenul proaspat al celeilalte file e bun daca nu expira chiar acum.
+        if (accessToken && !tokenStorage.isAccessTokenExpiring(10)) {
+            return accessToken;
+        }
+    }
+
+    const { data } = await rawClient.post<RefreshResponse>('/Auth/refresh', { refreshToken });
+
+    tokenStorage.save({
+        accessToken: data.accessToken ?? data.token,
+        refreshToken: data.refreshToken,
+        accessTokenExpiresAt: new Date(data.accessTokenExpiresAt).getTime(),
+    });
+
+    return data.accessToken ?? data.token;
+}
+
 export async function refreshAccessToken(): Promise<string> {
     if (refreshPromise) return refreshPromise;
 
-    refreshPromise = (async () => {
-        const refreshToken = tokenStorage.getRefreshToken();
-        if (!refreshToken) throw new Error('Nu exista refresh token.');
+    const seen = tokenStorage.getRefreshToken();
+    const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
 
-        const { data } = await rawClient.post<RefreshResponse>('/Auth/refresh', { refreshToken });
-
-        tokenStorage.save({
-            accessToken: data.accessToken ?? data.token,
-            refreshToken: data.refreshToken,
-            accessTokenExpiresAt: new Date(data.accessTokenExpiresAt).getTime(),
-        });
-
-        return data.accessToken ?? data.token;
-    })();
+    refreshPromise = locks
+        ? locks.request(REFRESH_LOCK, () => rotateTokens(seen))
+        : rotateTokens(seen);
 
     try {
         return await refreshPromise;

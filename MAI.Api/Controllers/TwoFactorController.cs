@@ -41,7 +41,15 @@ namespace MAI.Api.Controllers
     public class TwoFactorController : ControllerBase
     {
         private readonly AppDbContext _context;
-        private readonly IPasswordHasher _hasher;
+
+        // Nu IPasswordHasher direct: un cont de domeniu are PasswordHash gol,
+        // deci verificarea locală eșua mereu și utilizatorii din AD nu puteau
+        // nici activa, nici dezactiva 2FA. Cu TwoFactor:RequiredForPrivilegedRoles
+        // activ, administratorii veniți din grupul AD rămâneau astfel blocați în
+        // afara endpointurilor de administrare. IUserCredentialVerifier alege
+        // sursa corectă: Argon2id pentru conturile locale, bind LDAPS pentru
+        // cele de domeniu - aceeași regulă ca la operațiile cu chei E2EE.
+        private readonly IUserCredentialVerifier _credentials;
         private readonly TotpService _totp;
         private readonly SecretProtector _protector;
         private readonly TwoFactorOptions _options;
@@ -50,7 +58,7 @@ namespace MAI.Api.Controllers
 
         public TwoFactorController(
             AppDbContext context,
-            IPasswordHasher hasher,
+            IUserCredentialVerifier credentials,
             TotpService totp,
             SecretProtector protector,
             TwoFactorOptions options,
@@ -58,7 +66,7 @@ namespace MAI.Api.Controllers
             ILogger<TwoFactorController> logger)
         {
             _context   = context;
-            _hasher    = hasher;
+            _credentials = credentials;
             _totp      = totp;
             _protector = protector;
             _options   = options;
@@ -119,11 +127,9 @@ namespace MAI.Api.Controllers
                               "Dezactivați-o înainte de a înrola un alt dispozitiv.",
                 });
 
-            if (!await VerifyPasswordAsync(user, dto.Password, ct))
-            {
-                await AuditAsync(user, "Initiere 2FA cu parola incorecta", ct, AuditResult.Failure);
-                return BadRequest(new { message = "Parola este incorectă." });
-            }
+            var passwordProblem = await RequirePasswordAsync(
+                user, dto.Password, "Initiere 2FA cu parola incorecta", ct);
+            if (passwordProblem is not null) return passwordProblem;
 
             var secret = _totp.GenerateSecret();
 
@@ -262,11 +268,9 @@ namespace MAI.Api.Controllers
             if (!user.TwoFactorEnabled)
                 return BadRequest(new { message = "Autentificarea în doi pași nu este activă." });
 
-            if (!await VerifyPasswordAsync(user, dto.Password, ct))
-            {
-                await AuditAsync(user, "Dezactivare 2FA cu parola incorecta", ct, AuditResult.Failure);
-                return BadRequest(new { message = "Parola este incorectă." });
-            }
+            var passwordProblem = await RequirePasswordAsync(
+                user, dto.Password, "Dezactivare 2FA cu parola incorecta", ct);
+            if (passwordProblem is not null) return passwordProblem;
 
             if (!await VerifySecondFactorAsync(user, dto.Code))
             {
@@ -310,8 +314,9 @@ namespace MAI.Api.Controllers
             if (!user.TwoFactorEnabled)
                 return BadRequest(new { message = "Autentificarea în doi pași nu este activă." });
 
-            if (!await VerifyPasswordAsync(user, dto.Password, ct))
-                return BadRequest(new { message = "Parola este incorectă." });
+            var passwordProblem = await RequirePasswordAsync(
+                user, dto.Password, "Regenerare coduri de recuperare 2FA cu parola incorecta", ct);
+            if (passwordProblem is not null) return passwordProblem;
 
             if (!await VerifySecondFactorAsync(user, dto.Code))
                 return BadRequest(new { message = "Codul nu este valid." });
@@ -399,12 +404,59 @@ namespace MAI.Api.Controllers
         // Helpers
         // ═════════════════════════════════════════════════════════════════════
 
-        private async Task<bool> VerifyPasswordAsync(User user, string? password, CancellationToken ct)
+        /// <summary>
+        /// Verifică parola contului (locală sau de domeniu). Întoarce null dacă e
+        /// corectă, altfel răspunsul HTTP potrivit, deja consemnat în audit.
+        ///
+        /// Trei rezultate distincte, nu două:
+        ///   • parolă greșită → 400 și rând Failure în audit;
+        ///   • AD indisponibil → 503: „nu știu” nu se raportează ca „parolă
+        ///     greșită”, altfel utilizatorul reîncearcă la nesfârșit o parolă
+        ///     corectă;
+        ///   • prea multe hash-uri Argon2 simultane → 503 cu Retry-After, ca la
+        ///     login, în loc de excepție netratată (500).
+        /// </summary>
+        private async Task<IActionResult?> RequirePasswordAsync(
+            User user, string? password, string failureDetails, CancellationToken ct)
         {
-            if (string.IsNullOrEmpty(password)) return false;
+            CredentialCheck check;
+            try
+            {
+                check = await _credentials.VerifyAsync(user, password ?? string.Empty, ct);
+            }
+            catch (HashingCapacityExceededException ex)
+            {
+                Response.Headers.RetryAfter = "5";
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+                {
+                    message    = ex.Message,
+                    retryAfter = 5,
+                });
+            }
 
-            var result = await _hasher.VerifyPasswordAsync(password, user.PasswordHash, ct);
-            return result != PasswordVerificationResult.Failed;
+            switch (check)
+            {
+                case CredentialCheck.Valid:
+                    return null;
+
+                case CredentialCheck.DirectoryUnavailable:
+                    await AuditAsync(user, $"{failureDetails}: Active Directory indisponibil", ct, AuditResult.Failure);
+                    Response.Headers.RetryAfter = "30";
+                    return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+                    {
+                        message = "Serviciul de domeniu nu răspunde, deci parola nu poate fi verificată acum. " +
+                                  "Reîncercați în câteva minute.",
+                    });
+
+                default:
+                    await AuditAsync(user, failureDetails, ct, AuditResult.Failure);
+                    return BadRequest(new
+                    {
+                        message = user.IsDirectoryAccount
+                            ? "Parola de domeniu este incorectă."
+                            : "Parola este incorectă.",
+                    });
+            }
         }
 
         /// <summary>Acceptă un cod TOTP sau, ca alternativă, un cod de recuperare (care se consumă).</summary>

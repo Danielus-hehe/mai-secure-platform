@@ -48,7 +48,10 @@ namespace MAI.Api.Controllers
         // ─────────────────────────────────────────────────────────────────────
         // GET api/Keys/me - pachetul propriu, pentru descuiere în browser
         // ─────────────────────────────────────────────────────────────────────
+        // Accesibil cu parola temporară: ecranul de schimbare a parolei citește
+        // pachetul ca să știe dacă trebuie să reîmpacheteze cheile existente.
         [HttpGet("me")]
+        [AllowDuringPasswordChange]
         public async Task<IActionResult> GetMyBundle(CancellationToken ct)
         {
             var user = await _context.Users
@@ -264,6 +267,10 @@ namespace MAI.Api.Controllers
         /// schimbarea parolei și dezactivarea 2FA.
         /// </summary>
         [HttpPatch("rewrap")]
+        // Rulează imediat după change-password, cu tokenul de acces emis încă
+        // pentru parola temporară. Cere oricum parola NOUĂ (verificată mai jos),
+        // deci cine știe doar parola temporară nu poate folosi endpointul.
+        [AllowDuringPasswordChange]
         [EnableRateLimiting(RateLimitPolicies.PasswordWrite)]
         public async Task<IActionResult> Rewrap([FromBody] RewrapKeysDto dto, CancellationToken ct)
         {

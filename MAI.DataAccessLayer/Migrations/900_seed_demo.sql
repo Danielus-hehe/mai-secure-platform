@@ -34,9 +34,13 @@
 --
 -- ── Fișiere în MinIO ──────────────────────────────────────────────────────
 --
--- Documentele normative referă chei de forma documents/demo/doc-{n}/v{m}.enc.
--- Aceste obiecte sunt create de scripts/seed-demo-objects.sh. Dacă scriptul
--- nu a fost rulat, documentele apar în listă dar descărcarea dă 404.
+-- Documentele normative referă chei de forma documents/demo/doc-{n}/v{m}.txt,
+-- cele interne internal/2026/09/intdoc-{n}.enc. Fișierele NU se creează aici:
+-- după acest script, rulați (din rădăcina repo-ului)
+--     dotnet run --project MAI.Api -- demo:seed-files
+-- Comanda scrie fișierele prin depozitul criptat și înlocuiește amprentele
+-- SHA-256 de mai jos (provizorii) cu cele ale conținutului real. Fără ea,
+-- documentele apar în listă, dar descărcarea dă 404.
 --
 -- ── Rulare repetată ────────────────────────────────────────────────────────
 --
@@ -181,7 +185,7 @@ VALUES (v_id, v_servicii[v_i] || ' (demo)', 'DEMO-V' || v_i, 300,
 END LOOP;
 
     -- ══════════════════════════════════════════════════════════════════════
-    -- 1. UTILIZATORI — 20 conturi
+    -- 1. UTILIZATORI: 20 conturi
     -- ══════════════════════════════════════════════════════════════════════
     -- 1 administrator, 3 șefi de direcție, 16 utilizatori.
 
@@ -249,7 +253,7 @@ SET "FailedLoginAttempts" = 7,
 WHERE "Id" = v_user_ids[10];
 
 -- ══════════════════════════════════════════════════════════════════════
--- 2. SESIUNI ACTIVE — demonstrează pagina de sesiuni
+-- 2. SESIUNI ACTIVE: demonstrează pagina de sesiuni
 -- ══════════════════════════════════════════════════════════════════════
 
 FOR v_i IN 1..12 LOOP
@@ -276,7 +280,7 @@ FOR v_i IN 1..12 LOOP
 END LOOP;
 
     -- ══════════════════════════════════════════════════════════════════════
-    -- 3. TRANSFERURI — 50 transferuri cu dovezi de primire
+    -- 3. TRANSFERURI: 50 transferuri cu dovezi de primire
     -- ══════════════════════════════════════════════════════════════════════
 
 FOR v_i IN 1..50 LOOP
@@ -372,10 +376,10 @@ END IF;
 END LOOP;
 
     -- ══════════════════════════════════════════════════════════════════════
-    -- 4. DOCUMENTE NORMATIVE cu versiuni — 12 documente, ~25 versiuni
+    -- 4. DOCUMENTE NORMATIVE cu versiuni: 12 documente, ~25 versiuni
     -- ══════════════════════════════════════════════════════════════════════
-    -- Cheile de stocare referă documents/demo/doc-{i}/v{j}.enc, create
-    -- de scripts/seed-demo-objects.sh.
+    -- Cheile de stocare referă documents/demo/doc-{i}/v{j}.txt. Fișierele și
+    -- amprentele reale le scrie comanda demo:seed-files (vezi antetul).
 
 FOR v_i IN 1..12 LOOP
         v_doc_id := gen_random_uuid();
@@ -407,7 +411,7 @@ FOR v_j IN 1..(1 + (v_i % 3)) LOOP
                 gen_random_uuid(),
                 v_doc_id,
                 v_j,
-                'documents/demo/doc-' || v_i || '/v' || v_j || '.enc',
+                'documents/demo/doc-' || v_i || '/v' || v_j || '.txt',
                 encode(sha256(('doc-demo-' || v_i || '-v' || v_j)::bytea), 'hex'),
                 (SELECT "Username" FROM "Users" WHERE "Id" = v_user_ids[1 + (v_i % 18)]),
                 v_now - (interval '1 day' * (v_i * 8 - v_j * 2)),
@@ -501,7 +505,7 @@ END IF;
 END LOOP;
 
     -- ══════════════════════════════════════════════════════════════════════
-    -- 6. JURNAL DE AUDIT — ~500 rânduri, toate acțiunile și rezultatele
+    -- 6. JURNAL DE AUDIT: ~500 rânduri, toate acțiunile și rezultatele
     -- ══════════════════════════════════════════════════════════════════════
 
 FOR v_i IN 1..500 LOOP
@@ -606,7 +610,7 @@ FROM "Users" u WHERE u."Id" = v_admin;
 RAISE NOTICE 'Seed complet: 20 utilizatori, ~50 transferuri, 12 documente normative, 8 documente interne, 12 sesiuni, ~520 randuri de audit.';
     RAISE NOTICE 'Structura: 5 directii, 5 sectii, 4 servicii.';
     RAISE NOTICE 'Toti utilizatorii demo au parola contului "%".', v_sursa_parola;
-    RAISE NOTICE 'Conturi: *.demo — administrator: %', (SELECT "Username" FROM "Users" WHERE "Id" = v_admin);
+    RAISE NOTICE 'Conturi: *.demo, administrator: %', (SELECT "Username" FROM "Users" WHERE "Id" = v_admin);
 
 END $$;
 

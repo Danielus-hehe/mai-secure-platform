@@ -174,8 +174,6 @@ services:
     depends_on:
       minio:
         condition: service_healthy
-    volumes:
-      - ./scripts:/scripts:ro
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
@@ -272,7 +270,10 @@ services:
       MAI_STORAGE_MASTER_KEYS: ${MAI_STORAGE_MASTER_KEYS:-}
       StorageEncryption__ActiveKeyId: ${STORAGE_ENCRYPTION_ACTIVE_KEY:-}
       StorageEncryption__Enabled: ${STORAGE_ENCRYPTION_ENABLED:-true}
-      StorageEncryption__AllowPlaintextRead: ${STORAGE_ENCRYPTION_ALLOW_PLAINTEXT:-true}
+      # Implicit false: un obiect in clar pus in locul unuia criptat e refuzat.
+      # true doar temporar, cat timp mai exista fisiere necriptate (inainte de
+      # storage:recrypt).
+      StorageEncryption__AllowPlaintextRead: ${STORAGE_ENCRYPTION_ALLOW_PLAINTEXT:-false}
 
       # Originea frontend-ului. In spatele nginx, pagina si /api au aceeasi
       # origine si CORS nu mai intervine; valoarea ramane corecta pentru cazul
