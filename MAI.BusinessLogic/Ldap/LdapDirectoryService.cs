@@ -50,7 +50,13 @@ namespace MAI.BusinessLogic.Ldap
         /// conexiune. Nu e folosit la nicio decizie de securitate: validarea se
         /// face în callback, în momentul conexiunii.
         /// </summary>
-        private X509Certificate2? _lastServerCertificate;
+        // Doar subiectul și amprenta, nu obiectul certificatului. Certificatul
+        // primit în callbackul TLS aparține lui SslStream, care îl eliberează la
+        // închiderea conexiunii; o referință păstrată la el arunca apoi
+        // CryptographicException la citirea lui .Subject. Asta se întâmpla chiar
+        // în blocul catch al testului de conexiune, deci excepția ieșea din metodă
+        // și pagina primea 500 în loc de mesajul de eroare.
+        private ServerCertificateInfo? _lastServerCertificate;
 
         public LdapDirectoryService(LdapOptions options, ILogger<LdapDirectoryService> logger)
         {
@@ -264,7 +270,7 @@ namespace MAI.BusinessLogic.Ldap
 
                         return new DirectoryProbe(
                             Reachable: true, ServiceAccountBound: false, UserCount: 0, OrgUnitCount: 0,
-                            _lastServerCertificate?.Subject, Thumbprint(_lastServerCertificate),
+                            _lastServerCertificate?.Subject, _lastServerCertificate?.Thumbprint,
                             "Nu e configurat un cont de serviciu (LDAP_BIND_DN), deci nu se pot număra obiectele.");
                     }
 
@@ -288,14 +294,14 @@ namespace MAI.BusinessLogic.Ldap
                         UserCount: users.Entries.Count,
                         OrgUnitCount: ous.Entries.Count,
                         _lastServerCertificate?.Subject,
-                        Thumbprint(_lastServerCertificate),
+                        _lastServerCertificate?.Thumbprint,
                         Error: null);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "LDAP: testul de conexiune catre {Endpoint} a esuat", _options.Endpoint);
                     return new DirectoryProbe(false, false, 0, 0,
-                        _lastServerCertificate?.Subject, Thumbprint(_lastServerCertificate), Shorten(ex.Message));
+                        _lastServerCertificate?.Subject, _lastServerCertificate?.Thumbprint, Shorten(ex.Message));
                 }
             }, ct);
 
@@ -368,8 +374,10 @@ namespace MAI.BusinessLogic.Ldap
                 using var ssl = new SslStream(tcp.GetStream(), leaveInnerStreamOpen: false,
                     (_, certificate, _, _) =>
                     {
+                        // Citit acum, cât timp certificatul e valid: după
+                        // închiderea conexiunii, SslStream îl eliberează.
                         if (certificate is not null)
-                            _lastServerCertificate = certificate as X509Certificate2 ?? new X509Certificate2(certificate);
+                            _lastServerCertificate = ServerCertificateInfo.From(certificate);
                         return true;   // doar citim; conexiunea se închide imediat
                     });
 
@@ -401,7 +409,7 @@ namespace MAI.BusinessLogic.Ldap
         private bool Validate(X509Certificate certificate)
         {
             var cert = certificate as X509Certificate2 ?? new X509Certificate2(certificate);
-            _lastServerCertificate = cert;
+            _lastServerCertificate = ServerCertificateInfo.From(cert);
 
             if (!string.IsNullOrWhiteSpace(_options.ServerCertificateThumbprint))
             {
@@ -748,5 +756,30 @@ namespace MAI.BusinessLogic.Ldap
         /// <summary>Mesajele de rețea pot fi lungi; în audit intră o coloană, nu un eseu.</summary>
         private static string Shorten(string message) =>
             message.Length <= 200 ? message : message[..200];
+    }
+}
+
+namespace MAI.BusinessLogic.Ldap
+{
+    /// <summary>
+    /// Subiectul și amprenta SHA-256 ale certificatului unui controler de
+    /// domeniu, copiate ca text. Separat de certificat intenționat: obiectul
+    /// primit în callbackurile TLS e eliberat de SslStream, textul nu.
+    /// </summary>
+    public sealed record ServerCertificateInfo(string Subject, string Thumbprint)
+    {
+        public static ServerCertificateInfo From(X509Certificate certificate)
+        {
+            // Copie proprie din octeții certificatului: nu depinde de cine
+            // eliberează originalul, nici de tipul concret primit (X509Certificate
+            // simplu pe unele platforme).
+            using var copy = new X509Certificate2(certificate.GetRawCertData());
+
+            // SHA-256 fără „:”, același șir ca `openssl x509 -fingerprint -sha256`,
+            // exact ce se pune în LDAP_CERT_THUMBPRINT.
+            return new ServerCertificateInfo(
+                copy.Subject,
+                copy.GetCertHashString(System.Security.Cryptography.HashAlgorithmName.SHA256));
+        }
     }
 }
