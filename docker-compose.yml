@@ -34,7 +34,9 @@
 # ── Structura cheilor ────────────────────────────────────────────────────────
 # Transferuri:  transfers/{yyyy}/{MM}/{transferId:N}.enc
 #               (cele vechi pot avea inca prefixul departamentului)
-# Documente:    documents/{docId:N}/v{n}.{ext}
+# Documente:    documents/{docId:N}/v{n}-{incercare:N}.{ext}
+#               (cele vechi: v{n}.{ext}; sufixul unic impiedica doua incarcari
+#                simultane sa scrie in acelasi obiect)
 # Interne:      internal/{yyyy}/{MM}/{docId:N}-{id}.{ext}
 #
 # Toate stau in acelasi bucket ("mai-secure"). Transferurile sunt criptate in
@@ -178,28 +180,121 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       SGDM_BUCKET: ${STORAGE_BUCKET:-mai-secure}
-    entrypoint: >
-      /bin/sh -c "
-      set -e;
-      mc alias set local http://minio:9000 \"$$MINIO_ROOT_USER\" \"$$MINIO_ROOT_PASSWORD\";
+      # Contul de serviciu al API-ului (vezi mai jos, sub script).
+      SGDM_APP_USER: ${MINIO_APP_USER:-sgdm-app}
+      SGDM_APP_SECRET: ${MINIO_APP_PASSWORD:-}
 
-      mc mb --ignore-existing local/$$SGDM_BUCKET;
+    # Script bloc (|), nu linie pliata (>): politica contului de serviciu e un
+    # JSON pe mai multe randuri. „$$” e un „$” pentru shell, nu pentru compose.
+    #
+    # ── Contul de serviciu al API-ului ────────────────────────────────────────
+    # Inainte, API-ul folosea credentialele root ale MinIO. Cine compromitea
+    # API-ul (sau citea variabilele containerului) putea sterge bucketul,
+    # dezactiva versionarea, schimba regulile de retentie si crea conturi noi.
+    # Acum API-ul are un cont care poate doar citi, scrie si sterge obiecte in
+    # bucketul propriu. Versionarea ramane activa si un obiect sters se poate
+    # recupera 24 de ore, iar root ramane doar aici si in serviciul de backup.
+    # Comenzile sunt idempotente: parola se actualizeaza, politica se rescrie,
+    # iar detach inainte de attach evita eroarea „policy already attached”.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
 
-      echo '→ bucket privat (fara acces anonim)';
-      mc anonymous set none local/$$SGDM_BUCKET;
+        mc mb --ignore-existing "local/$$SGDM_BUCKET"
 
-      echo '→ versionare activata: o stergere gresita se poate anula 24 de ore';
-      mc version enable local/$$SGDM_BUCKET;
+        echo '→ bucket privat (fara acces anonim)'
+        mc anonymous set none "local/$$SGDM_BUCKET"
 
-      echo '→ retentie: transfers/ 30 de zile; versiuni sterse 1 zi; documents/ si internal/ fara expirare';
-      mc ilm rule rm --all --force local/$$SGDM_BUCKET >/dev/null 2>&1 || true;
-      mc ilm rule add --prefix 'transfers/' --expire-days 30 local/$$SGDM_BUCKET;
-      mc ilm rule add --noncurrent-expire-days 1 local/$$SGDM_BUCKET;
+        echo '→ versionare activata: o stergere gresita se poate anula 24 de ore'
+        mc version enable "local/$$SGDM_BUCKET"
 
-      echo '';
-      echo '=== MinIO pregatit ===';
-      mc ls local;
-      "
+        echo '→ retentie: transfers/ 30 de zile; versiuni sterse 1 zi; documents/ si internal/ fara expirare'
+        mc ilm rule rm --all --force "local/$$SGDM_BUCKET" >/dev/null 2>&1 || true
+        mc ilm rule add --prefix 'transfers/' --expire-days 30 "local/$$SGDM_BUCKET"
+        mc ilm rule add --noncurrent-expire-days 1 "local/$$SGDM_BUCKET"
+
+        echo '→ cont de serviciu pentru API, limitat la bucket'
+        if [ -z "$$SGDM_APP_USER" ] || [ -z "$$SGDM_APP_SECRET" ]; then
+          echo 'EROARE: MINIO_APP_USER si MINIO_APP_PASSWORD trebuie setate in .env (parola: minim 8 caractere).' >&2
+          exit 1
+        fi
+        if [ "$$SGDM_APP_USER" = "$$MINIO_ROOT_USER" ]; then
+          echo 'EROARE: MINIO_APP_USER trebuie sa difere de MINIO_ROOT_USER.' >&2
+          exit 1
+        fi
+
+        # GetBucketLocation + ListBucket pe bucket; Get/Put/DeleteObject in el.
+        # Nimic pe alte bucketuri, nimic administrativ, nimic pe versiuni
+        # (DeleteObjectVersion): o stergere facuta de API lasa mereu un obiect
+        # recuperabil pana la expirarea versiunii necurente.
+        POLICY="{
+          \"Version\": \"2012-10-17\",
+          \"Statement\": [
+            {
+              \"Effect\": \"Allow\",
+              \"Action\": [\"s3:GetBucketLocation\", \"s3:ListBucket\"],
+              \"Resource\": [\"arn:aws:s3:::$${SGDM_BUCKET}\"]
+            },
+            {
+              \"Effect\": \"Allow\",
+              \"Action\": [\"s3:GetObject\", \"s3:PutObject\", \"s3:DeleteObject\"],
+              \"Resource\": [\"arn:aws:s3:::$${SGDM_BUCKET}/*\"]
+            }
+          ]
+        }"
+        printf '%s\n' "$$POLICY" > /tmp/sgdm-app-policy.json
+        mc admin policy create local sgdm-app /tmp/sgdm-app-policy.json
+        mc admin user add local "$$SGDM_APP_USER" "$$SGDM_APP_SECRET"
+        mc admin policy detach local sgdm-app --user "$$SGDM_APP_USER" >/dev/null 2>&1 || true
+        mc admin policy attach local sgdm-app --user "$$SGDM_APP_USER"
+
+        echo ''
+        echo '=== MinIO pregatit ==='
+        mc ls local
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Migrari si rolul aplicatiei in PostgreSQL (container efemer)
+  #
+  # Ruleaza „db:migrate” din imaginea API-ului, la fiecare 'up', inaintea
+  # API-ului: aplica migrarile EF in asteptare si (re)creeaza rolul aplicatiei
+  # cu drepturi minime. Serverul nu mai are nevoie de SDK-ul .NET si nici de
+  # codul sursa - doar de Docker. Manual:
+  #   docker compose run --rm migrate                       (aplica)
+  #   docker compose run --rm migrate db:migrate --list     (doar afiseaza starea)
+  # Argumentele dupa numele serviciului INLOCUIESC comanda, deci „db:migrate”
+  # se repeta cand se adauga --list.
+  #
+  # Se conecteaza cu PROPRIETARUL schemei (POSTGRES_USER), singurul care are
+  # voie sa schimbe structura. API-ul foloseste rolul aplicatiei
+  # (POSTGRES_APP_USER): SELECT/INSERT/UPDATE/DELETE pe tabele, dar pe
+  # AuditLogs doar SELECT si INSERT - jurnalul nu poate fi modificat sau sters
+  # nici de un API compromis. Detalii: MAI.DataAccessLayer/Maintenance/.
+  #
+  # Primeste doar conexiunea si rolul, niciun alt secret (JWT, pepper, SMTP):
+  # comanda nu trece prin validarile din Program.cs.
+  # ───────────────────────────────────────────────────────────────────────────
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sgdm-api:latest
+    container_name: sgdm-migrate
+    command: ["db:migrate"]
+    restart: "no"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    environment:
+      ConnectionStrings__DefaultConnection: ${DB_CONTAINER_CONNECTION_STRING:-Host=postgres;Port=5432;Database=${POSTGRES_DB:-sgdm};Username=${POSTGRES_USER:-sgdm};Password=${POSTGRES_PASSWORD}}
+      Database__AppUser: ${POSTGRES_APP_USER:-sgdm_app}
+      MAI_DB_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:-}
+      # In Docker, rularea fara rolul aplicatiei e o eroare, nu o optiune: API-ul
+      # de mai jos se conecteaza cu el.
+      Database__RequireAppRole: "true"
 
   # ───────────────────────────────────────────────────────────────────────────
   # API-ul .NET
@@ -228,20 +323,24 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+      # Schema la zi si rolul aplicatiei creat, inainte de prima cerere.
+      migrate:
+        condition: service_completed_successfully
 
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
 
-      # Conexiunea la baza, VAZUTA DIN CONTAINER. Implicit: serviciul postgres
-      # de mai sus, construita din aceleasi variabile POSTGRES_* ca baza insasi,
-      # deci nu are cum sa difere de ea.
+      # Conexiunea la baza, VAZUTA DIN CONTAINER, cu ROLUL APLICATIEI (nu cu
+      # proprietarul): fara DDL, fara UPDATE/DELETE pe jurnalul de audit. Rolul
+      # il creeaza serviciul „migrate” de mai sus, la fiecare 'up'.
       #
       # DB_CONNECTION_STRING din .env NU se foloseste aici: el e pentru
       # 'dotnet run', unde hostul e localhost. In container, localhost e
       # containerul insusi. Pentru o baza externa (alt server PostgreSQL al
-      # institutiei): DB_CONTAINER_CONNECTION_STRING in .env.
-      ConnectionStrings__DefaultConnection: ${DB_CONTAINER_CONNECTION_STRING:-Host=postgres;Port=5432;Database=${POSTGRES_DB:-sgdm};Username=${POSTGRES_USER:-sgdm};Password=${POSTGRES_PASSWORD}}
+      # institutiei): DB_CONTAINER_APP_CONNECTION_STRING (rolul aplicatiei)
+      # si DB_CONTAINER_CONNECTION_STRING (proprietarul, pentru migrate si backup).
+      ConnectionStrings__DefaultConnection: ${DB_CONTAINER_APP_CONNECTION_STRING:-Host=postgres;Port=5432;Database=${POSTGRES_DB:-sgdm};Username=${POSTGRES_APP_USER:-sgdm_app};Password=${POSTGRES_APP_PASSWORD:-}}
 
       # Secrete - generate cu:  openssl rand -base64 48
       MAI_JWT_KEY: ${MAI_JWT_KEY}
@@ -261,8 +360,10 @@ services:
       # presemnate in productie, MinIO trebuie expus sub un nume DNS comun,
       # vazut la fel si de API, si de browser.
       Storage__UsePresignedDownload: "false"
-      MAI_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER}
-      MAI_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      # Contul de serviciu creat de minio-init, limitat la bucketul aplicatiei.
+      # Root ramane doar la minio-init si la backup.
+      MAI_STORAGE_ACCESS_KEY: ${MINIO_APP_USER:-sgdm-app}
+      MAI_STORAGE_SECRET_KEY: ${MINIO_APP_PASSWORD:-}
 
       # Criptarea la nivel de aplicatie a documentelor (documents/, internal/).
       # Cheile principale raman in .env; in imagine si in Git nu ajung niciodata.
@@ -302,6 +403,10 @@ services:
 
       # Valabilitatea linkului de resetare a parolei trimis pe email (minute).
       PasswordReset__TokenMinutes: ${PASSWORD_RESET_TOKEN_MINUTES:-120}
+
+      # Durata absoluta a sesiunii (ore de la autentificare). Refresh-ul nu o
+      # mai poate prelungi; dupa ea se cere din nou parola si codul 2FA.
+      Jwt__SessionAbsoluteHours: ${SESSION_ABSOLUTE_HOURS:-12}
 
       # ── Active Directory (LDAP) ──────────────────────────────────────────
       # Implicit dezactivat: aplicatia porneste identic fara domeniu, iar

@@ -78,6 +78,16 @@ try
             dotEnv.Path, dotEnv.Applied, string.Join(", ", dotEnv.Keys));
     }
 
+    // db:migrate: migrările și rolul aplicației, cu conexiunea proprietarului.
+    // Tratată înainte de restul configurării, intenționat: nu are nevoie de
+    // cheia JWT, pepper, SMTP sau LDAP, deci containerul „migrate” nu primește
+    // niciun secret pe care nu îl folosește. Vezi DbMigrateCommand.
+    if (DbMigrateCommand.IsMigrate(args))
+    {
+        Environment.ExitCode = await DbMigrateCommand.RunAsync(args);
+        return;
+    }
+
     var builder = WebApplication.CreateBuilder(isMaintenanceCommand ? Array.Empty<string>() : args);
 
     // ─── Loguri structurate (Serilog, JSON pe consolă) ─────────────────────────
@@ -523,6 +533,22 @@ try
     // cerere autentificată (JwtBearerEvents.OnTokenValidated, mai sus).
     builder.Services.AddScoped<ISessionTokenValidator, SessionTokenValidator>();
 
+    // ─── Autorizare: implicit închis ───────────────────────────────────────────
+    // Orice endpoint fără [Authorize] sau [AllowAnonymous] cere un utilizator
+    // autentificat. Înainte, implicitul era „deschis”: AuthController nu are
+    // [Authorize] pe clasă (majoritatea rutelor lui sunt anonime), deci o rută
+    // nouă adăugată acolo fără atribut ar fi fost publică fără ca nimeni să
+    // observe. Acum greșeala are efectul sigur: ruta refuză anonimii până
+    // cineva scrie explicit [AllowAnonymous]. Rutele anonime existente (login,
+    // 2FA, refresh, logout, invitație, resetare parolă, health, login-info AD)
+    // au deja atributul și nu se schimbă.
+    builder.Services.AddAuthorization(options =>
+    {
+        options.FallbackPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
+            .RequireAuthenticatedUser()
+            .Build();
+    });
+
     // ─── CORS ──────────────────────────────────────────────────────────────────
     var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
         ?? ["http://localhost:5173", "http://localhost:3000"];
@@ -831,8 +857,10 @@ try
         expirationOptions.PurgeObjects ? "activata" : "dezactivata");
 
     app.Logger.LogInformation(
-        "JWT: issuer={Issuer}, audience={Audience}, acces {Minutes} min, refresh {Days} zile, validare issuer/audience ACTIVA",
-        jwtOptions.Issuer, jwtOptions.Audience, jwtOptions.AccessTokenMinutes, jwtOptions.RefreshTokenDays);
+        "JWT: issuer={Issuer}, audience={Audience}, acces {Minutes} min, refresh {Days} zile, " +
+        "sesiune maxim {AbsoluteHours} h de la autentificare, validare issuer/audience ACTIVA",
+        jwtOptions.Issuer, jwtOptions.Audience, jwtOptions.AccessTokenMinutes, jwtOptions.RefreshTokenDays,
+        jwtOptions.SessionAbsoluteHours);
 
     app.Logger.LogInformation(
         "Active Directory: {State}{Details}",
@@ -880,7 +908,9 @@ try
 
             // Refuzurile de autentificare, autorizare și rate limit sunt semnale de
             // securitate, nu trafic obișnuit.
-            return http.Response.StatusCode is 401 or 403 or 429
+            // 409 intră aici: un conflict de concurență e fie un dublu-clic,
+            // fie cereri paralele trimise intenționat. Vezi ConcurrencyConflictMiddleware.
+            return http.Response.StatusCode is 401 or 403 or 409 or 429
                 ? LogEventLevel.Warning
                 : LogEventLevel.Information;
         };
@@ -915,6 +945,11 @@ try
     app.UseHttpsRedirection();
     app.UseCors("AllowFrontend");
     app.UseRateLimiter();          // înainte de autentificare: respingem devreme, ieftin
+
+    // Conflictele de concurență (xmin, index unic) → 409 cu mesaj și audit.
+    // Înaintea autentificării în lanț, deci o înconjoară: la întoarcerea
+    // excepției, HttpContext.User e deja completat și ajunge în jurnal.
+    app.UseConcurrencyConflicts();
     app.UseAuthentication();
     app.UseAuthorization();
     app.MapControllers();

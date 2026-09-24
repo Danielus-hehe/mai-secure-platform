@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Security.Claims;
 using MAI.Api.BackgroundJobs;
+using MAI.Api.Services;
 using MAI.BusinessLogic.Interfaces;
 using MAI.BusinessLogic.Storage;
 using MAI.BusinessLogic.Storage.Encryption;
@@ -181,10 +182,25 @@ namespace MAI.Api.Controllers
 
             var alerts = new List<SecurityAlert>();
 
+            // Aceeași regulă ca jurnalul: un șef de direcție vede semnalele
+            // subdiviziunii lui, nu ale ministerului (null = administrator, tot).
+            // Fără ea, panoul de alerte ar fi fost o scurgere a exact ce jurnalul
+            // filtrează: cine a greșit parola, cine s-a autentificat cu cod de
+            // recuperare, ce conturi privilegiate nu au 2FA.
+            var visible = await OrgStructure.AuditVisibleUsersAsync(_context, User, ct);
+
+            IQueryable<AuditLog> Logs() => visible is null
+                ? _context.AuditLogs
+                : _context.AuditLogs.Where(a => a.UserId != null && visible.Contains(a.UserId.Value));
+
+            IQueryable<User> People() => visible is null
+                ? _context.Users
+                : _context.Users.Where(u => visible.Contains(u.Id));
+
             // ── 1. Conturi cu multe esecuri de autentificare ─────────────────
             // Gruparea se face in baza de date, nu prin aducerea randurilor in
             // memorie: pe un jurnal mare, diferenta e intre milisecunde si secunde.
-            var bruteForce = await _context.AuditLogs
+            var bruteForce = await Logs()
                 .Where(a => a.Action == AuditAction.Login
                          && a.Result == AuditResult.Failure
                          && a.Timestamp >= last24h)
@@ -211,7 +227,7 @@ namespace MAI.Api.Controllers
             // aplicatia de autentificare. Legitim de cele mai multe ori, dar e si
             // exact calea pe care ar veni cineva care a obtinut parola si codurile
             // scrise pe hartie.
-            var recoveryLogins = await _context.AuditLogs
+            var recoveryLogins = await Logs()
                 .Where(a => a.Action == AuditAction.Login
                          && a.Result == AuditResult.Warning
                          && a.Timestamp >= last7d
@@ -235,7 +251,7 @@ namespace MAI.Api.Controllers
             // ── 3. Semnaturi invalide la descarcare ──────────────────────────
             // Cel mai grav semnal din lista: inseamna ca un fisier a ajuns la
             // destinatar fara sa se poata dovedi cine l-a trimis.
-            var badSignatures = await _context.AuditLogs
+            var badSignatures = await Logs()
                 .Where(a => a.Action == AuditAction.FileDownload
                          && a.Result == AuditResult.Warning
                          && a.Timestamp >= last7d
@@ -260,7 +276,7 @@ namespace MAI.Api.Controllers
             // Nu vine din jurnal, ci din starea curenta. Un administrator fara al
             // doilea factor face din parola lui singurul lucru care sta intre un
             // atacator si intregul sistem.
-            var privilegedWithout2Fa = await _context.Users
+            var privilegedWithout2Fa = await People()
                 .Where(u => u.IsActive
                          && u.Role >= UserRole.SefDirectie
                          && !u.TwoFactorEnabled)
@@ -281,7 +297,7 @@ namespace MAI.Api.Controllers
             }
 
             // ── 5. Conturi blocate chiar acum ────────────────────────────────
-            var lockedOut = await _context.Users
+            var lockedOut = await People()
                 .Where(u => u.LockoutEndsAt != null && u.LockoutEndsAt > now)
                 .OrderByDescending(u => u.LockoutEndsAt)
                 .Take(MaxAlertsPerCategory)
@@ -303,7 +319,7 @@ namespace MAI.Api.Controllers
             // Nu pot primi fisiere: expeditorul nu are cu ce sa impacheteze cheia.
             // E o problema de functionare, nu de securitate, dar se manifesta ca
             // "nu pot trimite lui X" si e greu de diagnosticat din interfata.
-            var withoutKeys = await _context.Users
+            var withoutKeys = await People()
                 .CountAsync(u => u.IsActive && u.PublicKeyEncryption == null, ct);
 
             if (withoutKeys > 0)
@@ -315,6 +331,62 @@ namespace MAI.Api.Controllers
                     Detail:   "Nu pot primi fișiere. Cheile se generează automat la prima " +
                                "autentificare, deci probabil nu s-au conectat încă.",
                     Username: (string?)null));
+            }
+
+            // ── 7. Refresh token refolosit ───────────────────────────────────
+            // Un token deja rotit, prezentat din nou: doua parti au avut aceeasi
+            // sesiune. Sesiunea s-a inchis automat, dar titularul trebuie
+            // intrebat de unde s-a putut copia tokenul (calculator partajat,
+            // extensie de browser, backup al profilului).
+            var reusedTokens = await Logs()
+                .Where(a => a.Action == AuditAction.RefreshTokenReused
+                         && a.Timestamp >= last7d)
+                .OrderByDescending(a => a.Timestamp)
+                .Take(MaxAlertsPerCategory)
+                .Select(a => new { a.Username, a.Timestamp, a.IpAddress })
+                .ToListAsync(ct);
+
+            foreach (var item in reusedTokens)
+            {
+                alerts.Add(new SecurityAlert(
+                    Severity: "high",
+                    Category: "Sesiuni",
+                    Title:    $"Sesiune a lui @{item.Username} folosită de două părți",
+                    Detail:   $"{item.Timestamp:dd.MM.yyyy HH:mm} UTC, cerere de la {item.IpAddress}. " +
+                               "Sesiunea a fost închisă automat. Verificați cu utilizatorul de unde s-a " +
+                               "putut copia tokenul și luați în calcul schimbarea parolei.",
+                    Username: item.Username));
+            }
+
+            // ── 8. Conflicte de concurenta in rafala ─────────────────────────
+            // Unul izolat e un dublu-clic. Multe de la aceeasi adresa in 24 de ore
+            // inseamna cereri paralele trimise intentionat, de exemplu coduri 2FA
+            // in rafala ca sa ocoleasca limita de incercari. Gruparea e pe IP, nu
+            // pe cont: la login si 2FA cererea nu are inca utilizator. Tocmai de
+            // aceea semnalul nu poate fi atribuit unei subdiviziuni si ramane
+            // doar la administrator.
+            if (visible is null)
+            {
+                var conflictBursts = await _context.AuditLogs
+                    .Where(a => a.Action == AuditAction.ConcurrencyConflict
+                             && a.Timestamp >= last24h)
+                    .GroupBy(a => a.IpAddress)
+                    .Select(g => new { Ip = g.Key, Count = g.Count() })
+                    .Where(x => x.Count >= ConflictBurstThreshold)
+                    .OrderByDescending(x => x.Count)
+                    .Take(MaxAlertsPerCategory)
+                    .ToListAsync(ct);
+
+                foreach (var item in conflictBursts)
+                {
+                    alerts.Add(new SecurityAlert(
+                        Severity: "medium",
+                        Category: "Concurență",
+                        Title:    $"{item.Count} cereri simultane respinse de la {item.Ip}",
+                        Detail:   "În ultimele 24 de ore. Filtrați jurnalul după această adresă: cereri " +
+                                   "paralele repetate pe autentificare sau 2FA indică o încercare automată.",
+                        Username: (string?)null));
+                }
             }
 
             // Severitatea decide ordinea. Un singur "high" ingropat sub zece "low"
@@ -357,6 +429,13 @@ namespace MAI.Api.Controllers
 
         /// <summary>De la câte eșecuri în 24h un cont devine semnal, nu zgomot.</summary>
         private const int FailedLoginAlertThreshold = 5;
+
+        /// <summary>
+        /// De la câte conflicte de concurență de pe același IP, în 24h, apare
+        /// alerta. Un utilizator obișnuit ajunge la unul-două pe zi (dublu-clic);
+        /// cinci înseamnă deja cereri trimise în paralel.
+        /// </summary>
+        private const int ConflictBurstThreshold = 5;
 
         /// <summary>
         /// Plafon per categorie. O pagină cu trei sute de alerte e o pagină pe

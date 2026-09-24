@@ -34,6 +34,8 @@ namespace MAI.DataAccessLayer
             modelBuilder.ApplyConfiguration(new InternalDocumentConfiguration());
             modelBuilder.ApplyConfiguration(new InternalDocumentTargetConfiguration());
             modelBuilder.ApplyConfiguration(new InternalDocumentRecipientConfiguration());
+            modelBuilder.ApplyConfiguration(new DocumentConfiguration());
+            modelBuilder.ApplyConfiguration(new DocumentVersionConfiguration());
         }
 
         // Toate variantele publice de SaveChanges ajung în aceste două metode,

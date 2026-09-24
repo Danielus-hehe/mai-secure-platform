@@ -23,7 +23,8 @@ namespace MAI.BusinessLogic.Storage
         /// și în appsettings.json. Toate transferurile și documentele normative
         /// coexistă în același bucket:
         ///   • Transferuri:  {dept-slug}/{yyyy}/{MM}/{transferId:N}.enc
-        ///   • Documente:    documents/{docId:N}/v{n}.{ext}
+        ///   • Documente:    documents/{docId:N}/v{n}-{încercare:N}.{ext}
+        ///                   (sufix unic per încărcare; cheile vechi: v{n}.{ext})
         ///
         /// Mediu de producție - dacă volumul o cere sau politicile IAM o impun, se
         /// pot folosi bucket-uri separate (ex. "mai-secure-transfers" și

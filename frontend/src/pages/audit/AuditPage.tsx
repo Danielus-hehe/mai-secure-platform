@@ -207,11 +207,20 @@ export default function AuditPage() {
 
     const canExport = hasRole('SEF_DIRECTIE');
 
+    // Serverul filtrează jurnalul pentru șefii de direcție (vezi AuditScope în
+    // backend); subtitlul spune asta, ca un rezultat „incomplet” să nu pară o
+    // eroare. Filtrarea NU se face aici: interfața doar o descrie.
+    const seesWholeMinistry = hasRole('ADMINISTRATOR');
+
     return (
         <div className="space-y-6">
             <PageHeader
                 title="Jurnal de audit"
-                subtitle="Toate acțiunile înregistrate: utilizator, acțiune, timestamp, IP, rezultat"
+                subtitle={
+                    seesWholeMinistry
+                        ? 'Toate acțiunile înregistrate: utilizator, acțiune, timestamp, IP, rezultat'
+                        : 'Acțiunile dumneavoastră și ale membrilor subdiviziunii pe care o conduceți'
+                }
                 actions={
                     canExport ? (
                         <div className="flex gap-2">

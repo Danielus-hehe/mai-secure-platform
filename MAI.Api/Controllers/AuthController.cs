@@ -397,8 +397,13 @@ namespace MAI.Api.Controllers
                 // alege înainte, fiindcă intră în JWT (claim-ul „sid”).
                 var sessionId = Guid.NewGuid();
                 var issued    = _tokens.IssueTokens(user, sessionId);
-                _sessions.Create(
+                var session   = _sessions.Create(
                     sessionId, user, issued.RefreshTokenHash, issued.RefreshTokenExpiresAt, UserAgent, Ip);
+
+                // Expirarea reală, după limita absolută a sesiunii. Tokenul e
+                // emis cu RefreshTokenDays, dar sesiunea poate fi mai scurtă;
+                // clientul trebuie să vadă ce contează efectiv.
+                issued.Response.RefreshTokenExpiresAt = session.ExpiresAt;
 
                 AddAudit(user.Id, user.Username, AuditAction.Login,
                     (useDirectory ? "Autentificare reusita prin Active Directory" : "Autentificare reusita") +
@@ -582,8 +587,9 @@ namespace MAI.Api.Controllers
             var issued    = _tokens.IssueTokens(user, sessionId);
             var response  = issued.Response;
 
-            _sessions.Create(
+            var session = _sessions.Create(
                 sessionId, user, issued.RefreshTokenHash, issued.RefreshTokenExpiresAt, UserAgent, Ip);
+            response.RefreshTokenExpiresAt = session.ExpiresAt;
 
             AddAudit(user.Id, user.Username, AuditAction.Login,
                 usedRecoveryCode
@@ -646,6 +652,23 @@ namespace MAI.Api.Controllers
 
             if (session?.User is null)
             {
+                // Înainte de „invalid”: e tokenul de dinaintea ultimei rotații al
+                // unei sesiuni încă deschise? Atunci două părți au avut același
+                // token. Clientul legitim nu retrimite un token rotit (filele se
+                // rotesc pe rând, sub lacăt), deci una dintre ele l-a copiat.
+                // Nu putem ști care, așa că sesiunea se închide pentru amândouă.
+                //
+                // Fără fereastră de toleranță: dacă răspunsul unei rotații se
+                // pierde pe rețea, clientul a pierdut oricum tokenul nou, deci
+                // sesiunea îi e deja inutilizabilă. O toleranță ar ajuta doar un
+                // atacator care reușește să folosească tokenul în acele secunde.
+                var reused = await _sessions.FindActiveByPreviousTokenAsync(hash, ct);
+                if (reused?.User is not null)
+                {
+                    await CloseReusedSessionAsync(reused, "token deja rotit, prezentat din nou");
+                    return Unauthorized(new { message = genericError });
+                }
+
                 await WriteAuditAsync(null, "necunoscut", AuditAction.Login,
                     "Refresh token invalid, revocat sau expirat", AuditResult.Failure);
                 return Unauthorized(new { message = genericError });
@@ -675,13 +698,73 @@ namespace MAI.Api.Controllers
             var issued = _tokens.IssueTokens(user, session.Id);
             _sessions.Rotate(session, issued.RefreshTokenHash, issued.RefreshTokenExpiresAt);
 
-            await _context.SaveChangesAsync(ct);
+            // Expirarea reală: rotația nu trece de limita absolută a sesiunii.
+            issued.Response.RefreshTokenExpiresAt = session.ExpiresAt;
+
+            try
+            {
+                await _context.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                // Altă cerere a rotit ACEEAȘI sesiune, cu ACELAȘI token, între
+                // citirea și scrierea noastră (tokenul xmin al rândului s-a
+                // schimbat). E aceeași situație ca mai sus, doar prinsă în
+                // aceeași fracțiune de secundă: două părți au același token.
+                var sessionId = session.Id;
+                _context.ChangeTracker.Clear();
+
+                var current = await _context.UserSessions
+                    .Include(s => s.User)
+                    .FirstOrDefaultAsync(s => s.Id == sessionId, CancellationToken.None);
+
+                if (current?.User is not null && current.RevokedAt is null)
+                    await CloseReusedSessionAsync(current, "acelasi token folosit in cereri simultane");
+
+                return Unauthorized(new { message = genericError });
+            }
 
             // Reîmprospătarea NU se scrie în audit: se întâmplă la fiecare
             // cincisprezece minute, pentru fiecare sesiune activă, și ar îneca
             // jurnalul în zgomot. Activitatea rămâne vizibilă prin LastSeenAt.
 
             return Ok(issued.Response);
+        }
+
+        /// <summary>
+        /// Închide o sesiune al cărei refresh token a fost folosit de două părți
+        /// și lasă urma în jurnal (acțiunea RefreshTokenReused, afișată și ca
+        /// alertă pe /admin). Rândul spune de unde și când s-a deschis sesiunea:
+        /// e primul lucru pe care îl caută cine investighează.
+        /// </summary>
+        private async Task CloseReusedSessionAsync(UserSession session, string how)
+        {
+            var username = session.User?.Username ?? "necunoscut";
+
+            _sessions.Revoke(session, "refolosire refresh token");
+
+            AddAudit(session.UserId, username, AuditAction.RefreshTokenReused,
+                $"Refresh token refolosit ({how}). Sesiunea {session.Id} a fost inchisa; " +
+                $"deschisa la {session.CreatedAt:yyyy-MM-dd HH:mm} UTC de la {session.IpAddress ?? "-"}, " +
+                $"cererea curenta de la {Ip}",
+                AuditResult.Failure);
+
+            _logger.LogWarning(
+                "Refresh token refolosit pentru {Username}: {How}. Sesiunea {SessionId} inchisa, IP={Ip}",
+                username, how, session.Id, Ip);
+
+            try
+            {
+                // CancellationToken.None: clientul poate închide conexiunea după
+                // 401, dar închiderea sesiunii trebuie să ajungă în bază oricum.
+                await _context.SaveChangesAsync(CancellationToken.None);
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                // O altă cerere a închis-o în același moment (tot pentru
+                // refolosire): rezultatul e cel dorit, iar rândul ei de audit
+                // există deja.
+            }
         }
 
         // ═════════════════════════════════════════════════════════════════════

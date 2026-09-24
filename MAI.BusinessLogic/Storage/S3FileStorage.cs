@@ -196,10 +196,25 @@ namespace MAI.BusinessLogic.Storage
             {
                 if (_bucketChecked) return;
 
-                var buckets = await _client.ListBucketsAsync(ct);
-                var exists  = buckets.Buckets.Exists(b =>
-                    string.Equals(b.BucketName, _options.Bucket, StringComparison.Ordinal));
+                // GetBucketLocation, nu ListBuckets: API-ul rulează cu un cont de
+                // serviciu limitat la bucketul propriu (creat de minio-init), care
+                // intenționat nu poate enumera bucketurile altora. ListBuckets ar fi
+                // cerut s3:ListAllMyBuckets, adică exact dreptul pe care nu i-l dăm.
+                bool exists;
+                try
+                {
+                    await _client.GetBucketLocationAsync(_options.Bucket, ct);
+                    exists = true;
+                }
+                catch (AmazonS3Exception ex) when (ex.ErrorCode == "NoSuchBucket")
+                {
+                    exists = false;
+                }
 
+                // Crearea reușește doar cu un cont care are dreptul (MinIO local,
+                // în dezvoltare, cu root). Contul de serviciu din Docker primește
+                // AccessDenied - corect: acolo bucketul îl creează minio-init, cu
+                // versionare și reguli de retenție, nu API-ul fără ele.
                 if (!exists)
                 {
                     _logger.LogWarning(

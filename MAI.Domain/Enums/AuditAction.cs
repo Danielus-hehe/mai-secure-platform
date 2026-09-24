@@ -78,5 +78,20 @@ namespace MAI.Domain.Enums
 
         /// <summary>Administratorul a confirmat importul structurii din unitățile organizatorice AD.</summary>
         DirectoryStructureImported = 25,
+
+        /// <summary>
+        /// Un refresh token deja rotit a fost prezentat din nou, sau același
+        /// token a venit în două cereri simultane. Clientul legitim nu face
+        /// asta niciodată, deci tokenul a fost copiat; sesiunea se închide.
+        /// </summary>
+        RefreshTokenReused = 26,
+
+        /// <summary>
+        /// O salvare a fost respinsă pentru că rândul se schimbase între citire
+        /// și scriere (token xmin) sau încălca un index unic. Cele mai multe
+        /// sunt dublu-clicuri; multe de la aceeași adresă, în scurt timp, arată
+        /// cereri paralele trimise intenționat (ex. coduri 2FA în rafală).
+        /// </summary>
+        ConcurrencyConflict = 27,
     }
 }

@@ -41,6 +41,11 @@ namespace MAI.Api.Configuration
             new Dictionary<string, string[]>(StringComparer.Ordinal)
             {
                 ["DB_CONNECTION_STRING"] = new[] { "ConnectionStrings__DefaultConnection" },
+                // Rolul aplicației: folosit doar de db:migrate, care îl creează și îi
+                // dă drepturile minime. API-ul pornit cu dotnet run rămâne pe
+                // conexiunea din DB_CONNECTION_STRING.
+                ["POSTGRES_APP_USER"]     = new[] { "Database__AppUser" },
+                ["POSTGRES_APP_PASSWORD"] = new[] { "MAI_DB_APP_PASSWORD" },
                 ["FRONTEND_ORIGIN"]      = new[] { "Cors__AllowedOrigins__0", "Frontend__BaseUrl" },
                 ["STORAGE_BUCKET"]       = new[] { "Storage__Bucket" },
                 ["MINIO_ROOT_USER"]      = new[] { "MAI_STORAGE_ACCESS_KEY" },
@@ -54,6 +59,7 @@ namespace MAI.Api.Configuration
                 ["TRANSFER_MAX_EXPIRY_DAYS"]     = new[] { "Transfers__MaxExpiryDays" },
                 ["TRANSFER_MAX_RECIPIENTS"]      = new[] { "Transfers__MaxRecipients" },
                 ["PASSWORD_RESET_TOKEN_MINUTES"] = new[] { "PasswordReset__TokenMinutes" },
+                ["SESSION_ABSOLUTE_HOURS"]       = new[] { "Jwt__SessionAbsoluteHours" },
                 ["STORAGE_ENCRYPTION_ENABLED"]         = new[] { "StorageEncryption__Enabled" },
                 ["STORAGE_ENCRYPTION_ACTIVE_KEY"]      = new[] { "StorageEncryption__ActiveKeyId" },
                 ["STORAGE_ENCRYPTION_ALLOW_PLAINTEXT"] = new[] { "StorageEncryption__AllowPlaintextRead" },

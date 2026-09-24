@@ -138,7 +138,10 @@ Sistemul e construit astfel incat in acest scenariu:
 | Protectie DoS Argon2 | Semafor cu maxim 4 hash-uri simultane; depasit → 503 + `Retry-After` |
 | Politica de parole | Lungime, clase de caractere, interzicere username in parola, lista de parole banale |
 | Blocare cont | Progresiva, exponentiala: 5 esecuri → 5 min, dublu pana la 8 h |
-| Rate limiting | Per IP, pe categorii: login, refresh, operatii cu parola, upload |
+| Rate limiting | Per IP, pe categorii: login, refresh, operatii cu parola (upload-urile nu au inca limita per utilizator) |
+| Privilegii minime in PostgreSQL | API-ul ruleaza cu rolul `POSTGRES_APP_USER`, creat de `db:migrate`: fara DDL, iar pe `AuditLogs` doar SELECT si INSERT - jurnalul e append-only la nivelul bazei |
+| Privilegii minime in MinIO | API-ul foloseste un cont de serviciu creat de `minio-init`, limitat la citire/scriere/stergere de obiecte in bucketul propriu; root doar la init si backup |
+| Jurnal filtrat pe subdiviziune | Seful de directie vede in jurnal, export si alerte doar actiunile subdiviziunii pe care o conduce (`AuditScope`); administratorul vede tot |
 | 2FA TOTP (RFC 6238) | Secret cifrat, fereastra de ±1 interval, reprotectie anti-replay, 10 coduri de recuperare |
 | 2FA obligatoriu pe roluri privilegiate | `PrivilegedMfaFilter` verifica `amr = mfa` pe endpointurile de administrator |
 | Confirmare email | Token aleatoriu 256-bit, SHA-256 in DB, expiry 72 h, blocare login pana la activare |
@@ -230,7 +233,7 @@ In modul publicat, browserul vorbeste doar cu nginx, iar cifrotextul trece prin 
 | **DEK**: cheia de fisier stocare (AES-256-GCM) | API-ul, per document | Impachetata cu cheia principala, in antetul fisierului | API-ul la citire/scriere | Cat documentul |
 | **Cheia principala** stocare | Operatorul (`openssl rand`) | `.env` (`MAI_STORAGE_MASTER_KEYS`) | Procesul API | Pana la rotire |
 | Secret **TOTP** | Server | `Users.TwoFactorSecret`, cifrat AES-GCM cu `MAI_TWOFACTOR_KEY` | Serverul (necesar pentru verificarea codului) | Pana la dezactivare |
-| **Refresh token** (512 biti aleatori) | Server | In `UserSessions` doar SHA-256; in clar in browser | Browserul | 7 zile, rotit la fiecare folosire |
+| **Refresh token** (512 biti aleatori) | Server | In `UserSessions` doar SHA-256 (plus hash-ul celui anterior, pentru detectarea refolosirii); in clar in browser | Browserul | 7 zile, rotit la fiecare folosire, dar niciodata peste durata absoluta a sesiunii (12 h implicit) |
 | **Token invitatie** (256 biti aleatori) | Server, la creare cont | SHA-256 in `Users.InvitationToken`; tokenul brut doar in email | Nimeni dupa trimitere | 72 ore |
 | **Cheia JWT**, **pepper-ul Argon2**, **cheia 2FA** | Operatorul (`openssl rand`) | Variabile de mediu, niciodata in Git | Procesul API | Pana la rotire |
 
@@ -319,7 +322,9 @@ Cheile private sunt incuiate cu parola. Schimbarea parolei fara reimpachetarea b
 | 2FA TOTP (RFC 6238) | Secret cifrat AES-GCM; token de provocare opac (nu JWT); anti-replay | 30 s, ±1 fereastra; 10 coduri de recuperare |
 | 2FA pe roluri privilegiate | `PrivilegedMfaFilter` pe endpointurile cu rol ≥ Sef directie | Activabil din `TwoFactor:RequiredForPrivilegedRoles` |
 | Token de acces | JWT HS256, issuer si audience validate, `ClockSkew = 0`; claim `sid` verificat la fiecare cerere (`SessionTokenValidator`): sesiunea deschisa, contul activ, rolul neschimbat | 15 minute, dar invalid imediat ce sesiunea se inchide |
-| Sesiuni | Per dispozitiv (`UserSessions`), refresh token opac rotit, stocat SHA-256 | 7 zile, vizibil si revocabil din profil |
+| Sesiuni | Per dispozitiv (`UserSessions`), refresh token opac rotit, stocat SHA-256; un token rotit prezentat din nou (sau acelasi token in cereri simultane) inchide sesiunea | Maxim `SESSION_ABSOLUTE_HOURS` (12 h) de la autentificare, oricate reinnoiri; vizibil si revocabil din profil |
+| Concurenta | Token `xmin` pe `Users`, `UserSessions`, `Documents`; index unic pe versiunile documentelor; conflictul devine 409 cu rand de audit (`ConcurrencyConflictMiddleware`) | Contoarele de blocare, incercarile 2FA si codurile de recuperare nu mai pot fi ocolite cu cereri paralele |
+| Autorizare implicita | `FallbackPolicy` = utilizator autentificat | Un endpoint nou fara atribut e inchis, nu public |
 | Autorizare | Roluri declarate explicit pe fiecare endpoint, verificate automat in CI | Utilizator (1) · Sef directie (2) · Administrator (3) |
 | Unicitate conturi | Username si email unice, fara diferenta de majuscule | Indexuri pe `lower(...)`, email optional |
 | Perimetru | Middleware intranet-only pe plaje IP configurate | Dezactivat implicit; mod `AuditOnly` pentru rodaj |
@@ -380,6 +385,8 @@ Fara cookie nu exista CSRF clasic.
 ### D6. Sesiuni per dispozitiv, cu refresh token opac
 
 O singura coloana de refresh token per user ar deconecta toate dispozitivele la fiecare reinnoire.
+
+Sesiunea are o durata absoluta (implicit 12 ore de la autentificare): rotatia muta expirarea tokenului, dar nu si sfarsitul sesiunii. Fara ea, o sesiune folosita zilnic nu expira niciodata, iar un refresh token copiat ramanea bun cat timp era reinnoit. Serverul pastreaza si hash-ul tokenului inlocuit la ultima rotatie: daca acesta revine, doua parti au avut aceeasi sesiune, iar sesiunea se inchide pentru amandoua (actiunea `RefreshTokenReused`, alerta pe /admin). Nu exista fereastra de toleranta: un client legitim care pierde raspunsul unei rotatii a pierdut oricum tokenul nou.
 
 ### D7. MinIO auto-gazduit, cu URL-uri presemnate (dezvoltare) / proxy prin API (productie)
 
@@ -479,13 +486,14 @@ docs/STORAGE-ENCRYPTION.md  criptarea documentelor normative si interne in MinIO
 ```bash
 cp .env.example .env              # completati secretele: openssl rand -base64 48
 docker compose up -d postgres
-dotnet ef database update --project MAI.DataAccessLayer --startup-project MAI.Api
+dotnet run --project MAI.Api -- db:migrate    # sau: docker compose run --rm migrate
 ```
 
 Dezvoltare (API si frontend pe masina locala):
 
 ```bash
 docker compose up -d postgres minio minio-init
+dotnet run --project MAI.Api -- db:migrate
 dotnet run --project MAI.Api
 cd frontend && npm ci && npm run dev          # http://localhost:5173
 ```

@@ -32,7 +32,25 @@ namespace MAI.BusinessLogic.Security
         /// </summary>
         public int AccessTokenMinutes { get; set; } = 15;
 
+        /// <summary>
+        /// Cât trăiește un refresh token de la emitere. Fiecare rotație emite
+        /// unul nou, deci valoarea spune cât poate lipsi un utilizator (laptop
+        /// închis peste weekend) fără să se autentifice din nou.
+        /// </summary>
         public int RefreshTokenDays { get; set; } = 7;
+
+        /// <summary>
+        /// Durata absolută a unei sesiuni, în ore, de la autentificare.
+        ///
+        /// Rotația prelungea sesiunea cu <see cref="RefreshTokenDays"/> la
+        /// fiecare /refresh, deci o sesiune activă nu expira niciodată. Un
+        /// refresh token copiat rămânea bun cât timp hoțul îl folosea măcar o
+        /// dată pe săptămână. Limita fixă îl obligă pe oricine, titular sau nu,
+        /// să treacă din nou prin parolă (și 2FA) după o zi de lucru.
+        /// Implicit 12: o tură lungă, fără ca utilizatorul să fie deconectat în
+        /// mijlocul ei. Din .env: SESSION_ABSOLUTE_HOURS.
+        /// </summary>
+        public int SessionAbsoluteHours { get; set; } = 12;
 
         /// <summary>Valoarea-șablon din appsettings.json versionat.</summary>
         public const string PlaceholderKey = "YOUR_JWT_SECRET_KEY_HERE";
@@ -85,6 +103,26 @@ namespace MAI.BusinessLogic.Security
 
             if (AccessTokenMinutes <= 0)  AccessTokenMinutes = 15;
             if (RefreshTokenDays   <= 0)  RefreshTokenDays   = 7;
+            if (SessionAbsoluteHours <= 0) SessionAbsoluteHours = 12;
+
+            // O sesiune mai scurtă decât un token de acces ar expira înaintea
+            // primului refresh: utilizatorul ar fi deconectat la fiecare cerere
+            // după primul sfert de oră, fără vreo explicație.
+            if (SessionAbsoluteHours * 60 < AccessTokenMinutes)
+            {
+                throw new InvalidOperationException(
+                    $"Jwt:SessionAbsoluteHours ({SessionAbsoluteHours} h) este mai mică decât durata " +
+                    $"tokenului de acces ({AccessTokenMinutes} min). Măriți SESSION_ABSOLUTE_HOURS.");
+            }
+
+            // Peste 30 de zile, limita absolută nu mai limitează nimic practic:
+            // e mai probabil o unitate greșită (minute în loc de ore).
+            if (SessionAbsoluteHours > 720)
+            {
+                throw new InvalidOperationException(
+                    $"Jwt:SessionAbsoluteHours = {SessionAbsoluteHours} depășește 720 (30 de zile). " +
+                    "Valoarea este în ore; verificați SESSION_ABSOLUTE_HOURS.");
+            }
 
             // Un token de acces cu viață lungă anulează rostul refresh token-ului:
             // revocarea la logout n-ar avea efect până la expirare.
