@@ -381,6 +381,13 @@ verifică la final drepturile **efective** (`has_table_privilege`) și eșuează
 dacă rolul are mai mult decât trebuie, de exemplu printr-un GRANT manual făcut
 cândva sau prin apartenența la alt rol.
 
+**Baze venite de pe Supabase.** Acolo Row Level Security e de obicei activat pe
+tabele, cu politici pentru rolurile Supabase. Restaurarea sare politicile, dar
+lasă RLS activat, ceea ce pentru orice rol în afară de proprietar înseamnă
+„nimic permis”. `migrate` dezactivează RLS pe tabelele fără nicio politică și le
+listează în log. Dacă găsește tabele cu politici, se oprește și le numește: le
+ștergeți manual (`DROP POLICY`), aplicația nu folosește RLS.
+
 Înainte de o actualizare care aduce migrări noi: un backup (secțiunea 8).
 
 ### 7.3 Mutarea datelor de pe Supabase
@@ -629,4 +636,4 @@ docker compose logs --tail 200 api
 - [ ] Backup programat, copiat în afara serverului, **o restaurare de probă reușită**
 - [ ] Porturile 9000/9001 neexpuse în afara gazdei (implicit așa sunt)
 - [ ] Samba AD de laborator oprit; `LDAP_HOST` spre controlerul de domeniu real, cu LDAPS
-- [ ] Imaginile `quay.io/minio/minio` și `quay.io/minio/mc` fixate pe o versiune exactă în `docker-compose.yml` (Docker Hub nu le mai are din 11.09.2026)
+- [ ] Imaginile `cgr.dev/chainguard/minio` și `cgr.dev/chainguard/minio-client` fixate pe digest în `docker-compose.yml` (MinIO nu mai publică imagini: Docker Hub le-a șters la 11.09.2026, quay.io refuză pull-ul anonim din 24.09.2026)

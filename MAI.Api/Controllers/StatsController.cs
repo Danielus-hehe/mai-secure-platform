@@ -215,6 +215,7 @@ namespace MAI.Api.Controllers
             {
                 alerts.Add(new SecurityAlert(
                     Severity: "high",
+                    Group:    "failed-logins",
                     Category: "Autentificare",
                     Title:    $"{item.Count} încercări eșuate pentru @{item.Username}",
                     Detail:   "În ultimele 24 de ore. Verificați dacă este o parolă uitată " +
@@ -241,6 +242,7 @@ namespace MAI.Api.Controllers
             {
                 alerts.Add(new SecurityAlert(
                     Severity: "medium",
+                    Group:    "recovery-codes",
                     Category: "2FA",
                     Title:    $"@{item.Username} s-a autentificat cu un cod de recuperare",
                     Detail:   $"{item.Timestamp:dd.MM.yyyy HH:mm} UTC, de la {item.IpAddress}. " +
@@ -265,6 +267,7 @@ namespace MAI.Api.Controllers
             {
                 alerts.Add(new SecurityAlert(
                     Severity: "high",
+                    Group:    "bad-signatures",
                     Category: "Integritate",
                     Title:    $"Semnătură invalidă la o descărcare a lui @{item.Username}",
                     Detail:   $"{item.Timestamp:dd.MM.yyyy HH:mm} UTC. Fișierul a ajuns la destinatar, " +
@@ -289,6 +292,7 @@ namespace MAI.Api.Controllers
             {
                 alerts.Add(new SecurityAlert(
                     Severity: "high",
+                    Group:    "privileged-no-2fa",
                     Category: "Configurare",
                     Title:    $"@{item.Username} ({item.Role}) nu are 2FA activat",
                     Detail:   "Un cont privilegiat fără al doilea factor reduce securitatea " +
@@ -308,6 +312,7 @@ namespace MAI.Api.Controllers
             {
                 alerts.Add(new SecurityAlert(
                     Severity: "low",
+                    Group:    "locked-accounts",
                     Category: "Autentificare",
                     Title:    $"Contul @{item.Username} este blocat",
                     Detail:   $"Deblocare automată la {item.LockoutEndsAt:dd.MM.yyyy HH:mm} UTC. " +
@@ -326,6 +331,7 @@ namespace MAI.Api.Controllers
             {
                 alerts.Add(new SecurityAlert(
                     Severity: "low",
+                    Group:    "missing-keys",
                     Category: "Configurare",
                     Title:    $"{withoutKeys} utilizatori activi nu și-au generat cheile",
                     Detail:   "Nu pot primi fișiere. Cheile se generează automat la prima " +
@@ -350,6 +356,7 @@ namespace MAI.Api.Controllers
             {
                 alerts.Add(new SecurityAlert(
                     Severity: "high",
+                    Group:    "token-reuse",
                     Category: "Sesiuni",
                     Title:    $"Sesiune a lui @{item.Username} folosită de două părți",
                     Detail:   $"{item.Timestamp:dd.MM.yyyy HH:mm} UTC, cerere de la {item.IpAddress}. " +
@@ -381,6 +388,7 @@ namespace MAI.Api.Controllers
                 {
                     alerts.Add(new SecurityAlert(
                         Severity: "medium",
+                        Group:    "concurrency-bursts",
                         Category: "Concurență",
                         Title:    $"{item.Count} cereri simultane respinse de la {item.Ip}",
                         Detail:   "În ultimele 24 de ore. Filtrați jurnalul după această adresă: cereri " +
@@ -410,8 +418,82 @@ namespace MAI.Api.Controllers
         /// de bază de date e o soluție care funcționează exact până la prima
         /// redenumire de câmp, când eșuează la runtime în loc de compilare.
         /// </summary>
+        // GET api/Stats/two-factor - cine are și cine nu are 2FA activat
+        /// <summary>
+        /// Acoperirea cu al doilea factor, pentru panoul de administrare.
+        ///
+        /// Alerta „cont privilegiat fără 2FA” arată doar riscul mare (administratori
+        /// și șefi). Aici e imaginea completă, pe care administratorul o folosește
+        /// când pregătește activarea TWOFACTOR_REQUIRED_PRIVILEGED sau urmărește
+        /// cine încă nu și-a configurat aplicația de autentificare.
+        ///
+        /// Doar conturile active: unul dezactivat nu se poate autentifica oricum.
+        /// Aceeași regulă de vizibilitate ca jurnalul și alertele: un șef de
+        /// direcție vede doar oamenii subdiviziunii lui.
+        ///
+        /// Nu se trimite nimic despre secret sau coduri în sine, doar starea și
+        /// data activării.
+        /// </summary>
+        [Authorize(Roles = "Administrator,SefDirectie")]
+        [HttpGet("two-factor")]
+        public async Task<IActionResult> GetTwoFactorCoverage(CancellationToken ct)
+        {
+            var visible = await OrgStructure.AuditVisibleUsersAsync(_context, User, ct);
+
+            var query = _context.Users.AsNoTracking().Where(u => u.IsActive);
+            if (visible is not null)
+                query = query.Where(u => visible.Contains(u.Id));
+
+            var people = await query
+                .OrderByDescending(u => u.Role)
+                .ThenBy(u => u.Username)
+                .Select(u => new TwoFactorPerson(
+                    u.Id,
+                    u.Username,
+                    u.FullName,
+                    u.Role.ToString(),
+                    u.OrgUnit != null ? u.OrgUnit.Name : null,
+                    u.AuthProvider == AuthProvider.Ldap,
+                    u.TwoFactorEnabled,
+                    u.TwoFactorEnabled ? u.TwoFactorEnrolledAt : null))
+                .ToListAsync(ct);
+
+            var enabled  = people.Where(p => p.Enabled).ToList();
+            var disabled = people.Where(p => !p.Enabled).ToList();
+
+            return Ok(new
+            {
+                total                    = people.Count,
+                enabledCount             = enabled.Count,
+                disabledCount            = disabled.Count,
+                // Numărul care contează pentru TWOFACTOR_REQUIRED_PRIVILEGED:
+                // cât timp e peste zero, activarea obligației i-ar bloca pe ei.
+                privilegedWithoutCount   = disabled.Count(p => p.Role != nameof(UserRole.Utilizator)),
+                enabled,
+                disabled,
+            });
+        }
+
+        private sealed record TwoFactorPerson(
+            Guid Id,
+            string Username,
+            string? FullName,
+            string Role,
+            string? Unit,
+            bool IsDirectoryAccount,
+            bool Enabled,
+            DateTime? EnrolledAt);
+
+        /// <param name="Group">
+        /// Cheie stabilă a tipului de alertă (ex. „privileged-no-2fa”). Panoul le
+        /// grupează după ea în secțiuni pliabile: zece conturi fără 2FA devin o
+        /// singură linie „Conturi privilegiate fără 2FA (10)”, nu zece rânduri
+        /// care împing restul alertelor în afara ecranului. Separată de Category,
+        /// care e textul afișat și poate aduna mai multe tipuri.
+        /// </param>
         private sealed record SecurityAlert(
             string Severity,
+            string Group,
             string Category,
             string Title,
             string Detail,

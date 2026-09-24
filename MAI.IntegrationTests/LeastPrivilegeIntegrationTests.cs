@@ -94,6 +94,50 @@ public class LeastPrivilegeIntegrationTests : IClassFixture<SgdmWebFactory>
     }
 
     [Fact]
+    public async Task RlsRamasDePeSupabase_FaraPolitici_EsteDezactivat_CuPoliticiEsteRaportat()
+    {
+        // Exact baza mutată de pe Supabase: RLS activat pe tabele, politicile
+        // sărite la restaurare. Proprietarul trece peste RLS, rolul aplicației nu:
+        // fără reparație, primul INSERT în AuditLogs (la login) dădea 500.
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE \"AuditLogs\" ENABLE ROW LEVEL SECURITY");
+            await db.Database.ExecuteSqlRawAsync(
+                "CREATE TABLE rls_cu_politica (id int); " +
+                "ALTER TABLE rls_cu_politica ENABLE ROW LEVEL SECURITY; " +
+                "CREATE POLICY p_test ON rls_cu_politica FOR SELECT USING (true);");
+        }
+
+        try
+        {
+            var report = await ProvisionAsync();
+
+            Assert.Contains("AuditLogs", report.RowSecurityDisabled);
+            Assert.Contains("rls_cu_politica", report.RowSecurityWithPolicies);
+            Assert.DoesNotContain("rls_cu_politica", report.RowSecurityDisabled);
+
+            // Rolul aplicației poate din nou adăuga în jurnal.
+            await using var app = ConnectAsApp();
+            await app.OpenAsync();
+            Assert.Equal(1, await ExecAsync(app,
+                "INSERT INTO \"AuditLogs\" (\"Id\", \"Username\", \"Action\", \"Details\", \"Result\", \"IpAddress\", \"Timestamp\") " +
+                "VALUES (gen_random_uuid(), 'rol.aplicatie', 0, 'dupa RLS', 0, '127.0.0.1', now())"));
+
+            // A doua rulare nu mai are ce dezactiva.
+            Assert.Empty((await ProvisionAsync()).RowSecurityDisabled);
+        }
+        finally
+        {
+            // Tabelul cu politică ar face ca db:migrate să raporteze eroare în
+            // celelalte teste care rulează pe aceeași bază.
+            using var scope = _factory.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.Database.ExecuteSqlRawAsync("DROP TABLE IF EXISTS rls_cu_politica");
+        }
+    }
+
+    [Fact]
     public async Task RolulAplicatiei_NuPoateFiProprietarul()
     {
         using var scope = _factory.Services.CreateScope();

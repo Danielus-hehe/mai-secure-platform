@@ -92,22 +92,29 @@ services:
       start_period: 10s
 
   minio:
-    # Registrul: quay.io, NU Docker Hub. In jurul datei de 11.09.2026, MinIO a
-    # sters depozitele minio/minio si minio/mc de pe Docker Hub; orice 'pull'
-    # de acolo esueaza cu „pull access denied”, chiar si pentru versiuni fixate.
-    # Aceleasi imagini raman publicate de MinIO pe quay.io.
+    # Registrul: Chainguard (cgr.dev), NU MinIO. MinIO nu mai publica imagini
+    # pentru comunitate: minio/minio si minio/mc au disparut de pe Docker Hub
+    # (11.09.2026), iar quay.io/minio/* raspunde 401 la orice pull anonim
+    # (24.09.2026), inclusiv pentru versiuni fixate. Chainguard compileaza
+    # MinIO din sursa si publica gratuit eticheta 'latest'; binarul e acelasi
+    # server, cu aceeasi comanda (server /data) si cu mc inclus (healthcheck).
     #
-    # Pentru demonstratie/practica 'latest' e in regula. In productie se
-    # pineaza o versiune exacta (ex. quay.io/minio/minio:RELEASE.2024-11-07T00-52-20Z)
-    # ca un update automat sa nu schimbe comportamentul sub picioarele tale.
+    # Imaginile deja descarcate raman in cache-ul Docker local si merg in
+    # continuare; problema apare pe o masina curata (server nou, CI).
     #
-    # Risc cunoscut: Community Edition e acum distribuita doar ca sursa, iar
-    # imaginile de pe quay.io nu mai primesc actualizari. Pe termen lung,
-    # stocarea S3 poate fi mutata pe o alternativa intretinuta (SeaweedFS,
-    # Garage); API-ul vorbeste S3 standard, deci schimbarea ar fi de configurare.
-    image: quay.io/minio/minio:latest
+    # Productie: fixati imaginea pe digest (cgr.dev/chainguard/minio@sha256:...),
+    # luat cu 'docker inspect --format "{{index .RepoDigests 0}}"'. Pe termen
+    # lung, stocarea poate fi mutata pe o alternativa intretinuta (SeaweedFS,
+    # Garage); API-ul vorbeste S3 standard, deci schimbarea e de configurare.
+    image: cgr.dev/chainguard/minio:latest
     container_name: sgdm-minio
     restart: unless-stopped
+
+    # Imaginea Chainguard ruleaza implicit ca utilizator neprivilegiat, dar
+    # volumul minio-data a fost creat de imaginea oficiala, care rula ca root:
+    # fisierele sunt ale lui root, iar serverul nu le-ar putea citi. Ramane
+    # root, ca inainte, pana la o migrare explicita a drepturilor pe volum.
+    user: "0:0"
 
     # server /data   → unde tine obiectele
     # --console-address → portul interfetei web de administrare
@@ -171,7 +178,8 @@ services:
   # vizibil, nu sa raporteze "MinIO pregatit" fara retentie.
   # ───────────────────────────────────────────────────────────────────────────
   minio-init:
-    image: quay.io/minio/mc:latest
+    # Varianta -dev: are shell (scriptul de mai jos); cea minimala are doar mc.
+    image: cgr.dev/chainguard/minio-client:latest-dev
     container_name: sgdm-minio-init
     depends_on:
       minio:
