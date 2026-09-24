@@ -18,13 +18,13 @@
 
 import { useState, type FormEvent } from 'react';
 import { Outlet } from 'react-router-dom';
-import { LockKeyhole, Loader2, LogOut, RefreshCw } from 'lucide-react';
+import { LockKeyhole, Loader2, LogOut } from 'lucide-react';
 import Button from '../ui/Button';
 import api from '../../api/client';
 import { apiErrorMessage } from '../../api/errors';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
-import { rewrapKeysForNewPassword, type RewrapPayload } from '../../crypto/passwordChange';
+import { rewrapKeysForNewPassword } from '../../crypto/passwordChange';
 import type { PublishedKeyBundle } from '../../crypto/E2ee';
 
 interface ServerBundle extends PublishedKeyBundle {
@@ -43,39 +43,11 @@ export default function PasswordChangeGate() {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
 
-    /**
-     * Cazul rar în care contul are deja chei (flag setat manual, de exemplu).
-     * Dacă parola s-a schimbat, dar reîmpachetarea cheilor a eșuat, pachetul
-     * calculat rămâne aici pentru reîncercare. Fără el, cheile ar rămâne
-     * încuiate cu o parolă care nu mai există.
-     */
-    const [pendingRewrap, setPendingRewrap] =
-        useState<{ payload: RewrapPayload; password: string } | null>(null);
-
     if (!user?.mustChangePassword) return <Outlet />;
 
     const finish = async () => {
         toast.success('Parola a fost schimbată. Autentificați-vă cu parola nouă.');
         await logout();
-    };
-
-    const syncKeys = async (payload: RewrapPayload, password: string) => {
-        await api.patch('/Keys/rewrap', { ...payload, currentPassword: password });
-        setPendingRewrap(null);
-    };
-
-    const handleRetrySync = async () => {
-        if (!pendingRewrap) return;
-        setBusy(true);
-        setError('');
-        try {
-            await syncKeys(pendingRewrap.payload, pendingRewrap.password);
-            await finish();
-        } catch (err) {
-            setError(apiErrorMessage(err, 'Sincronizarea cheilor a eșuat din nou.'));
-        } finally {
-            setBusy(false);
-        }
     };
 
     const handleSubmit = async (event: FormEvent) => {
@@ -105,21 +77,13 @@ export default function PasswordChangeGate() {
                 ? await rewrapKeysForNewPassword(currentPassword, newPassword, bundle)
                 : null;
 
-            await api.patch('/Auth/change-password', { currentPassword, newPassword });
-
-            if (payload) {
-                try {
-                    await syncKeys(payload, newPassword);
-                } catch (syncError) {
-                    setPendingRewrap({ payload, password: newPassword });
-                    setError(
-                        'Parola a fost schimbată, dar cheile nu s-au sincronizat. ' +
-                        'Nu închideți pagina și apăsați „Reîncearcă sincronizarea”.'
-                    );
-                    console.error('Rewrap esuat dupa schimbarea parolei:', syncError);
-                    return;
-                }
-            }
+            // Parola și cheile (dacă există) într-o singură cerere: serverul le
+            // salvează în aceeași tranzacție, deci nu pot ajunge nesincronizate.
+            await api.patch('/Auth/change-password', {
+                currentPassword,
+                newPassword,
+                keys: payload ?? undefined,
+            });
 
             setCurrentPassword('');
             setNewPassword('');
@@ -159,89 +123,76 @@ export default function PasswordChangeGate() {
                     </p>
                 </div>
 
-                {pendingRewrap ? (
-                    <div className="space-y-4">
-                        <p className="rounded-lg bg-red-50 dark:bg-red-900/30 px-3 py-2 text-sm text-red-700 dark:text-red-400">
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    <div>
+                        <label htmlFor="pwd-current" className={labelClass}>
+                            Parola primită de la administrator
+                        </label>
+                        <input
+                            id="pwd-current"
+                            type="password"
+                            autoComplete="current-password"
+                            autoFocus
+                            required
+                            disabled={busy}
+                            value={currentPassword}
+                            onChange={(e) => setCurrentPassword(e.target.value)}
+                            className={inputClass}
+                        />
+                    </div>
+
+                    <div>
+                        <label htmlFor="pwd-new" className={labelClass}>
+                            Parola nouă
+                        </label>
+                        <input
+                            id="pwd-new"
+                            type="password"
+                            autoComplete="new-password"
+                            required
+                            disabled={busy}
+                            value={newPassword}
+                            onChange={(e) => setNewPassword(e.target.value)}
+                            className={inputClass}
+                            aria-describedby="pwd-new-hint"
+                        />
+                        <p id="pwd-new-hint" className="mt-1.5 text-xs text-mai-400 dark:text-mai-400">
+                            Minim {MIN_LENGTH} caractere, cu majuscule, minuscule, cifre și un simbol.
+                        </p>
+                    </div>
+
+                    <div>
+                        <label htmlFor="pwd-confirm" className={labelClass}>
+                            Confirmați parola nouă
+                        </label>
+                        <input
+                            id="pwd-confirm"
+                            type="password"
+                            autoComplete="new-password"
+                            required
+                            disabled={busy}
+                            value={confirmPassword}
+                            onChange={(e) => setConfirmPassword(e.target.value)}
+                            className={inputClass}
+                        />
+                    </div>
+
+                    {error && (
+                        <p role="alert" className="rounded-lg bg-red-50 dark:bg-red-900/30 px-3 py-2 text-sm text-red-700 dark:text-red-400">
                             {error}
                         </p>
-                        <Button onClick={() => void handleRetrySync()} disabled={busy} className="w-full">
-                            {busy
-                                ? <><Loader2 size={16} className="animate-spin" /> Se sincronizează…</>
-                                : <><RefreshCw size={16} /> Reîncearcă sincronizarea</>}
-                        </Button>
-                    </div>
-                ) : (
-                    <form onSubmit={handleSubmit} className="space-y-4">
-                        <div>
-                            <label htmlFor="pwd-current" className={labelClass}>
-                                Parola primită de la administrator
-                            </label>
-                            <input
-                                id="pwd-current"
-                                type="password"
-                                autoComplete="current-password"
-                                autoFocus
-                                required
-                                disabled={busy}
-                                value={currentPassword}
-                                onChange={(e) => setCurrentPassword(e.target.value)}
-                                className={inputClass}
-                            />
-                        </div>
+                    )}
 
-                        <div>
-                            <label htmlFor="pwd-new" className={labelClass}>
-                                Parola nouă
-                            </label>
-                            <input
-                                id="pwd-new"
-                                type="password"
-                                autoComplete="new-password"
-                                required
-                                disabled={busy}
-                                value={newPassword}
-                                onChange={(e) => setNewPassword(e.target.value)}
-                                className={inputClass}
-                                aria-describedby="pwd-new-hint"
-                            />
-                            <p id="pwd-new-hint" className="mt-1.5 text-xs text-mai-400 dark:text-mai-400">
-                                Minim {MIN_LENGTH} caractere, cu majuscule, minuscule, cifre și un simbol.
-                            </p>
-                        </div>
-
-                        <div>
-                            <label htmlFor="pwd-confirm" className={labelClass}>
-                                Confirmați parola nouă
-                            </label>
-                            <input
-                                id="pwd-confirm"
-                                type="password"
-                                autoComplete="new-password"
-                                required
-                                disabled={busy}
-                                value={confirmPassword}
-                                onChange={(e) => setConfirmPassword(e.target.value)}
-                                className={inputClass}
-                            />
-                        </div>
-
-                        {error && (
-                            <p role="alert" className="rounded-lg bg-red-50 dark:bg-red-900/30 px-3 py-2 text-sm text-red-700 dark:text-red-400">
-                                {error}
-                            </p>
-                        )}
-
-                        <Button
-                            type="submit"
-                            disabled={busy || !currentPassword || !newPassword || !confirmPassword}
-                            className="w-full"
-                        >
-                            {busy
-                                ? <><Loader2 size={16} className="animate-spin" /> Se schimbă parola…</>
-                                : 'Schimbă parola'}
-                        </Button>
-                    </form>
-                )}
+                    <Button
+                        type="submit"
+                        disabled={busy || !currentPassword || !newPassword || !confirmPassword}
+                        className="w-full"
+                    >
+                        {busy
+                            ? <><Loader2 size={16} className="animate-spin" /> Se schimbă parola…</>
+                            : 'Schimbă parola'}
+                    </Button>
+                </form>
 
                 <button
                     type="button"

@@ -551,5 +551,7 @@ export function saveDecryptedFile(plaintext: ArrayBuffer, fileName: string): voi
     document.body.appendChild(link);
     link.click();
     link.remove();
-    URL.revokeObjectURL(url);
+    // Nu imediat: revocarea sincronă după click() poate anula descărcarea în
+    // Firefox și Safari, care pornesc citirea URL-ului asincron.
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

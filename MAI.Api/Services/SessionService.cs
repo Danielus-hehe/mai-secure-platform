@@ -16,8 +16,13 @@ namespace MAI.Api.Services
     public interface ISessionService
     {
         /// <summary>Deschide o sesiune pentru dispozitivul curent.</summary>
+        /// <param name="sessionId">
+        /// Identificatorul ales de apelant ÎNAINTE de emiterea tokenurilor: el
+        /// intră în JWT (claim-ul „sid”), deci trebuie cunoscut înainte ca
+        /// rândul să existe.
+        /// </param>
         UserSession Create(
-            User user, string refreshTokenHash, DateTime expiresAt,
+            Guid sessionId, User user, string refreshTokenHash, DateTime expiresAt,
             string? userAgent, string? ipAddress);
 
         /// <summary>
@@ -68,13 +73,14 @@ namespace MAI.Api.Services
         public SessionService(AppDbContext context) => _context = context;
 
         public UserSession Create(
-            User user, string refreshTokenHash, DateTime expiresAt,
+            Guid sessionId, User user, string refreshTokenHash, DateTime expiresAt,
             string? userAgent, string? ipAddress)
         {
             var now = DateTime.UtcNow;
 
             var session = new UserSession
             {
+                Id               = sessionId,
                 UserId           = user.Id,
                 RefreshTokenHash = refreshTokenHash,
                 CreatedAt        = now,

@@ -80,7 +80,7 @@ namespace MAI.Api.Controllers
                 ? id
                 : Guid.Empty;
 
-        private static readonly Regex EmailRegex =
+        internal static readonly Regex EmailRegex =
             new(@"^[^@\s]+@[^@\s]+\.[^@\s]+$", RegexOptions.Compiled);
 
         /// <summary>
@@ -92,7 +92,7 @@ namespace MAI.Api.Controllers
         /// altcuiva. Majusculele sunt permise, dar unicitatea se verifică fără
         /// diferență între ele (vezi migrarea CaseInsensitiveUserIndexes).
         /// </summary>
-        private static readonly Regex UsernameRegex =
+        internal static readonly Regex UsernameRegex =
             new(@"^[A-Za-z0-9._-]{3,50}$", RegexOptions.Compiled);
 
         /// <summary>Codul PostgreSQL pentru încălcarea unui index unic.</summary>

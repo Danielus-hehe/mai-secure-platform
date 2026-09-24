@@ -109,7 +109,13 @@ public static class TestHelpers
     /// (simulare cifrotext); plicul criptografic e sintetic dar valid
     /// structural.
     /// </summary>
-    public static async Task<MultipartFormDataContent> BuildUploadContent(
+    /// <remarks>
+    /// Intoarce Task, desi nu are nimic de asteptat: semnatura ramane cea
+    /// folosita de toate testele existente (await BuildUploadContent(...)),
+    /// iar Task.FromResult evita avertismentul CS1998 al unei metode async
+    /// fara await.
+    /// </remarks>
+    public static Task<MultipartFormDataContent> BuildUploadContent(
         Guid recipientId,
         string fileName = "raport.pdf.enc",
         int fileSize = 1024,
@@ -151,7 +157,7 @@ public static class TestHelpers
         if (expiresAt.HasValue)
             content.Add(new StringContent(expiresAt.Value.ToString("o")), "ExpiresAt");
 
-        return content;
+        return Task.FromResult(content);
     }
 
     // ── Utilitare ─────────────────────────────────────────────────────────

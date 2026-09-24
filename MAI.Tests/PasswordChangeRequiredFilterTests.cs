@@ -115,7 +115,7 @@ public class PasswordChangeRequiredFilterTests
     {
         var user = new User { Id = Guid.NewGuid(), Username = "temp.user", Role = UserRole.Utilizator, MustChangePassword = true };
 
-        var issued = CreateTokenService().IssueTokens(user);
+        var issued = CreateTokenService().IssueTokens(user, Guid.NewGuid());
 
         Assert.Contains(ClaimsOf(issued.Response.AccessToken), c =>
             c.Type == PasswordChangeRequiredFilter.ClaimType && c.Value == PasswordChangeRequiredFilter.ClaimValue);
@@ -126,10 +126,24 @@ public class PasswordChangeRequiredFilterTests
     {
         var user = new User { Id = Guid.NewGuid(), Username = "normal.user", Role = UserRole.Utilizator };
 
-        var issued = CreateTokenService().IssueTokens(user);
+        var issued = CreateTokenService().IssueTokens(user, Guid.NewGuid());
 
         Assert.DoesNotContain(ClaimsOf(issued.Response.AccessToken), c =>
             c.Type == PasswordChangeRequiredFilter.ClaimType);
+    }
+
+    [Fact]
+    public void TokenulDeAcces_PoartaSesiuneaDinCareProvine()
+    {
+        // Fără „sid”, SessionTokenValidator respinge tokenul: revocarea sesiunii
+        // trebuie să invalideze imediat și tokenul de acces.
+        var user      = new User { Id = Guid.NewGuid(), Username = "sid.user", Role = UserRole.Utilizator };
+        var sessionId = Guid.NewGuid();
+
+        var issued = CreateTokenService().IssueTokens(user, sessionId);
+
+        Assert.Contains(ClaimsOf(issued.Response.AccessToken), c =>
+            c.Type == SessionTokenValidator.SessionClaimType && c.Value == sessionId.ToString());
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -146,9 +160,9 @@ public class PasswordChangeRequiredFilterTests
             // Schimbarea parolei însăși.
             $"{nameof(AuthController)}.{nameof(AuthController.ChangePassword)}",
             // Ecranul citește pachetul de chei ca să știe dacă îl reîmpachetează.
+            // Reîmpachetarea însăși vine în aceeași cerere cu change-password,
+            // deci Keys/rewrap NU mai trebuie exceptat.
             $"{nameof(KeysController)}.{nameof(KeysController.GetMyBundle)}",
-            // Reîmpachetarea după schimbare; cere parola NOUĂ.
-            $"{nameof(KeysController)}.{nameof(KeysController.Rewrap)}",
         };
 
         var exceptate = typeof(AuthController).Assembly.GetTypes()

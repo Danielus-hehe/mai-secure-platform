@@ -13,6 +13,7 @@ import { useToast } from '../../context/ToastContext';
 import { formatDateTime } from '../../utils/format';
 import type { DocCategory } from '../../types';
 import api from '../../api/client';
+import { sha256IfAvailable } from '../../utils/crypto';
 import { apiErrorMessage } from '../../api/errors';
 
 const CATEGORY_LABELS: Record<DocCategory, string> = {
@@ -49,16 +50,6 @@ interface Doc {
     publishedBy:    string;
     publishedAt:    string;
     versions:       DocVersion[];
-}
-
-/**
- * SHA-256 al unui fișier, în hexazecimal cu litere mici. Null dacă browserul nu
- * oferă WebCrypto (pagină deschisă pe HTTP, în afara lui localhost).
- */
-async function sha256Hex(blob: Blob): Promise<string | null> {
-    if (!globalThis.crypto?.subtle) return null;
-    const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
-    return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
 }
 
 export default function DocumentsPage() {
@@ -192,7 +183,7 @@ export default function DocumentsPage() {
                 timeout: 300_000,
             });
 
-            const actual = expected ? await sha256Hex(blob) : null;
+            const actual = expected ? await sha256IfAvailable(blob) : null;
 
             if (expected && actual && actual !== expected) {
                 toast.error(

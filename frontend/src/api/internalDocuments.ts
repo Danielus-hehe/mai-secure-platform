@@ -4,6 +4,7 @@
  */
 
 import api from './client';
+import { checkIntegrity, saveBlob } from '../utils/crypto';
 import type { PagedResult } from './transfers';
 
 export const InternalDocumentStatus = {
@@ -260,17 +261,29 @@ export async function getDocumentReport(id: string): Promise<DocumentReport> {
  * Descarcă documentul. Prima descărcare a unui destinatar e înregistrată de
  * server ca „deschis” - condiția pentru „Luat la cunoștință”.
  */
-export async function downloadInternalDocument(id: string, fileName: string): Promise<void> {
+/**
+ * Descarcă documentul, îi verifică amprenta SHA-256 față de registru și abia
+ * apoi îl salvează. La nepotrivire aruncă IntegrityError și nu salvează nimic.
+ */
+export async function downloadInternalDocument(
+    id: string,
+    fileName: string,
+    expectedSha256?: string | null
+): Promise<{ message: string }> {
     const { data } = await api.get<Blob>(`/InternalDocuments/${id}/download`, {
         responseType: 'blob',
         timeout: 300_000,
     });
-    const url = URL.createObjectURL(data);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+    const check = await checkIntegrity(data, expectedSha256);
+    saveBlob(data, fileName);
+
+    return {
+        message:
+            check === 'verified'
+                ? 'Document descărcat: integritate verificată, amprenta SHA-256 corespunde registrului.'
+                : check === 'unavailable'
+                    ? 'Document descărcat, dar amprenta nu a putut fi verificată: browserul nu oferă WebCrypto pe această adresă.'
+                    : 'Document descărcat. Nu există amprentă SHA-256 în registru, deci nu a putut fi verificat.',
+    };
 }

@@ -249,9 +249,14 @@ namespace MAI.Api.Controllers
         }
 
         // ─────────────────────────────────────────────────────────────────────
-        // PATCH api/Keys/rewrap - după schimbarea parolei
+        // PATCH api/Keys/rewrap - după schimbarea parolei în Active Directory
         // ─────────────────────────────────────────────────────────────────────
         /// <summary>
+        /// Folosit doar când parola s-a schimbat în AFARA aplicației (cont de
+        /// domeniu, KeyRewrapRequired). Schimbarea parolei unui cont local trimite
+        /// pachetul reîmpachetat direct în PATCH /Auth/change-password, în aceeași
+        /// salvare cu hash-ul nou.
+        ///
         /// Cheile private sunt încuiate cu o cheie derivată din parolă. Când parola
         /// se schimbă, browserul le descuie cu cea veche, le reîncuie cu cea nouă și
         /// trimite noul blob aici. Cheile publice rămân aceleași, deci fișierele
@@ -267,10 +272,6 @@ namespace MAI.Api.Controllers
         /// schimbarea parolei și dezactivarea 2FA.
         /// </summary>
         [HttpPatch("rewrap")]
-        // Rulează imediat după change-password, cu tokenul de acces emis încă
-        // pentru parola temporară. Cere oricum parola NOUĂ (verificată mai jos),
-        // deci cine știe doar parola temporară nu poate folosi endpointul.
-        [AllowDuringPasswordChange]
         [EnableRateLimiting(RateLimitPolicies.PasswordWrite)]
         public async Task<IActionResult> Rewrap([FromBody] RewrapKeysDto dto, CancellationToken ct)
         {
@@ -321,25 +322,13 @@ namespace MAI.Api.Controllers
                     new { message = ex.Message, retryAfter = 5 });
             }
 
-            if (string.IsNullOrWhiteSpace(dto.EncryptedPrivateBundle) ||
-                string.IsNullOrWhiteSpace(dto.KeyDerivationSalt) ||
-                string.IsNullOrWhiteSpace(dto.WrapIv))
-            {
-                return BadRequest(new { message = "Pachet de chei incomplet." });
-            }
+            var bundleError = WrappedKeyBundle.Validate(
+                dto.EncryptedPrivateBundle, dto.KeyDerivationSalt, dto.WrapIv, dto.KeyDerivationIterations);
+            if (bundleError is not null)
+                return BadRequest(new { message = bundleError });
 
-            if (dto.KeyDerivationIterations < 100_000)
-                return BadRequest(new { message = "Numărul de iterații PBKDF2 este prea mic (minim 100.000)." });
-
-            user.EncryptedPrivateBundle  = dto.EncryptedPrivateBundle;
-            user.KeyDerivationSalt       = dto.KeyDerivationSalt;
-            user.KeyDerivationIterations = dto.KeyDerivationIterations;
-            user.KeyWrapIv               = dto.WrapIv;
-
-            // Momentul noii împachetări. Pentru conturile de domeniu, asta e
-            // exact ce oprește cererea repetată de reîmpachetare la fiecare
-            // autentificare de după schimbarea parolei în AD.
-            user.KeysWrappedAt           = DateTime.UtcNow;
+            WrappedKeyBundle.Apply(
+                user, dto.EncryptedPrivateBundle, dto.KeyDerivationSalt, dto.WrapIv, dto.KeyDerivationIterations);
 
             _context.AuditLogs.Add(new AuditLog
             {
@@ -522,9 +511,8 @@ namespace MAI.Api.Controllers
     public class RewrapKeysDto
     {
         /// <summary>
-        /// Parola pe care contul o are ÎN ACEST MOMENT. În fluxul de schimbare a
-        /// parolei, reîmpachetarea vine după /Auth/change-password, deci aceasta
-        /// este parola nouă. Nu se stochează și nu se jurnalizează.
+        /// Parola pe care contul o are ÎN ACEST MOMENT (pentru un cont de domeniu,
+        /// parola nouă din AD). Nu se stochează și nu se jurnalizează.
         /// </summary>
         public string CurrentPassword { get; set; } = string.Empty;
 

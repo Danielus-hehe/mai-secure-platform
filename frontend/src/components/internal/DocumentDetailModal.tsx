@@ -238,7 +238,7 @@ export default function DocumentDetailModal({ documentId, onClose, onChanged, on
                             <Button
                                 variant="secondary"
                                 disabled={busy !== null}
-                                onClick={() => void run('download', () => downloadInternalDocument(doc.id, doc.fileName))}
+                                onClick={() => void run('download', () => downloadInternalDocument(doc.id, doc.fileName, doc.sha256))}
                             >
                                 {busy === 'download' ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />} Descarcă
                             </Button>

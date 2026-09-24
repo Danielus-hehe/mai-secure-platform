@@ -391,12 +391,14 @@ namespace MAI.Api.Controllers
                 user.LastLoginAt = DateTime.UtcNow;
 
                 await LoadOrgUnitAsync(user, ct);
-                var issued = _tokens.IssueTokens(user);
 
                 // Sesiune nouă pentru acest dispozitiv. Autentificarea pe telefon
-                // nu mai deconectează laptopul: fiecare are rândul lui.
+                // nu mai deconectează laptopul: fiecare are rândul lui. Id-ul se
+                // alege înainte, fiindcă intră în JWT (claim-ul „sid”).
+                var sessionId = Guid.NewGuid();
+                var issued    = _tokens.IssueTokens(user, sessionId);
                 _sessions.Create(
-                    user, issued.RefreshTokenHash, issued.RefreshTokenExpiresAt, UserAgent, Ip);
+                    sessionId, user, issued.RefreshTokenHash, issued.RefreshTokenExpiresAt, UserAgent, Ip);
 
                 AddAudit(user.Id, user.Username, AuditAction.Login,
                     (useDirectory ? "Autentificare reusita prin Active Directory" : "Autentificare reusita") +
@@ -576,11 +578,12 @@ namespace MAI.Api.Controllers
             user.LastLoginAt = DateTime.UtcNow;
 
             await LoadOrgUnitAsync(user, ct);
-            var issued   = _tokens.IssueTokens(user);
-            var response = issued.Response;
+            var sessionId = Guid.NewGuid();
+            var issued    = _tokens.IssueTokens(user, sessionId);
+            var response  = issued.Response;
 
             _sessions.Create(
-                user, issued.RefreshTokenHash, issued.RefreshTokenExpiresAt, UserAgent, Ip);
+                sessionId, user, issued.RefreshTokenHash, issued.RefreshTokenExpiresAt, UserAgent, Ip);
 
             AddAudit(user.Id, user.Username, AuditAction.Login,
                 usedRecoveryCode
@@ -669,7 +672,7 @@ namespace MAI.Api.Controllers
             // dar rândul rămâne. Altfel utilizatorul ar vedea o „sesiune nouă” la
             // fiecare cincisprezece minute, iar lista ar deveni inutilizabilă.
             await LoadOrgUnitAsync(user, ct);
-            var issued = _tokens.IssueTokens(user);
+            var issued = _tokens.IssueTokens(user, session.Id);
             _sessions.Rotate(session, issued.RefreshTokenHash, issued.RefreshTokenExpiresAt);
 
             await _context.SaveChangesAsync(ct);
@@ -763,6 +766,41 @@ namespace MAI.Api.Controllers
                 if (sameAsOld != PasswordVerificationResult.Failed)
                     return BadRequest(new { message = "Parola nouă trebuie să fie diferită de cea curentă." });
 
+                // Cheile private E2EE sunt încuiate cu o cheie derivată din parolă.
+                // Reîmpachetarea lor (calculată în browser cu parola veche și cea
+                // nouă) intră în ACEEAȘI salvare cu hash-ul nou: fie se schimbă
+                // amândouă, fie niciuna.
+                //
+                // Înainte erau două cereri: change-password, apoi Keys/rewrap. A
+                // doua mergea doar pentru că tokenul de acces rămânea valid după
+                // închiderea sesiunilor. Cu verificarea sesiunii la fiecare cerere
+                // (claim-ul „sid”), rewrap-ul ar fi primit 401, iar cheile ar fi
+                // rămas încuiate cu o parolă care nu mai există: pierderea
+                // definitivă a accesului la toate fișierele primite.
+                var hasKeys = !string.IsNullOrEmpty(user.PublicKeyEncryption);
+                if (hasKeys)
+                {
+                    if (dto.Keys is null)
+                    {
+                        return BadRequest(new
+                        {
+                            code    = "KEYS_REWRAP_REQUIRED",
+                            message = "Contul are chei de criptare: parola se schimbă doar împreună cu " +
+                                      "reîmpachetarea lor. Reîncărcați pagina și reîncercați.",
+                        });
+                    }
+
+                    var keysError = WrappedKeyBundle.Validate(
+                        dto.Keys.EncryptedPrivateBundle, dto.Keys.KeyDerivationSalt,
+                        dto.Keys.WrapIv, dto.Keys.KeyDerivationIterations);
+                    if (keysError is not null)
+                        return BadRequest(new { message = keysError });
+
+                    WrappedKeyBundle.Apply(
+                        user, dto.Keys.EncryptedPrivateBundle, dto.Keys.KeyDerivationSalt,
+                        dto.Keys.WrapIv, dto.Keys.KeyDerivationIterations);
+                }
+
                 // Profilul scump: schimbarea de parolă e o operație rară, își permite costul.
                 user.PasswordHash = await _hasher.HashPasswordAsync(dto.NewPassword, _argon2.PrivilegedProfile, ct);
 
@@ -787,6 +825,7 @@ namespace MAI.Api.Controllers
                     (replacedTemporaryPassword
                         ? "Parola temporara inlocuita de utilizator (Argon2id)"
                         : "Parola schimbata (Argon2id)") +
+                    (hasKeys ? ", chei E2EE reimpachetate in aceeasi operatie" : string.Empty) +
                     $", {closed} sesiuni inchise");
 
                 await _context.SaveChangesAsync(ct);
