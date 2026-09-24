@@ -205,7 +205,10 @@ jobs:
           test "$loc" = "https://ci.local/x"
 
           # TLS 1.1 refuzat.
-          ! $C --tls-max 1.1 -o /dev/null https://ci.local:18443/ 2>/dev/null
+          # „! comanda” NU opreste scriptul cand comanda reuseste: bash ignora
+          # set -e pentru comenzile negate cu „!”. must_fail pica explicit.
+          must_fail() { if "$@"; then echo "::error::A reusit, desi trebuia refuzat: $*"; exit 1; fi; }
+          must_fail $C --tls-max 1.1 -o /dev/null https://ci.local:18443/ 2>/dev/null
 
           # Peste limita de 52 MB → 413 de la nginx, fără să ajungă la API.
           # „|| true”: nginx închide conexiunea după 413, iar curl poate raporta
@@ -270,12 +273,15 @@ jobs:
           echo "$before" | grep -qx 'ci_probe 2'
 
           # Fără --yes, restaurarea trebuie refuzată.
-          ! docker compose --profile backup run --rm backup restore "$name"
+          # „! comanda” NU opreste scriptul cand comanda reuseste: bash ignora
+          # set -e pentru comenzile negate cu „!”. must_fail pica explicit.
+          must_fail() { if "$@"; then echo "::error::A reusit, desi trebuia refuzat: $*"; exit 1; fi; }
+          must_fail docker compose --profile backup run --rm backup restore "$name"
 
           # Rolul dispare, ca pe un PostgreSQL nou: fără --skip-policies,
           # restaurarea trebuie să eșueze și să lase baza neatinsă...
           psql_ci -c 'DROP POLICY p_ci ON ci_probe; DROP ROLE authenticated; DELETE FROM ci_probe WHERE id = 2;'
-          ! docker compose --profile backup run --rm backup restore "$name" --yes --database-only
+          must_fail docker compose --profile backup run --rm backup restore "$name" --yes --database-only
           test "$(psql_ci -tAc 'SELECT count(*) FROM ci_probe;')" = "1"
 
           # ...iar cu --skip-policies trebuie să reușească, cu toate rândurile.
@@ -285,7 +291,69 @@ jobs:
 
           # Un fișier alterat în backup → verificarea pică.
           echo alterat | sudo tee -a "backups/$name/storage/transfers/ci/obiect.enc" >/dev/null
-          ! docker compose --profile backup run --rm backup verify "$name"
+          must_fail docker compose --profile backup run --rm backup verify "$name"
+
+      # Privilegii minime, verificate pe serviciile reale din compose:
+      #   - migrate (db:migrate) aplica migrarile pe o baza fara schema si creeaza
+      #     rolul aplicatiei; rulat de doua ori, ca sa dovedeasca idempotenta;
+      #   - rolul aplicatiei citeste si scrie, dar NU poate modifica sau sterge
+      #     jurnalul de audit si nu poate crea tabele;
+      #   - contul de serviciu MinIO scrie in bucketul lui, dar nu poate crea
+      #     bucketuri, schimba retentia sau administra MinIO.
+      # ASPNETCORE_ENVIRONMENT=Development doar aici: parolele din .env.example
+      # sunt sabloane, pe care db:migrate le refuza in Production.
+      - name: Migrari, rolul aplicatiei si contul de serviciu MinIO
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Imaginea construita mai sus, sub numele folosit de serviciul migrate.
+          docker tag sgdm-api:ci sgdm-api:latest
+
+          env_value() { grep -E "^$1=" .env | head -n1 | cut -d= -f2-; }
+          PGDB_CI=$(env_value POSTGRES_DB)
+          APP_USER=$(env_value POSTGRES_APP_USER)
+          APP_PW=$(env_value POSTGRES_APP_PASSWORD)
+
+          docker compose up -d postgres minio
+          for i in $(seq 1 30); do
+            [ "$(docker inspect --format '{{.State.Health.Status}}' sgdm-postgres)" = healthy ] && break
+            sleep 2
+          done
+
+          docker compose run --rm -e ASPNETCORE_ENVIRONMENT=Development migrate
+          docker compose run --rm -e ASPNETCORE_ENVIRONMENT=Development migrate
+          docker compose run --rm -e ASPNETCORE_ENVIRONMENT=Development migrate db:migrate --list
+
+          psql_app() { docker exec -e PGPASSWORD="$APP_PW" sgdm-postgres psql -h 127.0.0.1 -U "$APP_USER" -d "$PGDB_CI" -v ON_ERROR_STOP=1 "$@"; }
+
+          psql_app -c 'SELECT count(*) FROM "Users";'
+          psql_app -c "INSERT INTO \"AuditLogs\" (\"Id\", \"Username\", \"Action\", \"Details\", \"Result\", \"IpAddress\", \"Timestamp\") VALUES (gen_random_uuid(), 'ci', 0, 'ci', 0, '127.0.0.1', now());"
+          # „! comanda” NU opreste scriptul cand comanda reuseste: bash ignora
+          # set -e pentru comenzile negate cu „!”. must_fail pica explicit.
+          must_fail() { if "$@"; then echo "::error::A reusit, desi trebuia refuzat: $*"; exit 1; fi; }
+          must_fail psql_app -c 'UPDATE "AuditLogs" SET "Details" = $$modificat$$;'
+          must_fail psql_app -c 'DELETE FROM "AuditLogs";'
+          must_fail psql_app -c 'TRUNCATE "AuditLogs";'
+          must_fail psql_app -c 'CREATE TABLE ci_ddl_interzis (id int);'
+          must_fail psql_app -c 'DELETE FROM "__EFMigrationsHistory";'
+
+          # MinIO: minio-init a creat contul la pasul de backup; il rulam din
+          # nou, ca si aici sa fie dovedita idempotenta (detach/attach, user add).
+          docker compose run --rm minio-init
+          BUCKET=$(env_value STORAGE_BUCKET)
+          S3_USER=$(env_value MINIO_APP_USER)
+          S3_PW=$(env_value MINIO_APP_PASSWORD)
+          mc_app() {
+            docker run --rm --network sgdmci_default --entrypoint sh quay.io/minio/mc:latest -c \
+              "mc alias set a http://minio:9000 '$S3_USER' '$S3_PW' >/dev/null && $1"
+          }
+          mc_app "echo ci | mc pipe a/$BUCKET/transfers/ci/app.enc"
+          mc_app "mc cat a/$BUCKET/transfers/ci/app.enc"
+          mc_app "mc rm a/$BUCKET/transfers/ci/app.enc"
+          must_fail mc_app "mc mb a/alt-bucket-ci"
+          must_fail mc_app "mc version suspend a/$BUCKET"
+          must_fail mc_app "mc ilm rule rm --all --force a/$BUCKET"
+          must_fail mc_app "mc admin user list a"
 
       - name: Curățenie
         if: always()

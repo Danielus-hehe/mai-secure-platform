@@ -139,6 +139,9 @@ Sistemul e construit astfel incat in acest scenariu:
 | Politica de parole | Lungime, clase de caractere, interzicere username in parola, lista de parole banale |
 | Blocare cont | Progresiva, exponentiala: 5 esecuri → 5 min, dublu pana la 8 h |
 | Rate limiting | Per IP, pe categorii: login, refresh, operatii cu parola (upload-urile nu au inca limita per utilizator) |
+| Privilegii minime in PostgreSQL | API-ul ruleaza cu rolul `POSTGRES_APP_USER`, creat de `db:migrate`: fara DDL, iar pe `AuditLogs` doar SELECT si INSERT - jurnalul e append-only la nivelul bazei |
+| Privilegii minime in MinIO | API-ul foloseste un cont de serviciu creat de `minio-init`, limitat la citire/scriere/stergere de obiecte in bucketul propriu; root doar la init si backup |
+| Jurnal filtrat pe subdiviziune | Seful de directie vede in jurnal, export si alerte doar actiunile subdiviziunii pe care o conduce (`AuditScope`); administratorul vede tot |
 | 2FA TOTP (RFC 6238) | Secret cifrat, fereastra de ±1 interval, reprotectie anti-replay, 10 coduri de recuperare |
 | 2FA obligatoriu pe roluri privilegiate | `PrivilegedMfaFilter` verifica `amr = mfa` pe endpointurile de administrator |
 | Confirmare email | Token aleatoriu 256-bit, SHA-256 in DB, expiry 72 h, blocare login pana la activare |
@@ -483,13 +486,14 @@ docs/STORAGE-ENCRYPTION.md  criptarea documentelor normative si interne in MinIO
 ```bash
 cp .env.example .env              # completati secretele: openssl rand -base64 48
 docker compose up -d postgres
-dotnet ef database update --project MAI.DataAccessLayer --startup-project MAI.Api
+dotnet run --project MAI.Api -- db:migrate    # sau: docker compose run --rm migrate
 ```
 
 Dezvoltare (API si frontend pe masina locala):
 
 ```bash
 docker compose up -d postgres minio minio-init
+dotnet run --project MAI.Api -- db:migrate
 dotnet run --project MAI.Api
 cd frontend && npm ci && npm run dev          # http://localhost:5173
 ```

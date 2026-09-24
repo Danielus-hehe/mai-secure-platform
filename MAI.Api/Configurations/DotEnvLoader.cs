@@ -41,6 +41,11 @@ namespace MAI.Api.Configuration
             new Dictionary<string, string[]>(StringComparer.Ordinal)
             {
                 ["DB_CONNECTION_STRING"] = new[] { "ConnectionStrings__DefaultConnection" },
+                // Rolul aplicației: folosit doar de db:migrate, care îl creează și îi
+                // dă drepturile minime. API-ul pornit cu dotnet run rămâne pe
+                // conexiunea din DB_CONNECTION_STRING.
+                ["POSTGRES_APP_USER"]     = new[] { "Database__AppUser" },
+                ["POSTGRES_APP_PASSWORD"] = new[] { "MAI_DB_APP_PASSWORD" },
                 ["FRONTEND_ORIGIN"]      = new[] { "Cors__AllowedOrigins__0", "Frontend__BaseUrl" },
                 ["STORAGE_BUCKET"]       = new[] { "Storage__Bucket" },
                 ["MINIO_ROOT_USER"]      = new[] { "MAI_STORAGE_ACCESS_KEY" },

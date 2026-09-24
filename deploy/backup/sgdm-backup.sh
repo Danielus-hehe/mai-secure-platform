@@ -345,7 +345,11 @@ cmd_restore() {
         log "Stocare restaurata."
     fi
 
-    log "Restaurare $name terminata. Reporniti API-ul: docker compose restart api"
+    # --no-privileges: tabelele restaurate nu mai au drepturile rolului
+    # aplicatiei (POSTGRES_APP_USER), deci API-ul ar primi „permission denied”.
+    # db:migrate le reaplica, idempotent, inainte ca API-ul sa fie repornit.
+    log "Restaurare $name terminata. Reaplicati drepturile si reporniti API-ul:"
+    log "  docker compose run --rm migrate && docker compose restart api"
 }
 
 # ═════════════════════════════════════════════════════════════════════════════

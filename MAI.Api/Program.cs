@@ -78,6 +78,16 @@ try
             dotEnv.Path, dotEnv.Applied, string.Join(", ", dotEnv.Keys));
     }
 
+    // db:migrate: migrările și rolul aplicației, cu conexiunea proprietarului.
+    // Tratată înainte de restul configurării, intenționat: nu are nevoie de
+    // cheia JWT, pepper, SMTP sau LDAP, deci containerul „migrate” nu primește
+    // niciun secret pe care nu îl folosește. Vezi DbMigrateCommand.
+    if (DbMigrateCommand.IsMigrate(args))
+    {
+        Environment.ExitCode = await DbMigrateCommand.RunAsync(args);
+        return;
+    }
+
     var builder = WebApplication.CreateBuilder(isMaintenanceCommand ? Array.Empty<string>() : args);
 
     // ─── Loguri structurate (Serilog, JSON pe consolă) ─────────────────────────

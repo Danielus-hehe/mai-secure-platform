@@ -1,6 +1,8 @@
 ﻿using System.Globalization;
 using System.Text;
 using ClosedXML.Excel;
+using System.Security.Claims;
+using MAI.Api.Services;
 using MAI.BusinessLogic.Dtos;
 using MAI.DataAccessLayer;
 using MAI.Domain.Entities;
@@ -54,7 +56,8 @@ namespace MAI.Api.Controllers
             CancellationToken ct = default)
         {
             var pagination = new PaginationQuery { Page = page, PageSize = pageSize };
-            var query      = BuildQuery(username, action, result, search, from, to);
+            var visible    = await OrgStructure.AuditVisibleUsersAsync(_context, User, ct);
+            var query      = BuildQuery(visible, username, action, result, search, from, to);
 
             // Count înainte de Skip/Take - altfel numărăm doar pagina curentă.
             var total = await query.CountAsync(ct);
@@ -85,8 +88,9 @@ namespace MAI.Api.Controllers
             [FromQuery] DateTime? to = null,
             CancellationToken ct = default)
         {
-            var query = BuildQuery(username, action, result, search, from, to);
-            var total = await query.CountAsync(ct);
+            var visible = await OrgStructure.AuditVisibleUsersAsync(_context, User, ct);
+            var query   = BuildQuery(visible, username, action, result, search, from, to);
+            var total   = await query.CountAsync(ct);
 
             if (total > MaxExportRows)
             {
@@ -104,9 +108,16 @@ namespace MAI.Api.Controllers
             // Exportul jurnalului de audit este el însuși o acțiune auditabilă.
             _context.AuditLogs.Add(new AuditLog
             {
+                // UserId completat: fără el, exportul făcut de un șef nu apărea
+                // în propriul lui jurnal (filtrat după utilizator), deci nici
+                // în al celui care îl supraveghează.
+                UserId    = Guid.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var exporterId)
+                                ? exporterId
+                                : null,
                 Username  = HttpContext.User.Identity?.Name ?? "sistem",
                 Action    = AuditAction.FileDownload,
-                Details   = $"Export jurnal audit ({items.Count} inregistrari, {format})",
+                Details   = $"Export jurnal audit ({items.Count} inregistrari, {format}" +
+                            (visible is null ? ", tot ministerul)" : ", subdiviziunea proprie)"),
                 Result    = AuditResult.Success,
                 IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                 Timestamp = DateTime.UtcNow,
@@ -133,7 +144,11 @@ namespace MAI.Api.Controllers
         [HttpGet("usernames")]
         public async Task<IActionResult> GetUsernames(CancellationToken ct)
         {
-            var names = await _context.AuditLogs
+            // Lista de nume respectă aceeași regulă ca jurnalul: altfel dropdown-ul
+            // ar dezvălui cine a folosit sistemul în alte direcții.
+            var visible = await OrgStructure.AuditVisibleUsersAsync(_context, User, ct);
+
+            var names = await ScopeTo(_context.AuditLogs, visible)
                 .Select(a => a.Username)
                 .Distinct()
                 .OrderBy(n => n)
@@ -144,11 +159,24 @@ namespace MAI.Api.Controllers
         // ─────────────────────────────────────────────────────────────────────
         // Construirea query-ului - o singură sursă de adevăr pentru listă și export
         // ─────────────────────────────────────────────────────────────────────
+        /// <summary>
+        /// Restrânge jurnalul la utilizatorii vizibili (null = fără restricție).
+        /// Rândurile fără utilizator rămân doar la administrator: nu aparțin
+        /// nimănui din subdiviziunea unui șef.
+        /// </summary>
+        private static IQueryable<AuditLog> ScopeTo(IQueryable<AuditLog> query, Guid[]? visibleUsers) =>
+            visibleUsers is null
+                ? query
+                : query.Where(a => a.UserId != null && visibleUsers.Contains(a.UserId.Value));
+
         private IQueryable<AuditLog> BuildQuery(
+            Guid[]? visibleUsers,
             string? username, string? action, string? result,
             string? search, DateTime? from, DateTime? to)
         {
-            var query = _context.AuditLogs.AsNoTracking().AsQueryable();
+            // Restricția de vizibilitate se aplică PRIMA, înaintea filtrelor
+            // cerute de client: niciun parametru nu o poate ocoli.
+            var query = ScopeTo(_context.AuditLogs.AsNoTracking(), visibleUsers);
 
             if (!string.IsNullOrWhiteSpace(username))
                 query = query.Where(a => a.Username == username);

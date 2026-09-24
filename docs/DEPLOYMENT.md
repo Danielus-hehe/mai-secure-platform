@@ -76,13 +76,18 @@ Parola bazei, doar litere și cifre (ajunge într-un connection string):
 -join ((48..57)+(65..90)+(97..122) | Get-Random -Count 32 | ForEach-Object {[char]$_})
 ```
 
-Apoi, fiecare în terminalul lui:
+Apoi, fiecare în terminalul lui. `db:migrate` aplică migrările (echivalent cu
+`dotnet ef database update`, care funcționează în continuare) și, dacă
+`POSTGRES_APP_USER` / `POSTGRES_APP_PASSWORD` sunt completate, creează și rolul
+aplicației (secțiunea 7.2). `minio-init` cere `MINIO_APP_USER` /
+`MINIO_APP_PASSWORD` în `.env`; API-ul pornit cu `dotnet run` folosește totuși
+contul root, ca până acum.
 
 ```powershell
 docker compose up -d postgres minio minio-init
 ```
 ```powershell
-dotnet ef database update --project MAI.DataAccessLayer --startup-project MAI.Api
+dotnet run --project MAI.Api -- db:migrate
 ```
 ```powershell
 dotnet run --project MAI.Api
@@ -118,7 +123,10 @@ Pe lângă secretele din secțiunea 3, în `.env`:
 | `SGDM_SELF_SIGNED` | `true` | Generează un certificat autosemnat dacă lipsește cel real |
 | `SGDM_DOCKER_SUBNET` / `SGDM_PROXY_IP` | `172.28.0.0/24` / `172.28.0.10` | Rețeaua internă și IP-ul fix al nginx |
 | `POSTGRES_PASSWORD` | - | Parola bazei din Docker; conexiunea containerelor se construiește din ea |
-| `DB_CONTAINER_CONNECTION_STRING` | gol | Doar pentru o bază externă, în locul serviciului `postgres` |
+| `POSTGRES_APP_USER` / `POSTGRES_APP_PASSWORD` | `sgdm_app` / - | Rolul PostgreSQL al API-ului, creat de `migrate`: fără DDL, jurnalul de audit doar SELECT și INSERT (secțiunea 7.2). Parola: minim 16 caractere, litere și cifre |
+| `MINIO_APP_USER` / `MINIO_APP_PASSWORD` | `sgdm-app` / - | Contul MinIO al API-ului, creat de `minio-init`: doar citire, scriere și ștergere de obiecte în `STORAGE_BUCKET`. Root rămâne la `minio-init` și backup |
+| `DB_CONTAINER_CONNECTION_STRING` | gol | Doar pentru o bază externă: conexiunea proprietarului (migrate, backup) |
+| `DB_CONTAINER_APP_CONNECTION_STRING` | gol | Doar pentru o bază externă: conexiunea rolului aplicației (API) |
 | `INTRANET_ONLY` / `INTRANET_AUDIT_ONLY` | `false` / `false` | Acces doar din rețele private, pe IP-ul real al clientului; modul doar-jurnal |
 | `TWOFACTOR_REQUIRED_PRIVILEGED` | `false` | 2FA obligatoriu pentru Administrator și Șef de direcție |
 
@@ -129,9 +137,9 @@ Pe lângă secretele din secțiunea 3, în `.env`:
 > `MAI_TWOFACTOR_KEY` diferită face ilizibile secretele 2FA; o cheie din
 > `MAI_STORAGE_MASTER_KEYS` lipsă face ilizibile documentele criptate cu ea.
 
-Baza de date nu cere nicio configurare în plus: API-ul din container se
-conectează la serviciul `postgres` cu aceleași `POSTGRES_*` din `.env`. Pentru
-datele existente pe Supabase: secțiunea 7.3.
+Baza de date nu cere altă configurare decât rolul aplicației de mai sus:
+`migrate` îl creează la fiecare pornire, iar API-ul se conectează cu el la
+serviciul `postgres`. Pentru datele existente pe Supabase: secțiunea 7.3.
 
 ### 4.2 Numele aplicației
 
@@ -158,14 +166,16 @@ docker compose up -d --build
 ```
 
 Ordinea de pornire e impusă prin `depends_on`: PostgreSQL și MinIO sănătoase →
-`minio-init` (bucket, versionare, retenție) → API sănătos → web. Starea:
+`minio-init` (bucket, versionare, retenție, contul de serviciu) și `migrate`
+(migrări, rolul aplicației) → API sănătos → web. Starea:
 
 ```powershell
 docker compose ps
 ```
 
-Toate serviciile permanente trebuie să apară `healthy`; `minio-init` apare
-`exited (0)`, e normal. Aplicația: <https://sgdm.local>.
+Toate serviciile permanente trebuie să apară `healthy`; `minio-init` și
+`migrate` apar `exited (0)`, e normal. Dacă API-ul nu pornește, primul loc de
+căutat e ieșirea lor: `docker compose logs migrate minio-init`. Aplicația: <https://sgdm.local>.
 
 Verificare rapidă, din PowerShell:
 
@@ -327,24 +337,51 @@ docker exec -it sgdm-postgres psql -U sgdm -d sgdm
 
 (`\dt` listează tabelele, `\d "Users"` descrie un tabel, `\q` iese.)
 
-### 7.2 Migrările
+### 7.2 Migrările și rolul aplicației
 
-API-ul **nu aplică migrările la pornire**, intenționat: o schimbare de schemă pe
-o bază de producție se face conștient, de un om, nu ca efect secundar al unui
-`docker compose up`. Înainte de orice migrare: un backup (secțiunea 8).
+Migrările se aplică de serviciul `migrate` din docker-compose, care rulează
+comanda `db:migrate` din imaginea API-ului **înaintea** API-ului, la fiecare
+`docker compose up`. Serverul nu are nevoie de SDK-ul .NET și nici de codul
+sursă, doar de Docker. API-ul pornește numai dacă `migrate` s-a terminat cu
+succes.
 
-```powershell
-dotnet ef database update --project MAI.DataAccessLayer --startup-project MAI.Api
-```
-
-Comanda citește `DB_CONNECTION_STRING` din `.env` (prin `DotEnvLoader`), adică
-`localhost:5432`, aceeași bază pe care o folosește și containerul API.
-
-Starea migrărilor aplicate:
+Toate comenzile se dau din **rădăcina repository-ului** (folderul cu
+`docker-compose.yml` și `.env`):
 
 ```powershell
-dotnet ef migrations list --project MAI.DataAccessLayer --startup-project MAI.Api
+docker compose run --rm migrate
 ```
+```powershell
+docker compose run --rm migrate db:migrate --list
+```
+
+A doua doar afișează migrările aplicate și pe cele în așteptare. Argumentele
+scrise după numele serviciului **înlocuiesc** comanda lui, de aceea
+`db:migrate` apare din nou când se adaugă `--list`.
+
+Local, fără Docker pentru API: `dotnet run --project MAI.Api -- db:migrate`
+(citește `DB_CONNECTION_STRING` din `.env`).
+
+**Două roluri PostgreSQL, două procese.** `migrate` se conectează cu
+proprietarul schemei (`POSTGRES_USER`), singurul care poate schimba structura.
+API-ul se conectează cu rolul aplicației (`POSTGRES_APP_USER`), pe care
+`migrate` îl creează sau îl actualizează la fiecare rulare:
+
+| Drept | Rolul aplicației |
+|---|---|
+| SELECT, INSERT, UPDATE, DELETE pe tabelele aplicației | da |
+| `AuditLogs`: SELECT, INSERT | da |
+| `AuditLogs`: UPDATE, DELETE, TRUNCATE | **nu**: jurnalul e append-only |
+| `__EFMigrationsHistory`: scriere | nu |
+| CREATE / ALTER / DROP (DDL) | nu |
+
+Astfel, nici un API compromis (o injecție SQL, un endpoint scăpat de sub
+autorizare) nu poate șterge urmele din jurnal sau schimba schema. `migrate`
+verifică la final drepturile **efective** (`has_table_privilege`) și eșuează
+dacă rolul are mai mult decât trebuie, de exemplu printr-un GRANT manual făcut
+cândva sau prin apartenența la alt rol.
+
+Înainte de o actualizare care aduce migrări noi: un backup (secțiunea 8).
 
 ### 7.3 Mutarea datelor de pe Supabase
 
@@ -500,8 +537,12 @@ Comportamentul, pe scurt:
   rămâne exact cum era, nu pe jumătate restaurată;
 - tabelele din backup se înlocuiesc; tabelele create **după** backup (de o
   migrare mai nouă) rămân în bază. După restaurarea unui backup mai vechi decât
-  ultima migrare, rulați `dotnet ef database update`; dacă migrarea se plânge
-  că un tabel există deja, ștergeți manual tabelele adăugate de ea;
+  ultima migrare, rulați `docker compose run --rm migrate`; dacă migrarea se
+  plânge că un tabel există deja, ștergeți manual tabelele adăugate de ea;
+- restaurarea se face cu `--no-privileges`, deci tabelele restaurate pierd
+  drepturile rolului aplicației, iar API-ul primește „permission denied”.
+  După **orice** restaurare: `docker compose run --rm migrate`, apoi
+  `docker compose restart api` (scriptul afișează același lucru la final);
 - stocarea: obiectele din backup se rescriu; obiectele apărute după backup
   rămân. Nu sunt referite din baza restaurată, deci nu apar nicăieri, iar
   jobul de expirare le curăță pe cele de transfer. Ștergerea automată ar fi
@@ -534,11 +575,11 @@ git pull
 docker compose --profile backup run --rm backup
 ```
 ```powershell
-dotnet ef database update --project MAI.DataAccessLayer --startup-project MAI.Api
-```
-```powershell
 docker compose up -d --build
 ```
+
+Migrările noi se aplică automat de serviciul `migrate`, înaintea API-ului
+(secțiunea 7.2); de aceea backup-ul vine primul.
 
 Imaginea web se reconstruiește cu frontend-ul nou; `index.html` nu e ținut în
 cache, deci utilizatorii primesc versiunea nouă la următoarea încărcare a
@@ -577,7 +618,8 @@ docker compose logs --tail 200 api
 
 ## 11. Lista de verificare înainte de producție
 
-- [ ] Toate secretele generate, niciunul pe valoarea-șablon (API-ul refuză oricum să pornească), inclusiv `POSTGRES_PASSWORD`
+- [ ] Toate secretele generate, niciunul pe valoarea-șablon (API-ul refuză oricum să pornească), inclusiv `POSTGRES_PASSWORD`, `POSTGRES_APP_PASSWORD` și `MINIO_APP_PASSWORD`
+- [ ] `docker compose logs migrate` arată rolul aplicației cu `jurnal UPDATE=nu, jurnal DELETE=nu`
 - [ ] Cheile (`MAI_STORAGE_MASTER_KEYS`, `MAI_ARGON2_PEPPER`, `MAI_TWOFACTOR_KEY`, `BACKUP_PASSPHRASE`) copiate în afara serverului
 - [ ] Certificatul instituției în `certs/tls/`, `SGDM_SELF_SIGNED=false`
 - [ ] `SGDM_SERVER_NAME` în DNS-ul intern; `SGDM_PUBLIC_ORIGIN` corect (linkurile din email)
