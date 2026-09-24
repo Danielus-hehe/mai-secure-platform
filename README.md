@@ -65,9 +65,8 @@ Sistemul e construit astfel incat in acest scenariu:
 | Parola ajunge la server la autentificare | Serverul o verifica (Argon2id local sau bind LDAPS). Un server compromis activ, care ruleaza cod modificat, ar putea-o retine si deriva din ea cheia care descuie cheile private | Modelul este serverul onest dar curios si scurgerea datelor stocate, nu un server care executa cod strain. Remediere planificata: derivari separate in browser, o cheie de autentificare trimisa la server si o cheie de impachetare care nu pleaca din browser. Pentru conturile de domeniu parola trebuie oricum sa ajunga la controlerul de domeniu |
 | Blobul cheilor private permite ghicirea offline a parolei | Blobul e criptat cu PBKDF2(parola, 600.000 iteratii), fara niciun secret al serverului. Dintr-o copie a bazei, fiecare parola incercata se verifica prin tag-ul GCM, ocolind pepper-ul care protejeaza hash-ul Argon2id | Costul per incercare e mare, politica cere minim 12 caractere din 4 clase, iar backup-ul bazei e cifrat GPG. Remediere planificata: Argon2id in browser (WASM) sau o componenta a cheii eliberata de server doar dupa autentificare |
 | Un administrator poate prelua identitatea criptografica a unui cont | Dupa o resetare cu parola temporara, administratorul cunoaste parola, se poate autentifica, o poate schimba si poate genera chei noi; expeditorii ar cifra apoi pentru cheile lui | Fiecare pas ramane in jurnal (resetare, autentificare, inregistrare chei, cu IP). Amprentele cheilor se compara in afara canalului. Resetarea prin link pe email nu expune parola administratorului si e varianta recomandata |
-| Revocarea unei sesiuni nu invalideaza imediat tokenul de acces | Delogarea, inchiderea unei sesiuni, dezactivarea contului sau schimbarea rolului revoca refresh token-ul; JWT-ul deja emis ramane valid pana la expirare, cu rolul din el | Fereastra e de cel mult 15 minute. Remediere planificata: claim `sid` verificat la fiecare cerere |
 | Semnatura acopera continutul, nu si metadatele | Numele fisierului, categoria si lista destinatarilor nu intra in semnatura; serverul le-ar putea modifica fara ca verificarea sa esueze | Continutul, singurul care conteaza ca proba, e semnat; orice modificare facuta prin API lasa urma in jurnal |
-| Plicul de stocare nu e legat de cheia obiectului | Cine poate scrie in MinIO poate inlocui un document criptat cu alt document criptat valid. La documentele normative browserul verifica SHA-256 din registru si detecteaza inlocuirea; la cele interne verificarea lipseste inca | Necesita acces de scriere in MinIO, care asculta doar local. Remediere planificata: cheia obiectului in datele asociate (AAD) ale plicului |
+| Plicul de stocare nu e legat de cheia obiectului | Cine poate scrie in MinIO poate inlocui un document criptat cu alt document criptat valid. API-ul il decripteaza fara eroare; inlocuirea o detecteaza browserul, care compara SHA-256 al fisierului primit cu registrul (la documentele normative si la cele interne) si refuza sa-l salveze | Necesita acces de scriere in MinIO, care asculta doar local. Remediere planificata: cheia obiectului in datele asociate (AAD) ale plicului, ca verificarea sa se faca si pe server |
 
 ### 1.4 Unde sa va uitati in cod, in ordinea asta
 
@@ -147,6 +146,7 @@ Sistemul e construit astfel incat in acest scenariu:
 | Unicitate conturi | Username si email unice fara diferenta de majuscule (indexuri pe `lower(...)`) |
 | Antet criptografic | CSP, `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, HSTS pe HTTPS |
 | Perimetru intranet | Middleware care respinge IP-urile din afara plajelor configurate (dezactivat implicit, cu mod audit) |
+| Revocare imediata a sesiunii | Claim `sid` in JWT, verificat la fiecare cerere; delogarea, dezactivarea sau schimbarea rolului au efect imediat |
 | Refuz configuratie nesigura | Pornirea esueaza explicit daca lipsesc secretele sau exista valori-sablon (`YOUR_…`) |
 
 ### 2.8 Notificari email (SMTP / MailKit)
@@ -298,9 +298,11 @@ sequenceDiagram
 
 Cheile private sunt incuiate cu parola. Schimbarea parolei fara reimpachetarea blobului ar face toate fisierele primite inaccesibile:
 
-1. Browserul descuie blobul cu parola **veche** si il reincuie cu cea **noua**.
-2. `PATCH /Auth/change-password`: schimba hash-ul si inchide toate sesiunile.
-3. `PATCH /Keys/rewrap`: trimite blobul nou, parola noua verificata de server.
+1. Browserul descuie blobul cu parola **veche** si il reincuie cu cea **noua**. O parola veche gresita se afla aici, local, inainte ca serverul sa schimbe ceva.
+2. `PATCH /Auth/change-password` primeste parola curenta, parola noua **si** blobul reimpachetat. Serverul salveaza hash-ul nou si blobul in aceeasi tranzactie, apoi inchide toate sesiunile, inclusiv pe cea curenta. Pentru un cont cu chei, cererea fara blob e refuzata (`KEYS_REWRAP_REQUIRED`): parola si cheile nu pot ajunge nesincronizate.
+3. Utilizatorul se autentifica din nou cu parola noua, care ii descuie si cheile.
+
+`PATCH /Keys/rewrap` ramane doar pentru conturile de domeniu, a caror parola se schimba in Active Directory, in afara aplicatiei.
 
 ---
 
@@ -310,13 +312,13 @@ Cheile private sunt incuiate cu parola. Schimbarea parolei fara reimpachetarea b
 |---|---|---|
 | Hash parole | Argon2id + pepper, format PHC, doua profiluri de cost | Interactive: 19 MiB, t=2. Sensitive (admin): 64 MiB, t=3 |
 | Confirmare email la creare cont | Token 256-bit (SHA-256 in DB), link valabil 72 h, login blocat pana la activare | Retrimitere disponibila din panoul de administrare |
-| Schimbare parola fortata | `MustChangePassword = true` la creare fara email sau dupa resetare | Claim `pwd_change` in JWT; `PasswordChangeRequiredFilter` blocheaza tot API-ul in afara `change-password`, `Keys/me` si `Keys/rewrap` |
+| Schimbare parola fortata | `MustChangePassword = true` la creare fara email sau dupa resetare | Claim `pwd_change` in JWT; `PasswordChangeRequiredFilter` blocheaza tot API-ul in afara `change-password` si `Keys/me` |
 | Politica de parole | Lungime, clase, interzicere username, lista parole banale | Minim 12 caractere |
 | Blocare cont | Progresiva, exponentiala | 5 esecuri → 5 min, dublu pana la 8 h |
 | Rate limiting | Ferestre fixe per IP, per categorie | Login 10/5 min · Refresh 30/min · Parole 5/15 min |
 | 2FA TOTP (RFC 6238) | Secret cifrat AES-GCM; token de provocare opac (nu JWT); anti-replay | 30 s, ±1 fereastra; 10 coduri de recuperare |
 | 2FA pe roluri privilegiate | `PrivilegedMfaFilter` pe endpointurile cu rol ≥ Sef directie | Activabil din `TwoFactor:RequiredForPrivilegedRoles` |
-| Token de acces | JWT HS256, issuer si audience validate, `ClockSkew = 0` | 15 minute |
+| Token de acces | JWT HS256, issuer si audience validate, `ClockSkew = 0`; claim `sid` verificat la fiecare cerere (`SessionTokenValidator`): sesiunea deschisa, contul activ, rolul neschimbat | 15 minute, dar invalid imediat ce sesiunea se inchide |
 | Sesiuni | Per dispozitiv (`UserSessions`), refresh token opac rotit, stocat SHA-256 | 7 zile, vizibil si revocabil din profil |
 | Autorizare | Roluri declarate explicit pe fiecare endpoint, verificate automat in CI | Utilizator (1) · Sef directie (2) · Administrator (3) |
 | Unicitate conturi | Username si email unice, fara diferenta de majuscule | Indexuri pe `lower(...)`, email optional |
@@ -349,7 +351,7 @@ sequenceDiagram
     API-->>USR: JWT + refresh token
 ```
 
-Operatiile care inchid **toate** sesiunile: schimbarea sau resetarea parolei, rotatia 2FA, schimbarea rolului, dezactivarea contului. Blocarea contului dupa esecuri **nu** le inchide: altfel oricine ar putea deconecta pe oricine cu 5 cereri gresite.
+Operatiile care inchid **toate** sesiunile: schimbarea sau resetarea parolei, rotatia 2FA, schimbarea rolului, dezactivarea contului. Inchiderea are efect la cererea urmatoare si asupra tokenului de acces deja emis, nu doar asupra refresh token-ului. Blocarea contului dupa esecuri **nu** le inchide: altfel oricine ar putea deconecta pe oricine cu 5 cereri gresite.
 
 ---
 
@@ -435,7 +437,7 @@ Documentele normative si interne nu pot fi E2EE (serverul decide distributia), d
 | `PasswordChangeRequiredFilterTests` | Parola temporara blocheaza API-ul; lista endpointurilor exceptate e exact cea cunoscuta |
 | `AuditLogLimitsTests` | Un rand de audit prea lung se trunchiaza, nu anuleaza operatia consemnata |
 
-**Teste de integrare** (`MAI.IntegrationTests`): API-ul real pe PostgreSQL real, pornit de Testcontainers (necesita Docker), cu migrarile aplicate exact ca in productie. Acopera ciclul complet al transferurilor (inclusiv anti-IDOR), resetarea parolei prin link, blocarea API-ului cu parola temporara si un transfer catre 20 de destinatari cu nume lungi. Provider-ul EF in memorie a fost evitat intentionat: nu cunoaste ILIKE, tranzactiile si indexurile case-insensitive.
+**Teste de integrare** (`MAI.IntegrationTests`): API-ul real pe PostgreSQL real, pornit de Testcontainers (necesita Docker), cu migrarile aplicate exact ca in productie. Acopera ciclul complet al transferurilor (inclusiv anti-IDOR), resetarea parolei prin link, blocarea API-ului cu parola temporara, invalidarea imediata a tokenului de acces la delogare si la dezactivarea contului, schimbarea atomica parola + chei si un transfer catre 20 de destinatari cu nume lungi. Provider-ul EF in memorie a fost evitat intentionat: nu cunoaste ILIKE, tranzactiile si indexurile case-insensitive.
 
 **Loguri:** Serilog, o linie JSON per eveniment. Refuzurile 401, 403 si 429 la nivel `Warning`, erorile 5xx la nivel `Error`.
 
@@ -505,7 +507,14 @@ psql -h localhost -U sgdm -d sgdm -f MAI.DataAccessLayer/Migrations/900_seed_dem
 dotnet run --project MAI.Api -- demo:seed-files        # sau: docker compose run --rm api demo:seed-files
 ```
 
-Seed-ul **nu creeaza** administratorul: copiaza hash-ul parolei unui cont existent (variabila `v_sursa_parola` din `900_seed_demo.sql`, implicit `admin`) pe toate conturile demonstrative, care se autentifica apoi cu aceeasi parola. Pe o baza goala, contul sursa trebuie sa existe inainte. O comanda dedicata pentru primul administrator (`admin:create`) nu exista inca: limitare cunoscuta a instalarii de la zero.
+Seed-ul **nu creeaza** administratorul: copiaza hash-ul parolei unui cont existent (variabila `v_sursa_parola` din `900_seed_demo.sql`, implicit `admin`) pe toate conturile demonstrative, care se autentifica apoi cu aceeasi parola. Pe o baza goala, primul administrator se creeaza din linia de comanda:
+
+```bash
+dotnet run --project MAI.Api -- admin:create admin --email admin@mai.gov.md --name "Administrator SGDM"
+# in Docker: docker compose run --rm -it api admin:create admin
+```
+
+Parola se cere de la tastatura, de doua ori, fara ecou (sau din variabila `SGDM_ADMIN_PASSWORD`, pentru automatizare), niciodata ca argument. Contul porneste cu `MustChangePassword = true`, iar crearea ramane in jurnal ca `Warning`.
 
 `demo:seed-files` scrie fisierele prin acelasi depozit ca un upload real, deci ajung in MinIO deja criptate, iar amprentele SHA-256 din baza se recalculeaza din continutul efectiv (cele din SQL sunt provizorii). Atinge doar documentele create de conturile `*.demo` si poate fi rulata de oricate ori. Nu e nevoie de citire in clar sau de `storage:recrypt`.
 

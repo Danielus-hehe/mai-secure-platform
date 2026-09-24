@@ -60,7 +60,11 @@ try
     // demo:seed-files la fel: configurarea completă (baza, depozitul criptat),
     // fără server web. Scrie fișierele documentelor din 900_seed_demo.sql.
     var isDemoSeedCommand = DemoSeedFilesCommand.IsSeedFiles(args);
-    var isMaintenanceCommand = isRecryptCommand || isDemoSeedCommand;
+
+    // admin:create: primul administrator pe o bază goală, fără server web.
+    var isAdminCreateCommand = AdminCreateCommand.IsAdminCreate(args);
+
+    var isMaintenanceCommand = isRecryptCommand || isDemoSeedCommand || isAdminCreateCommand;
 
     // ─── .env local (o singură sursă de configurare cu Docker Compose) ─────────
     // Rulat înainte de CreateBuilder: provider-ul de variabile de mediu își face
@@ -472,6 +476,34 @@ try
                 // token de acces cu o treime din durata lui.
                 ClockSkew        = TimeSpan.Zero,
             };
+
+            // Semnătura și expirarea spun doar că tokenul a fost emis de noi și
+            // nu e vechi. Nu spun dacă sesiunea din care vine mai e deschisă.
+            // Verificarea sesiunii face ca delogarea, închiderea unei sesiuni,
+            // dezactivarea contului și schimbarea rolului să aibă efect la
+            // cererea următoare, nu după expirarea tokenului. Vezi SessionTokenValidator.
+            options.Events = new JwtBearerEvents
+            {
+                OnTokenValidated = async context =>
+                {
+                    var validator = context.HttpContext.RequestServices
+                        .GetRequiredService<ISessionTokenValidator>();
+
+                    var failure = await validator.ValidateAsync(
+                        context.Principal!, context.HttpContext.RequestAborted);
+
+                    if (failure is not null)
+                    {
+                        // Warning, nu Information: un token cu semnătură validă
+                        // dar sesiune închisă e fie un tab rămas deschis, fie un
+                        // token folosit după ce titularul a închis sesiunea.
+                        Log.Warning(
+                            "Token de acces respins: {Reason}, IP={Ip}",
+                            failure, context.HttpContext.Connection.RemoteIpAddress?.ToString());
+                        context.Fail(failure);
+                    }
+                },
+            };
         });
 
     // ─── Servicii de autentificare ─────────────────────────────────────────────
@@ -486,6 +518,10 @@ try
     // un serviciu care nu face decât HMAC și numere aleatorii nu trebuie să devină
     // dependent de EF Core și nici să-și piardă durata de viață de singleton.
     builder.Services.AddScoped<ISessionService, SessionService>();
+
+    // Scoped din același motiv: citește sesiunea din baza de date la fiecare
+    // cerere autentificată (JwtBearerEvents.OnTokenValidated, mai sus).
+    builder.Services.AddScoped<ISessionTokenValidator, SessionTokenValidator>();
 
     // ─── CORS ──────────────────────────────────────────────────────────────────
     var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
@@ -757,6 +793,12 @@ try
     if (isDemoSeedCommand)
     {
         Environment.ExitCode = await DemoSeedFilesCommand.RunAsync(app.Services);
+        return;
+    }
+
+    if (isAdminCreateCommand)
+    {
+        Environment.ExitCode = await AdminCreateCommand.RunAsync(app.Services, args);
         return;
     }
 

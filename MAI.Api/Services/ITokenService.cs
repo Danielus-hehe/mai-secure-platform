@@ -18,7 +18,14 @@ namespace MAI.Api.Services
         /// Produce o pereche access + refresh. NU scrie nimic: rezultatul conține
         /// hash-ul refresh token-ului, pe care apelantul îl pune într-o sesiune.
         /// </summary>
-        TokenIssueResult IssueTokens(User user);
+        /// <param name="user">Titularul tokenurilor.</param>
+        /// <param name="sessionId">
+        /// Sesiunea (rândul din UserSessions) căreia îi aparține tokenul de acces.
+        /// Intră în JWT ca claim-ul „sid” și se verifică la fiecare cerere
+        /// (vezi SessionTokenValidator): o sesiune închisă își pierde imediat și
+        /// tokenul de acces, nu abia la expirarea lui.
+        /// </param>
+        TokenIssueResult IssueTokens(User user, Guid sessionId);
 
         /// <summary>
         /// Emite provocarea de pas doi. Tokenul în clar se întoarce o singură

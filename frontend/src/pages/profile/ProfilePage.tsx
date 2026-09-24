@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Building2, KeyRound, ShieldCheck, Fingerprint, CalendarClock, AlertTriangle } from 'lucide-react';
+import { Building2, KeyRound, ShieldCheck, Fingerprint, CalendarClock } from 'lucide-react';
 import KeyFingerprint from '../../components/security/KeyFingerprint';
 import PageHeader from '../../components/ui/PageHeader';
 import Button     from '../../components/ui/Button';
@@ -22,7 +22,7 @@ interface ServerBundle extends PublishedKeyBundle {
 }
 
 export default function ProfilePage() {
-    const { user }  = useAuth();
+    const { user, logout } = useAuth();
     const toast     = useToast();
     const { fingerprint } = useKeys();
 
@@ -31,19 +31,6 @@ export default function ProfilePage() {
     const [confirmPw,  setConfirmPw]  = useState('');
     const [saving,     setSaving]     = useState(false);
     const [keysCreatedAt, setKeysCreatedAt] = useState<string | null>(null);
-
-    /**
-     * Dacă schimbarea parolei reușește dar sincronizarea cheilor eșuează (rețea
-     * căzută exact atunci), pachetul deja calculat rămâne aici ca utilizatorul
-     * să poată reîncerca fără să reintroducă parolele. Fără el, cheile ar rămâne
-     * încuiate cu parola veche și fișierele primite ar deveni inaccesibile.
-     *
-     * Parola nouă stă alături, doar în memoria componentei: serverul cere dovada
-     * parolei la /Keys/rewrap (altfel un token furat ar putea distruge blobul).
-     * Dispare la reîncercarea reușită sau la părăsirea paginii.
-     */
-    const [pendingRewrap, setPendingRewrap] =
-        useState<{ payload: RewrapPayload; password: string } | null>(null);
 
     useEffect(() => {
         void (async () => {
@@ -64,24 +51,6 @@ export default function ProfilePage() {
         .join('')
         .toUpperCase()
         .slice(0, 2) || user.username.slice(0, 2).toUpperCase();
-
-    const syncKeys = async (payload: RewrapPayload, password: string) => {
-        await api.patch('/Keys/rewrap', { ...payload, currentPassword: password });
-        setPendingRewrap(null);
-    };
-
-    const handleRetrySync = async () => {
-        if (!pendingRewrap) return;
-        setSaving(true);
-        try {
-            await syncKeys(pendingRewrap.payload, pendingRewrap.password);
-            toast.success('Cheile au fost sincronizate cu parola nouă.');
-        } catch (e: unknown) {
-            toast.error(apiErrorMessage(e, 'Sincronizarea cheilor a eșuat din nou.'));
-        } finally {
-            setSaving(false);
-        }
-    };
 
     const handlePasswordChange = async () => {
         if (!currentPw || !newPw || !confirmPw) {
@@ -116,34 +85,26 @@ export default function ProfilePage() {
                 payload = await rewrapKeysForNewPassword(currentPw, newPw, bundle);
             }
 
-            // ── Pasul 2: schimbarea parolei ──────────────────────────────
+            // ── Pasul 2: parola și cheile, într-o singură cerere ─────────
+            // Serverul salvează hash-ul nou și pachetul reîmpachetat în aceeași
+            // tranzacție: nu mai există starea „parolă schimbată, chei încuiate
+            // cu cea veche”, deci nici ecranul de reîncercare a sincronizării.
             await api.patch('/Auth/change-password', {
                 currentPassword: currentPw,
                 newPassword:     newPw,
+                keys:            payload ?? undefined,
             });
 
-            // ── Pasul 3: sincronizarea cheilor ───────────────────────────
-            if (payload) {
-                try {
-                    // Parola nouă: după pasul 2 este parola curentă a contului.
-                    await syncKeys(payload, newPw);
-                } catch (syncError) {
-                    setPendingRewrap({ payload, password: newPw });
-                    toast.error(
-                        'Parola a fost schimbată, dar cheile NU s-au sincronizat. ' +
-                        'Nu închideți pagina și apăsați „Reîncearcă sincronizarea".'
-                    );
-                    console.error('Rewrap esuat dupa schimbarea parolei:', syncError);
-                    return;
-                }
-            }
-
+            // Serverul a închis toate sesiunile, inclusiv pe aceasta: tokenul
+            // curent e deja respins. Utilizatorul se autentifică din nou, cu
+            // parola nouă, care îi descuie și cheile.
             setCurrentPw(''); setNewPw(''); setConfirmPw('');
             toast.success(
                 bundle.hasKeys
-                    ? 'Parola a fost actualizată, iar cheile au fost reîmpachetate.'
-                    : 'Parola a fost actualizată cu succes.'
+                    ? 'Parola a fost schimbată și cheile reîmpachetate. Autentificați-vă cu parola nouă.'
+                    : 'Parola a fost schimbată. Autentificați-vă cu parola nouă.'
             );
+            await logout();
         } catch (e: unknown) {
             toast.error(apiErrorMessage(e, 'Parola nu a putut fi schimbată.'));
         } finally {
@@ -281,27 +242,6 @@ export default function ProfilePage() {
                             <KeyRound size={16} className="text-mai-400" />
                             Schimbare parolă
                         </h2>
-
-                        {pendingRewrap && (
-                            <div className="mb-4 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/30 px-4 py-3">
-                                <p className="flex items-start gap-2 text-sm text-red-800 dark:text-red-300">
-                                    <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-                                    <span>
-                                        Parola s-a schimbat, dar cheile private au rămas încuiate cu cea
-                                        veche. Până la sincronizare nu veți putea deschide fișierele
-                                        primite. Nu închideți pagina.
-                                    </span>
-                                </p>
-                                <Button
-                                    variant="danger"
-                                    className="mt-3"
-                                    disabled={saving}
-                                    onClick={() => void handleRetrySync()}
-                                >
-                                    Reîncearcă sincronizarea
-                                </Button>
-                            </div>
-                        )}
 
                         <div className="space-y-4 max-w-sm">
                             <Input id="currentPw" label="Parola curentă" type="password"

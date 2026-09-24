@@ -91,6 +91,14 @@ dotnet run --project MAI.Api
 cd frontend; npm ci; npm run dev
 ```
 
+Pe o bază goală nu există încă niciun cont. Primul administrator se creează o
+singură dată, înainte de prima autentificare (parola se cere de la tastatură,
+fără ecou; la prima autentificare aplicația cere alegerea uneia proprii):
+
+```powershell
+dotnet run --project MAI.Api -- admin:create admin --email admin@mai.gov.md --name "Administrator SGDM"
+```
+
 Aplicația: <http://localhost:5173>. Swagger (doar în Development):
 <http://localhost:5000/swagger>.
 

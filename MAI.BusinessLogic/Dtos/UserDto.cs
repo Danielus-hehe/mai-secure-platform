@@ -69,6 +69,22 @@ namespace MAI.BusinessLogic.Dtos
     {
         public string CurrentPassword { get; set; } = string.Empty;
         public string NewPassword { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Cheile private reîmpachetate în browser cu parola nouă. Obligatorii
+        /// dacă și numai dacă contul are chei: se salvează în aceeași operație cu
+        /// hash-ul parolei, ca cele două să nu poată ajunge nesincronizate.
+        /// </summary>
+        public RewrappedKeysDto? Keys { get; set; }
+    }
+
+    /// <summary>Pachetul de chei private reîncuiat cu o parolă nouă. Cheile publice nu se schimbă.</summary>
+    public class RewrappedKeysDto
+    {
+        public string EncryptedPrivateBundle { get; set; } = string.Empty;
+        public string KeyDerivationSalt { get; set; } = string.Empty;
+        public int KeyDerivationIterations { get; set; }
+        public string WrapIv { get; set; } = string.Empty;
     }
 
     // Folosit de POST /api/Users/{id}/reset-password (administrator)

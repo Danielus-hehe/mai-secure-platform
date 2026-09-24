@@ -36,14 +36,14 @@ namespace MAI.Api.Services
             _credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
         }
 
-        public TokenIssueResult IssueTokens(User user)
+        public TokenIssueResult IssueTokens(User user, Guid sessionId)
         {
             var now            = DateTime.UtcNow;
             var accessExpires  = now.AddMinutes(_jwt.AccessTokenMinutes);
             var refreshExpires = now.AddDays(_jwt.RefreshTokenDays);
 
             var mfa          = CompletedSecondFactor(user);
-            var accessToken  = GenerateJwtToken(user, accessExpires, mfa);
+            var accessToken  = GenerateJwtToken(user, sessionId, accessExpires, mfa);
             var refreshToken = GenerateOpaqueToken(64);
 
             var response = new TokenResponseDto
@@ -120,7 +120,7 @@ namespace MAI.Api.Services
         private static bool CompletedSecondFactor(User user) =>
             user.TwoFactorEnabled && !string.IsNullOrEmpty(user.TwoFactorSecret);
 
-        private string GenerateJwtToken(User user, DateTime expires, bool mfa)
+        private string GenerateJwtToken(User user, Guid sessionId, DateTime expires, bool mfa)
         {
             var claims = new List<Claim>
             {
@@ -128,6 +128,12 @@ namespace MAI.Api.Services
                 new(ClaimTypes.Name,           user.Username),
                 new(ClaimTypes.Role,           user.Role.ToString()),
                 new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+
+                // Sesiunea din care provine tokenul. SessionTokenValidator o caută
+                // la fiecare cerere: delogarea, închiderea sesiunii din profil,
+                // dezactivarea contului sau schimbarea rolului invalidează tokenul
+                // imediat, nu după cele până la 15 minute rămase până la expirare.
+                new(SessionTokenValidator.SessionClaimType, sessionId.ToString()),
 
                 // "amr" (authentication methods references), RFC 8176. Consemnează
                 // cu ce a fost obținut tokenul. PrivilegedMfaFilter îl citește
