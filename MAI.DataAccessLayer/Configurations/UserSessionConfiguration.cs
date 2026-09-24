@@ -22,6 +22,16 @@ namespace MAI.DataAccessLayer.Configurations
             builder.Property(s => s.IpAddress).HasMaxLength(64);
             builder.Property(s => s.RevokedReason).HasMaxLength(128);
 
+            // Tot hash SHA-256 în hex, ca tokenul curent.
+            builder.Property(s => s.PreviousRefreshTokenHash).HasMaxLength(64);
+
+            // Vezi UserSession.Version: două rotații simultane nu mai pot
+            // câștiga amândouă.
+            builder.Property(s => s.Version)
+                .IsRowVersion()
+                .HasColumnName("xmin")
+                .HasColumnType("xid");
+
             // Calculată din RevokedAt și ExpiresAt - EF ar căuta altfel o coloană.
             builder.Ignore(s => s.IsActive);
 
@@ -46,6 +56,16 @@ namespace MAI.DataAccessLayer.Configurations
             // Listarea sesiunilor proprii, cele active întâi.
             builder.HasIndex(s => new { s.UserId, s.RevokedAt })
                 .HasDatabaseName("IX_UserSessions_UserId_RevokedAt");
+
+            // Detectarea refolosirii: un /refresh cu token necunoscut caută aici
+            // înainte să răspundă 401. Parțial, fiindcă sesiunile care nu s-au
+            // rotit niciodată (NULL) sunt majoritatea și nu au ce căuta în index.
+            // Nu e unic: hash-urile vin din 64 de octeți aleatori, o coliziune
+            // nu are cum să apară, iar un index unic ar transforma imposibilul
+            // într-un 500 la rotație.
+            builder.HasIndex(s => s.PreviousRefreshTokenHash)
+                .HasFilter("\"PreviousRefreshTokenHash\" IS NOT NULL")
+                .HasDatabaseName("IX_UserSessions_PreviousRefreshTokenHash");
 
             // Curățarea periodică a sesiunilor expirate.
             builder.HasIndex(s => s.ExpiresAt)

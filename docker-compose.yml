@@ -34,7 +34,9 @@
 # ── Structura cheilor ────────────────────────────────────────────────────────
 # Transferuri:  transfers/{yyyy}/{MM}/{transferId:N}.enc
 #               (cele vechi pot avea inca prefixul departamentului)
-# Documente:    documents/{docId:N}/v{n}.{ext}
+# Documente:    documents/{docId:N}/v{n}-{incercare:N}.{ext}
+#               (cele vechi: v{n}.{ext}; sufixul unic impiedica doua incarcari
+#                simultane sa scrie in acelasi obiect)
 # Interne:      internal/{yyyy}/{MM}/{docId:N}-{id}.{ext}
 #
 # Toate stau in acelasi bucket ("mai-secure"). Transferurile sunt criptate in
@@ -302,6 +304,10 @@ services:
 
       # Valabilitatea linkului de resetare a parolei trimis pe email (minute).
       PasswordReset__TokenMinutes: ${PASSWORD_RESET_TOKEN_MINUTES:-120}
+
+      # Durata absoluta a sesiunii (ore de la autentificare). Refresh-ul nu o
+      # mai poate prelungi; dupa ea se cere din nou parola si codul 2FA.
+      Jwt__SessionAbsoluteHours: ${SESSION_ABSOLUTE_HOURS:-12}
 
       # ── Active Directory (LDAP) ──────────────────────────────────────────
       # Implicit dezactivat: aplicatia porneste identic fara domeniu, iar

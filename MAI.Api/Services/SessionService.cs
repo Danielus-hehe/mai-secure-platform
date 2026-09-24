@@ -1,3 +1,4 @@
+using MAI.BusinessLogic.Security;
 using MAI.DataAccessLayer;
 using MAI.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -32,8 +33,16 @@ namespace MAI.Api.Services
         Task<UserSession?> FindActiveAsync(string refreshTokenHash, CancellationToken ct);
 
         /// <summary>
+        /// Găsește sesiunea încă deschisă al cărei token ANTERIOR (înlocuit la
+        /// ultima rotație) are acest hash. Un rezultat înseamnă că tokenul a
+        /// fost copiat: clientul legitim nu retrimite un token deja rotit.
+        /// </summary>
+        Task<UserSession?> FindActiveByPreviousTokenAsync(string refreshTokenHash, CancellationToken ct);
+
+        /// <summary>
         /// Rotește tokenul unei sesiuni existente. Rândul rămâne același, deci
         /// utilizatorul nu vede o sesiune nouă la fiecare reîmprospătare.
+        /// Noua expirare nu trece de <see cref="UserSession.AbsoluteExpiresAt"/>.
         /// </summary>
         void Rotate(UserSession session, string newRefreshTokenHash, DateTime newExpiresAt);
 
@@ -70,22 +79,30 @@ namespace MAI.Api.Services
         /// </summary>
         private const int MaxUserAgentChars = 256;
 
-        public SessionService(AppDbContext context) => _context = context;
+        private readonly JwtOptions _jwt;
+
+        public SessionService(AppDbContext context, JwtOptions jwt)
+        {
+            _context = context;
+            _jwt     = jwt;
+        }
 
         public UserSession Create(
             Guid sessionId, User user, string refreshTokenHash, DateTime expiresAt,
             string? userAgent, string? ipAddress)
         {
-            var now = DateTime.UtcNow;
+            var now      = DateTime.UtcNow;
+            var absolute = now.AddHours(_jwt.SessionAbsoluteHours);
 
             var session = new UserSession
             {
-                Id               = sessionId,
-                UserId           = user.Id,
-                RefreshTokenHash = refreshTokenHash,
-                CreatedAt        = now,
-                LastSeenAt       = now,
-                ExpiresAt        = expiresAt,
+                Id                = sessionId,
+                UserId            = user.Id,
+                RefreshTokenHash  = refreshTokenHash,
+                CreatedAt         = now,
+                LastSeenAt        = now,
+                ExpiresAt         = SessionLifetime.Cap(expiresAt, absolute),
+                AbsoluteExpiresAt = absolute,
                 UserAgent        = Truncate(userAgent, MaxUserAgentChars),
                 IpAddress        = Truncate(ipAddress, 64),
             };
@@ -110,11 +127,29 @@ namespace MAI.Api.Services
                     ct);
         }
 
+        public async Task<UserSession?> FindActiveByPreviousTokenAsync(string refreshTokenHash, CancellationToken ct)
+        {
+            var now = DateTime.UtcNow;
+
+            // Doar sesiuni încă deschise: una deja închisă sau expirată nu mai
+            // are ce pierde, iar un token vechi al ei e simplu invalid.
+            return await _context.UserSessions
+                .Include(s => s.User)
+                .FirstOrDefaultAsync(
+                    s => s.PreviousRefreshTokenHash == refreshTokenHash
+                      && s.RevokedAt == null
+                      && s.ExpiresAt > now,
+                    ct);
+        }
+
         public void Rotate(UserSession session, string newRefreshTokenHash, DateTime newExpiresAt)
         {
-            session.RefreshTokenHash = newRefreshTokenHash;
-            session.ExpiresAt        = newExpiresAt;
-            session.LastSeenAt       = DateTime.UtcNow;
+            // Tokenul înlocuit se păstrează (ca hash) pentru detectarea
+            // refolosirii; vezi UserSession.PreviousRefreshTokenHash.
+            session.PreviousRefreshTokenHash = session.RefreshTokenHash;
+            session.RefreshTokenHash         = newRefreshTokenHash;
+            session.ExpiresAt                = SessionLifetime.Cap(newExpiresAt, session.AbsoluteExpiresAt);
+            session.LastSeenAt               = DateTime.UtcNow;
         }
 
         public void Revoke(UserSession session, string reason)
@@ -169,5 +204,23 @@ namespace MAI.Api.Services
             string.IsNullOrWhiteSpace(value)
                 ? null
                 : value.Length <= max ? value : value[..max];
+    }
+}
+
+namespace MAI.Api.Services
+{
+    /// <summary>
+    /// Regula duratei absolute, separată ca funcție pură: se testează fără bază
+    /// de date și e aceeași la creare și la rotație.
+    /// </summary>
+    public static class SessionLifetime
+    {
+        /// <summary>
+        /// Expirarea cerută, dar nu mai târziu de sfârșitul absolut al sesiunii.
+        /// Un token emis cu 7 zile de valabilitate într-o sesiune care se încheie
+        /// peste o oră primește o oră.
+        /// </summary>
+        public static DateTime Cap(DateTime requested, DateTime absolute) =>
+            requested <= absolute ? requested : absolute;
     }
 }

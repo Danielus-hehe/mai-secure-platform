@@ -317,6 +317,57 @@ namespace MAI.Api.Controllers
                     Username: (string?)null));
             }
 
+            // ── 7. Refresh token refolosit ───────────────────────────────────
+            // Un token deja rotit, prezentat din nou: doua parti au avut aceeasi
+            // sesiune. Sesiunea s-a inchis automat, dar titularul trebuie
+            // intrebat de unde s-a putut copia tokenul (calculator partajat,
+            // extensie de browser, backup al profilului).
+            var reusedTokens = await _context.AuditLogs
+                .Where(a => a.Action == AuditAction.RefreshTokenReused
+                         && a.Timestamp >= last7d)
+                .OrderByDescending(a => a.Timestamp)
+                .Take(MaxAlertsPerCategory)
+                .Select(a => new { a.Username, a.Timestamp, a.IpAddress })
+                .ToListAsync(ct);
+
+            foreach (var item in reusedTokens)
+            {
+                alerts.Add(new SecurityAlert(
+                    Severity: "high",
+                    Category: "Sesiuni",
+                    Title:    $"Sesiune a lui @{item.Username} folosită de două părți",
+                    Detail:   $"{item.Timestamp:dd.MM.yyyy HH:mm} UTC, cerere de la {item.IpAddress}. " +
+                               "Sesiunea a fost închisă automat. Verificați cu utilizatorul de unde s-a " +
+                               "putut copia tokenul și luați în calcul schimbarea parolei.",
+                    Username: item.Username));
+            }
+
+            // ── 8. Conflicte de concurenta in rafala ─────────────────────────
+            // Unul izolat e un dublu-clic. Multe de la aceeasi adresa in 24 de ore
+            // inseamna cereri paralele trimise intentionat, de exemplu coduri 2FA
+            // in rafala ca sa ocoleasca limita de incercari. Gruparea e pe IP, nu
+            // pe cont: la login si 2FA cererea nu are inca utilizator.
+            var conflictBursts = await _context.AuditLogs
+                .Where(a => a.Action == AuditAction.ConcurrencyConflict
+                         && a.Timestamp >= last24h)
+                .GroupBy(a => a.IpAddress)
+                .Select(g => new { Ip = g.Key, Count = g.Count() })
+                .Where(x => x.Count >= ConflictBurstThreshold)
+                .OrderByDescending(x => x.Count)
+                .Take(MaxAlertsPerCategory)
+                .ToListAsync(ct);
+
+            foreach (var item in conflictBursts)
+            {
+                alerts.Add(new SecurityAlert(
+                    Severity: "medium",
+                    Category: "Concurență",
+                    Title:    $"{item.Count} cereri simultane respinse de la {item.Ip}",
+                    Detail:   "În ultimele 24 de ore. Filtrați jurnalul după această adresă: cereri " +
+                               "paralele repetate pe autentificare sau 2FA indică o încercare automată.",
+                    Username: (string?)null));
+            }
+
             // Severitatea decide ordinea. Un singur "high" ingropat sub zece "low"
             // e la fel de invizibil ca in jurnalul brut.
             var sorted = alerts.OrderBy(a => a.SeverityRank).ToList();
@@ -357,6 +408,13 @@ namespace MAI.Api.Controllers
 
         /// <summary>De la câte eșecuri în 24h un cont devine semnal, nu zgomot.</summary>
         private const int FailedLoginAlertThreshold = 5;
+
+        /// <summary>
+        /// De la câte conflicte de concurență de pe același IP, în 24h, apare
+        /// alerta. Un utilizator obișnuit ajunge la unul-două pe zi (dublu-clic);
+        /// cinci înseamnă deja cereri trimise în paralel.
+        /// </summary>
+        private const int ConflictBurstThreshold = 5;
 
         /// <summary>
         /// Plafon per categorie. O pagină cu trei sute de alerte e o pagină pe

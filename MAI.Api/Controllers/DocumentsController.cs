@@ -402,12 +402,20 @@ namespace MAI.Api.Controllers
         /// coloane - un import, o migrare, un endpoint de editare adăugat de
         /// altcineva - s-ar fi transformat instantaneu în citire arbitrară de
         /// fișiere de pe mașină, inclusiv appsettings.json.
+        ///
+        /// Cheia conține și un Guid al încercării, nu doar numărul versiunii.
+        /// Două încărcări simultane calculează același număr; cu cheia
+        /// „v{n}.ext” scriau în ACELAȘI obiect, iar cea care pierdea la salvare
+        /// (409, tokenul xmin al documentului) ștergea la compensare exact
+        /// obiectul celei care câștigase. Cu un sufix unic, fiecare încercare
+        /// își scrie și își retrage doar propriul obiect. Numărul versiunii
+        /// rămâne în cheie pentru cine citește bucketul direct.
         /// </summary>
         private static string BuildStorageKey(Guid documentId, int version, string safeName)
         {
             var ext = Path.GetExtension(safeName);
             if (ext.Length > 16) ext = string.Empty;
-            return $"{DocumentsPrefix}/{documentId:N}/v{version}{ext}";
+            return $"{DocumentsPrefix}/{documentId:N}/v{version}-{Guid.NewGuid():N}{ext}";
         }
 
         /// <summary>
@@ -546,7 +554,17 @@ namespace MAI.Api.Controllers
             if (stored.Length == 0) return string.Empty;
 
             var lastSlash = stored.LastIndexOfAny(['/', '\\']);
-            return lastSlash >= 0 ? stored[(lastSlash + 1)..] : stored;
+            var name      = lastSlash >= 0 ? stored[(lastSlash + 1)..] : stored;
+
+            // Cheile noi au forma „v{n}-{guid}.ext” (vezi BuildStorageKey).
+            // Sufixul unic protejează depozitul, dar nu spune nimic omului care
+            // citește lista de versiuni, deci se afișează tot „v{n}.ext”.
+            var match = UniqueKeySuffix.Match(name);
+            return match.Success ? match.Groups["head"].Value + match.Groups["ext"].Value : name;
         }
+
+        private static readonly System.Text.RegularExpressions.Regex UniqueKeySuffix = new(
+            @"^(?<head>v\d+)-[0-9a-f]{32}(?<ext>\.[^.]*)?$",
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant);
     }
 }

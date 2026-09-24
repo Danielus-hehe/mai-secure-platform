@@ -257,16 +257,21 @@ WHERE "Id" = v_user_ids[10];
 -- ══════════════════════════════════════════════════════════════════════
 
 FOR v_i IN 1..12 LOOP
+        -- AbsoluteExpiresAt (limita fixa a sesiunii, migrarea
+        -- ConcurrencyAndSessionLifetime) e pusa la 12 ore de ACUM, nu de la
+        -- CreatedAt: sesiunile demo sunt deschise "de cateva zile" ca lista sa
+        -- arate realist, dar trebuie sa ramana active pentru demonstratie.
         INSERT INTO "UserSessions" (
             "Id", "UserId", "RefreshTokenHash", "CreatedAt", "LastSeenAt",
-            "ExpiresAt", "RevokedAt", "RevokedReason", "UserAgent", "IpAddress"
+            "ExpiresAt", "AbsoluteExpiresAt", "RevokedAt", "RevokedReason", "UserAgent", "IpAddress"
         ) VALUES (
             gen_random_uuid(),
             v_user_ids[v_i],
             encode(sha256(('session-demo-' || v_i)::bytea), 'hex'),
             v_now - (interval '1 day' * (v_i % 5)),
             v_now - (interval '1 hour' * v_i),
-            v_now + interval '7 days',
+            v_now + interval '12 hours',
+            v_now + interval '12 hours',
             CASE WHEN v_i IN (10, 11, 12) THEN v_now - interval '3 hours' END,
             CASE WHEN v_i IN (10, 11, 12) THEN 'Revocare de la distanta (demo)' END,
             CASE v_i % 4

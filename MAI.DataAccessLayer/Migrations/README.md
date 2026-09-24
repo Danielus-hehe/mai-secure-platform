@@ -53,6 +53,8 @@ deci îl poți rula pe o bază parțial actualizată fără să se repete nimic.
 | `20260919120000_PerRecipientReceiptsAndSoftDelete` | Dovada de primire per destinatar (`TransferRecipients.DownloadedAt/SignatureValid`), eliminarea destinatarului unic de pe `FileTransfers`, `AllowForward`, ștergere logică (`DeletedAt`, `DeletedById`), repararea stărilor suprascrise de jobul de expirare |
 | `20260920120000_OrgStructureInternalDocsPasswordReset` | `OrgUnits` (Direcție/Secție/Serviciu, cu șef), `Users.OrgUnitId` în locul lui `Department` (convertit automat), `Users.PasswordResetToken*`, documente interne cu destinatari și confirmare „Luat la cunoștință” |
 | `20260921120000_OrgLevels` | Niveluri configurabile ale structurii (`OrgLevels`); rangurile subdiviziunilor trec de la 1/2/3 la 100/200/300, ca niveluri noi să poată fi inserate între cele existente |
+| `20260922120000_LdapDirectoryAuthentication` | Autentificare prin Active Directory: `Users.AuthProvider`, identificatorii din domeniu, `KeysWrappedAt`; `OrgUnits.DirectoryDn` |
+| `20260924120000_ConcurrencyAndSessionLifetime` | Index unic `(DocumentId, VersionNumber)` pe `DocumentVersions`; `UserSessions.AbsoluteExpiresAt` (durata absolută a sesiunii) și `PreviousRefreshTokenHash` (detectarea refolosirii tokenului). Tokenurile de concurență folosesc coloana de sistem `xmin`, deci nu adaugă coloane. Migrarea se oprește cu mesaj explicit dacă există deja versiuni duplicate |
 
 ---
 

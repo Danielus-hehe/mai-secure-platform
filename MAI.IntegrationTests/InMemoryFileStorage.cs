@@ -51,4 +51,15 @@ public sealed class InMemoryFileStorage : IFileStorage
 
     public bool Contains(string key) => _store.ContainsKey(key);
     public int Count => _store.Count;
+
+    /// <summary>
+    /// Cheile de sub un prefix. Testele de concurență numără obiectele unui
+    /// singur document: numărul global (Count) se poate schimba între timp,
+    /// fiindcă jobul de expirare rulează în același host.
+    /// </summary>
+    public IReadOnlyList<string> KeysWithPrefix(string prefix) =>
+        _store.Keys.Where(k => k.StartsWith(prefix, StringComparison.Ordinal)).ToList();
+
+    /// <summary>Conținutul unui obiect, pentru verificarea amprentei.</summary>
+    public byte[] Read(string key) => _store[key];
 }

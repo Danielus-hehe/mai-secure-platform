@@ -16,6 +16,15 @@ namespace MAI.DataAccessLayer.Configurations
     {
         public void Configure(EntityTypeBuilder<User> builder)
         {
+            // Token de concurență pe coloana de sistem xmin: nu adaugă nicio
+            // coloană (PostgreSQL o are pe fiecare rând), deci migrarea nu
+            // atinge tabela. Numele și tipul sunt scrise explicit, ca maparea
+            // să nu depindă de o convenție a providerului. Vezi User.Version.
+            builder.Property(u => u.Version)
+                .IsRowVersion()
+                .HasColumnName("xmin")
+                .HasColumnType("xid");
+
             // Unicitatea contează mai mult decât viteza: fără ea, două conturi
             // pot ajunge cu același nume, iar FirstOrDefaultAsync îl alege pe
             // unul nedeterminist. Rezultatul e un utilizator care se

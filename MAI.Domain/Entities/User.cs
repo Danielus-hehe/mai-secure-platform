@@ -26,6 +26,21 @@ namespace MAI.Domain.Entities
         public bool IsActive { get; set; } = true;
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+        /// <summary>
+        /// Token de concurență: coloana de sistem xmin din PostgreSQL, schimbată
+        /// de server la fiecare UPDATE. Nu se scrie niciodată din cod.
+        ///
+        /// Rândul utilizatorului ține contoare care se citesc și se rescriu în
+        /// aceeași cerere: încercările eșuate (blocarea contului), încercările
+        /// pe provocarea 2FA, ultimul pas TOTP acceptat, codurile de recuperare.
+        /// Fără token, două cereri paralele citeau aceeași valoare și o scriau
+        /// pe rând: ultimul câștiga, iar contorul pierdea incrementări. Așa se
+        /// puteau încerca mai multe coduri 2FA decât limita, iar același cod de
+        /// recuperare putea fi folosit de două ori. Cu xmin, a doua salvare
+        /// eșuează (409), deci o singură cerere concurentă ajunge să conteze.
+        /// </summary>
+        public uint Version { get; set; }
+
         // ── Cont de domeniu (Active Directory) ───────────────────────────────
         // Un cont de domeniu nu are parolă la noi: PasswordHash rămâne gol, iar
         // verificarea se face printr-un bind LDAPS. Diferența e importantă la

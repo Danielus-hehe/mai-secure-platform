@@ -402,7 +402,8 @@ namespace MAI.Api.Controllers
             AuditAction.TransferRevoked or AuditAction.TransferForwarded      => "TRANSFER",
             AuditAction.SessionRevoked or AuditAction.PasswordResetRequested or
             AuditAction.PasswordResetCompleted or AuditAction.StorageIntegrityFailure or
-            AuditAction.StorageRecrypted                                      => "SECURITATE",
+            AuditAction.StorageRecrypted or AuditAction.RefreshTokenReused or
+            AuditAction.ConcurrencyConflict                                   => "SECURITATE",
             AuditAction.OrgStructureChanged                                   => "STRUCTURA",
             AuditAction.InternalDocumentCreated or AuditAction.InternalDocumentPublished or
             AuditAction.InternalDocumentOpened or AuditAction.InternalDocumentAcknowledged or
@@ -410,25 +411,22 @@ namespace MAI.Api.Controllers
             _                              => "ADMIN",
         };
 
-        private static AuditAction[]? MapFrontendAction(string s) => s switch
-        {
-            "LOGIN"          => [AuditAction.Login],
-            "LOGOUT"         => [AuditAction.Logout],
-            "UPLOAD"         => [AuditAction.FileUpload],
-            "DOWNLOAD"       => [AuditAction.FileDownload],
-            "MODIFICARE_DOC" => [AuditAction.DocumentCreate, AuditAction.DocumentNewVersion],
-            "ADMIN"          => [AuditAction.UserCreated, AuditAction.UserUpdated],
-            "TRANSFER"       => [AuditAction.FileDeleted, AuditAction.TransferExpired,
-                                 AuditAction.TransferRevoked, AuditAction.TransferForwarded],
-            "SECURITATE"     => [AuditAction.SessionRevoked, AuditAction.PasswordResetRequested,
-                                 AuditAction.PasswordResetCompleted, AuditAction.StorageIntegrityFailure,
-                                 AuditAction.StorageRecrypted],
-            "STRUCTURA"      => [AuditAction.OrgStructureChanged],
-            "DOC_INTERN"     => [AuditAction.InternalDocumentCreated, AuditAction.InternalDocumentPublished,
-                                 AuditAction.InternalDocumentOpened, AuditAction.InternalDocumentAcknowledged,
-                                 AuditAction.InternalDocumentRepealed],
-            _                => null,
-        };
+        /// <summary>
+        /// Filtrul din interfață (o categorie) → acțiunile din baza de date.
+        ///
+        /// Derivat din <see cref="MapBackendAction"/>, nu scris a doua oară de
+        /// mână. Înainte erau două liste paralele și divergeau: acțiunile de
+        /// domeniu (DirectoryAccountProvisioned etc.) apăreau în jurnal ca
+        /// „ADMIN”, dar filtrul „ADMIN” nu le găsea. Acum orice acțiune nouă
+        /// intră automat în filtrul categoriei în care e afișată.
+        /// </summary>
+        private static readonly IReadOnlyDictionary<string, AuditAction[]> ActionsByCategory =
+            Enum.GetValues<AuditAction>()
+                .GroupBy(MapBackendAction)
+                .ToDictionary(g => g.Key, g => g.ToArray(), StringComparer.Ordinal);
+
+        private static AuditAction[]? MapFrontendAction(string s) =>
+            ActionsByCategory.TryGetValue(s, out var actions) ? actions : null;
     }
 
     /// <summary>Forma trimisă spre frontend pentru o înregistrare de audit.</summary>

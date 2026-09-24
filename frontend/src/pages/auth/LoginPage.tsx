@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShieldCheck, Lock, User, EyeOff, Eye, Smartphone, ArrowLeft } from 'lucide-react';
+import { Lock, User, EyeOff, Eye, Smartphone, ArrowLeft, Send, BookOpen, ClipboardCheck, type LucideIcon } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import Button from '../../components/ui/Button';
@@ -8,6 +8,32 @@ import Input from '../../components/ui/Input';
 import { apiErrorMessage } from '../../api/errors';
 import { getLoginInfo, type DirectoryLoginInfo } from '../../api/directory';
 import type { TwoFactorChallenge } from '../../api/twoFactor';
+
+/**
+ * Ce face platforma, în ordinea în care o folosește un angajat: trimite și
+ * primește fișiere, consultă actele normative, confirmă documentele interne.
+ * Textele descriu funcții care există în aplicație (destinatari multipli,
+ * termen de valabilitate, confirmare de primire, versiuni, „Luat la
+ * cunoștință”), ca pagina de start să nu promită nimic ce nu se găsește după
+ * autentificare.
+ */
+const PURPOSES: ReadonlyArray<{ icon: LucideIcon; title: string; text: string }> = [
+    {
+        icon: Send,
+        title: 'Transfer de fișiere între colegi',
+        text: 'Trimiteți un fișier unuia sau mai multor colegi, cu termen de valabilitate și confirmare de primire.',
+    },
+    {
+        icon: BookOpen,
+        title: 'Registrul actelor normative',
+        text: 'Ordine, instrucțiuni și regulamente în vigoare, cu istoricul tuturor versiunilor.',
+    },
+    {
+        icon: ClipboardCheck,
+        title: 'Documente interne ale subdiviziunii',
+        text: 'Dispozițiile conducerii ajung la destinatari, iar confirmarea „Luat la cunoștință” rămâne înregistrată.',
+    },
+];
 
 export default function LoginPage() {
     const { login, verifyTwoFactor } = useAuth();
@@ -130,46 +156,56 @@ export default function LoginPage() {
 
     return (
         <div className="min-h-screen flex bg-mai-950">
-            {/* Panoul instituțional */}
-            <div className="hidden lg:flex flex-col justify-between w-[45%] p-12 bg-gradient-to-br from-mai-900 via-mai-800 to-mai-950 relative overflow-hidden">
+            {/*
+              Panoul instituțional.
+
+              Spune la ce folosește platforma, nu cum e protejată. Cine ajunge
+              aici e un angajat care trebuie să trimită un fișier sau să citească
+              un ordin; detaliile de criptare, integritate și audit îl privesc pe
+              administrator și sunt descrise în documentație. Cele trei rânduri
+              corespund celor trei secțiuni din meniul aplicației, ca prima pagină
+              să fie și o hartă a ei.
+            */}
+            <div className="hidden lg:flex flex-col justify-between gap-8 w-[45%] p-10 2xl:p-12 bg-gradient-to-br from-mai-900 via-mai-800 to-mai-950 relative overflow-hidden">
                 <div className="absolute -bottom-32 -left-32 w-96 h-96 rounded-full border-[40px] border-white/5" />
                 <div className="absolute -top-24 -right-24 w-72 h-72 rounded-full border-[30px] border-gold-500/10" />
 
-                <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-full bg-gold-500 flex items-center justify-center text-mai-900 font-bold">
-                        MAI
-                    </div>
-                    <div className="leading-tight">
+                <div className="relative flex items-center gap-4">
+                    {/* Stema e desenată în negru; invert o face albă pe fundalul închis. */}
+                    <img src="/Stema.svg" alt="" aria-hidden="true" className="h-20 w-auto -my-3 -ml-3 invert" />
+                    <div className="leading-tight border-l border-white/15 pl-4">
                         <p className="text-white font-bold">Ministerul Afacerilor Interne</p>
-                        <p className="text-mai-300 text-xs">Republica Moldova</p>
+                        <p className="text-mai-300 text-xs mt-0.5">al Republicii Moldova</p>
                     </div>
                 </div>
 
-                <div>
-                    <h2 className="text-3xl font-bold text-white leading-snug">
+                <div className="relative">
+                    <h2 className="text-2xl 2xl:text-3xl font-bold text-white leading-snug">
                         Sistem de Gestiune Documente<br />și Transferuri Securizate
                     </h2>
                     <p className="mt-4 text-mai-200 max-w-md leading-relaxed">
-                        Transfer criptat de fișiere, gestiune documente normative și trasabilitate completă.
+                        Documentele de serviciu circulă între subdiviziunile ministerului direct
+                        din aplicație, fără stick-uri USB și fără poștă.
                     </p>
-                    <div className="mt-8 space-y-3">
-                        {[
-                            ['Criptare AES-256-GCM', 'per fișier, cu cheie derivată per utilizator'],
-                            ['Integritate SHA-256', 'verificare automată la fiecare descărcare'],
-                            ['Jurnal de audit complet', 'toate acțiunile înregistrate și trasabile'],
-                        ].map(([t, d]) => (
-                            <div key={t} className="flex items-start gap-3">
-                                <ShieldCheck size={18} className="text-gold-400 mt-0.5 shrink-0" />
-                                <p className="text-sm text-mai-100">
-                                    <span className="font-semibold text-white">{t}</span> - {d}
-                                </p>
-                            </div>
+
+                    <ul className="mt-8 2xl:mt-10 space-y-5 2xl:space-y-6 max-w-md">
+                        {PURPOSES.map(({ icon: Icon, title, text }) => (
+                            <li key={title} className="flex items-start gap-4">
+                                <span className="w-10 h-10 rounded-lg bg-white/10 text-gold-400 flex items-center justify-center shrink-0">
+                                    <Icon size={20} />
+                                </span>
+                                <div>
+                                    <p className="font-semibold text-white">{title}</p>
+                                    <p className="text-sm text-mai-200 leading-relaxed mt-0.5">{text}</p>
+                                </div>
+                            </li>
                         ))}
-                    </div>
+                    </ul>
                 </div>
 
-                <p className="text-mai-400 text-xs">
-                    © 2026 Ministerul Afacerilor Interne · Acces exclusiv în rețeaua intranet
+                <p className="relative text-mai-400 text-xs leading-relaxed">
+                    © 2026 Ministerul Afacerilor Interne al Republicii Moldova<br />
+                    Platformă disponibilă doar în rețeaua internă a ministerului
                 </p>
             </div>
 
